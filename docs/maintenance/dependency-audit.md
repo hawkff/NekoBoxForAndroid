@@ -52,7 +52,7 @@ Sources: `gradle/wrapper/gradle-wrapper.properties`, `buildSrc/build.gradle.kts`
 | Java (CI runner / Go build) | 17 implied via runners | VERIFY | Low | update-build-toolchain |
 | core library desugaring | desugar_jdk_libs 2.0.3 | VERIFY | Low | update-build-toolchain |
 
-NDK is pinned in two places that must stay in sync: `.github/workflows/build.yml:63`, `.github/workflows/release.yml:65` (`ndk/25.0.8775105`) and `buildScript/init/env_ndk.sh:13`.
+NDK is pinned in three places that must stay in sync: `.github/workflows/build.yml:63`, `.github/workflows/release.yml:65` (`ndk/25.0.8775105`) and `buildScript/init/env_ndk.sh:13`.
 
 ---
 
@@ -102,7 +102,7 @@ Sources: `libcore/go.mod`, `buildScript/lib/core/get_source.sh`, `buildScript/li
 
 The core is **not a normal Go-module update**. `libcore/go.mod` replaces sing-box and libneko with local checkouts, and `get_source.sh` clones pinned commits of `starifly/sing-box` and `starifly/libneko`.
 
-```
+```text
 go.mod replaces (libcore/go.mod:93-97):
   github.com/matsuridayo/libneko   => ../../libneko
   github.com/sagernet/sing-box     => ../../sing-box
@@ -114,7 +114,7 @@ go.mod replaces (libcore/go.mod:93-97):
 | starifly/sing-box commit | `4998428a136368500428a6a35cdd466a7042c75b` | VERIFY (commit with HY2 Gecko) | **Required for Gecko obfs** | High |
 | starifly/libneko commit | `1c47a3af71990a7b2192e03292b4d246c308ef0b` | hold unless needed | Keep separate from sing-box bump | High |
 | starifly/sing-vmess | `v0.2.8-mod.1` | hold | Fork pin | Medium |
-| Go toolchain (go.mod) | go 1.24.7 / toolchain 1.24.9 | VERIFY | matches CI | Medium |
+| Go toolchain (go.mod) | go 1.24.7 / toolchain 1.24.9 | VERIFY | **Mismatch: go.mod declares 1.24.x, CI uses ^1.25 (see next row)** | Medium |
 | Go toolchain (CI) | `^1.25` (`build.yml:31`, `release.yml:33`) | align with go.mod | **Mismatch: CI uses ^1.25, go.mod declares 1.24.x** | Medium |
 | sagernet/sing | v0.7.18 | follow sing-box | Transitive via fork | Medium |
 | sagernet/quic-go | v0.52.0-sing-box-mod.3 | follow sing-box | QUIC/Hysteria path | High |
