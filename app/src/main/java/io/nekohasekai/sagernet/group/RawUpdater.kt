@@ -261,11 +261,14 @@ object RawUpdater : GroupUpdater() {
                 // !!javax..., preventing arbitrary class instantiation
                 // (CVE-2022-1471 style gadget chains). A code-point limit bounds
                 // input size to mitigate decompression/billion-laughs style DoS.
+                // Note: load() is used instead of loadAs(..., Map::class.java)
+                // because SafeConstructor cannot construct an explicit root type
+                // tag; a YAML mapping is returned as a LinkedHashMap natively.
                 val loaderOptions = LoaderOptions().apply {
                     codePointLimit = 10 * 1024 * 1024 // 10 MiB
                 }
-                val yaml = Yaml(SafeConstructor(loaderOptions))
-                    .loadAs(text, Map::class.java)
+                val yaml = Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<String, Any?>
+                    ?: error(app.getString(R.string.no_proxies_found_in_file))
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
