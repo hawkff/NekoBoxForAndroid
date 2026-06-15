@@ -47,7 +47,6 @@ import java.util.zip.ZipInputStream
 import java.util.concurrent.TimeUnit
 import java.util.zip.Deflater
 import java.io.BufferedOutputStream
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
@@ -208,14 +207,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 val version = BuildConfig.VERSION_NAME
                 val fileName = "nekobox_backup_${version}_$timestamp.zip"
 
-                // 确保 baseUrl 是有效的 URL
-                if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                    throw Exception("Invalid server URL: must start with http:// or https://")
-                }
-
-                // 使用 HttpUrl 构建路径，避免 # 等特殊字符被当作 fragment
-                val baseHttpUrl = baseUrl.toHttpUrlOrNull()
-                    ?: throw Exception("Invalid server URL: $baseUrl")
+                // 确保 baseUrl 是有效的且使用 TLS 的 URL
+                // (WebDAV 备份包含所有配置密钥，禁止明文 http://)
+                val baseHttpUrl = WebDAVSecurity.requireSecureUrl(baseUrl)
 
                 val dirUrl = baseHttpUrl.newBuilder().apply {
                     path.split('/').filter { it.isNotEmpty() }.forEach { segment ->
@@ -339,12 +333,8 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                 val baseUrl = DataStore.webdavServer!!.trimEnd('/')
                 val path = DataStore.webdavPath?.trim('/')?.takeIf { it.isNotEmpty() } ?: "Nekobox"
 
-                if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                    throw Exception("Invalid server URL: must start with http:// or https://")
-                }
-
-                val baseHttpUrl = baseUrl.toHttpUrlOrNull()
-                    ?: throw Exception("Invalid server URL: $baseUrl")
+                // WebDAV 备份包含所有配置密钥，禁止明文 http://
+                val baseHttpUrl = WebDAVSecurity.requireSecureUrl(baseUrl)
 
                 val dirUrl = baseHttpUrl.newBuilder().apply {
                     path.split('/').filter { it.isNotEmpty() }.forEach { segment ->
