@@ -8,6 +8,7 @@
 #
 # Usage: ./run lib mieru
 set -e
+set -o pipefail
 
 source "buildScript/init/env.sh"
 

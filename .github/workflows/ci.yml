@@ -6,6 +6,8 @@ on:
     branches:
       - '*'
   pull_request:
+env:
+  MIERU_VERSION: v3.34.0
 jobs:
   libcore:
     name: Native Build (LibCore)
@@ -40,13 +42,11 @@ jobs:
   mieru:
     name: Native Build (Mieru)
     runs-on: ubuntu-latest
-    env:
-      MIERU_VERSION: v3.34.0
     steps:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Mieru Status
-        run: cat buildScript/lib/mieru.sh buildScript/init/env.sh | sha1sum > mieru_status
+        run: cat buildScript/lib/mieru.sh buildScript/init/env.sh buildScript/init/env_ndk.sh | sha1sum > mieru_status
       - name: Mieru Cache
         id: cache
         uses: actions/cache@v5
@@ -65,8 +65,6 @@ jobs:
   build:
     name: Build OSS APK
     runs-on: ubuntu-latest
-    env:
-      MIERU_VERSION: v3.34.0
     needs:
       - libcore
       - mieru
@@ -89,7 +87,7 @@ jobs:
             app/libs/libcore.aar
           key: ${{ hashFiles('.github/workflows/*', 'golang_status', 'libcore_status') }}-ci
       - name: Mieru Status
-        run: cat buildScript/lib/mieru.sh buildScript/init/env.sh | sha1sum > mieru_status
+        run: cat buildScript/lib/mieru.sh buildScript/init/env.sh buildScript/init/env_ndk.sh | sha1sum > mieru_status
       - name: Mieru Cache
         id: mieru-cache
         uses: actions/cache@v5
