@@ -51,9 +51,14 @@ Full feature scaffolding, gated to NekoBox proxy mode (no TUN, so no VPN loop):
   `127.0.0.1:<allocated port>`; sing-box `socks` outbound -> that port.
 - Bundled binaries: cross-compile `cmd/client` for all 4 ABIs into
   `app/executableSo/<abi>/libmasterdnsvpn.so`, built in CI (mirror `buildScript/lib/mieru.sh`
-  and the per-workflow Mieru job). Note: MasterDnsVPN is `go 1.25.0`; the build job would
-  need a Go that satisfies that (CI currently pins 1.24.9 for libcore — use a separate Go
-  setup for this binary or revisit the toolchain).
+  and the per-workflow Mieru job).
+  - **Go toolchain decision:** MasterDnsVPN requires `go 1.25.0`, while libcore's CI is
+    pinned to `1.24.9` (matching `libcore/go.mod`'s `toolchain` directive). Use a **separate
+    Go setup step scoped to the MasterDnsVPN build job** (its own `actions/setup-go` with
+    `go-version: '1.25.x'`), leaving the libcore toolchain pin untouched. Do **not** raise the
+    whole-repo Go pin just for this binary — libcore is reproducibility-sensitive and was
+    aligned to 1.24.9 deliberately. The MasterDnsVPN build is an independent native binary, so
+    an isolated newer Go for that one job is the lower-risk choice.
 - In VPN mode, disable the profile with a clear message:
   "MasterDnsVPN requires Android socket protection for VPN mode. Proxy mode is supported;
   VPN mode will be enabled after upstream resolver sockets can be protected."
