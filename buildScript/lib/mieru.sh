@@ -32,13 +32,20 @@ fi
 WORK="$(pwd)/.mieru-build"
 OUT="$(pwd)/app/executableSo"
 
-# Fetch source (shallow clone at the pinned tag).
-if [ ! -d "$WORK/.git" ]; then
+# Fetch source (shallow clone at the pinned tag). Re-clone fresh if the existing
+# checkout is missing or its git operations fail (e.g. corrupted by a prior build).
+need_clone=1
+if [ -d "$WORK/.git" ]; then
+  if git -C "$WORK" fetch --depth 1 origin "refs/tags/$MIERU_VERSION" \
+     && git -C "$WORK" checkout -q FETCH_HEAD; then
+    need_clone=0
+  else
+    echo ">> existing $WORK is unusable; re-cloning"
+  fi
+fi
+if [ "$need_clone" -eq 1 ]; then
   rm -rf "$WORK"
   git clone --depth 1 --branch "$MIERU_VERSION" https://github.com/enfein/mieru.git "$WORK"
-else
-  git -C "$WORK" fetch --depth 1 origin "refs/tags/$MIERU_VERSION"
-  git -C "$WORK" checkout -q FETCH_HEAD
 fi
 
 pushd "$WORK" >/dev/null
