@@ -91,8 +91,8 @@ public class JavaUtil {
             } else {
                 //main process
                 suffix = "_" + processName;
-                pathSet.add(dataPath + webViewDir + lockFile);//process name suffix not added by default
-                pathSet.add(dataPath + webViewDir + suffix + lockFile);//system automatically added the process name suffix
+                pathSet.add(dataPath + webViewDir + lockFile);// path variant without the process-name suffix
+                pathSet.add(dataPath + webViewDir + suffix + lockFile);// path variant with the process-name suffix (device-dependent)
                 if (checkIsHuaweiRom()) {//some Huawei phones changed the webview directory name
                     pathSet.add(dataPath + huaweiWebViewDir + lockFile);
                     pathSet.add(dataPath + huaweiWebViewDir + suffix + lockFile);
