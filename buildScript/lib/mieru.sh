@@ -24,6 +24,10 @@ DEPS="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
 if [ ! -d "$DEPS" ]; then
   DEPS="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin"
 fi
+if [ ! -d "$DEPS" ]; then
+  echo "Error: NDK LLVM toolchain not found under $ANDROID_NDK_HOME (unsupported host or NDK layout)." >&2
+  exit 1
+fi
 
 WORK="$(pwd)/.mieru-build"
 OUT="$(pwd)/app/executableSo"
