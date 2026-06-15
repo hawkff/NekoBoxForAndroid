@@ -267,6 +267,9 @@ object RawUpdater : GroupUpdater() {
                 val loaderOptions = LoaderOptions().apply {
                     codePointLimit = 10 * 1024 * 1024 // 10 MiB
                 }
+                // In SnakeYAML 2.x, Yaml(BaseConstructor) adopts the constructor's
+                // LoaderOptions (getLoadingConfig()), so codePointLimit set above is
+                // enforced during parsing (verified: input over the limit throws).
                 val yaml = Yaml(SafeConstructor(loaderOptions)).load<Any?>(text) as? Map<String, Any?>
                     ?: error(app.getString(R.string.no_proxies_found_in_file))
 
