@@ -11,6 +11,11 @@ set -e
 
 source "buildScript/init/env.sh"
 
+if [ -z "$ANDROID_NDK_HOME" ]; then
+  echo "Error: ANDROID_NDK_HOME is not set (NDK required to cross-compile Mieru)." >&2
+  exit 1
+fi
+
 # Mieru release tag to build from source.
 MIERU_VERSION="${MIERU_VERSION:-v3.34.0}"
 
