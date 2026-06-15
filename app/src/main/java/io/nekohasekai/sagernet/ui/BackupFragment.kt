@@ -30,7 +30,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.net.URL
 import java.util.*
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
