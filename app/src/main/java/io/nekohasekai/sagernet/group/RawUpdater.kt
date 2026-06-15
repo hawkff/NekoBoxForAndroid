@@ -32,8 +32,9 @@ import org.ini4j.Ini
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
-import org.yaml.snakeyaml.TypeDescription
+import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.constructor.SafeConstructor
 import org.yaml.snakeyaml.error.YAMLException
 import java.io.StringReader
 import androidx.core.net.toUri
@@ -254,9 +255,17 @@ object RawUpdater : GroupUpdater() {
 
             try {
 
-                val yaml = Yaml().apply {
-                    addTypeDescription(TypeDescription(String::class.java, "str"))
-                }.loadAs(text, Map::class.java)
+                // Parse untrusted subscription YAML safely.
+                // SafeConstructor only produces standard types (Map/List/String/
+                // Number/Boolean/null) and rejects custom/global tags such as
+                // !!javax..., preventing arbitrary class instantiation
+                // (CVE-2022-1471 style gadget chains). A code-point limit bounds
+                // input size to mitigate decompression/billion-laughs style DoS.
+                val loaderOptions = LoaderOptions().apply {
+                    codePointLimit = 10 * 1024 * 1024 // 10 MiB
+                }
+                val yaml = Yaml(SafeConstructor(loaderOptions))
+                    .loadAs(text, Map::class.java)
 
                 val globalClientFingerprint = yaml["global-client-fingerprint"]?.toString() ?: ""
 
