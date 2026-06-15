@@ -8,7 +8,7 @@ Switch this fork's core from `starifly/sing-box` to the official
 `SagerNet/sing-box`.
 
 ## The actual fork chain
-```
+```text
 SagerNet/sing-box        (official, latest stable v1.13.13)
   └── MatsuriDayo/sing-box   (NekoBox lineage; heavy Android/gomobile + extra protocols)
         └── starifly/sing-box   (this fork's pinned core; ~v1.12.19-neko-1)
