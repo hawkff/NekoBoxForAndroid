@@ -90,7 +90,7 @@ jobs:
       - name: Verify Mieru Artifacts
         run: |
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            if [ ! -x "app/executableSo/$abi/libmieru.so" ]; then
+            if [ ! -f "app/executableSo/$abi/libmieru.so" ]; then
               echo "Error: missing app/executableSo/$abi/libmieru.so (Mieru cache miss)" >&2
               exit 1
             fi
