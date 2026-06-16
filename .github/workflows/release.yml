@@ -11,6 +11,8 @@ on:
 env:
   MIERU_VERSION: v3.34.0
   HYSTERIA_VERSION: v2.9.2
+permissions:
+  contents: write
 jobs:
   libcore:
     name: Native Build (LibCore)

@@ -71,15 +71,17 @@ lazy: true
   `app/executableSo/<abi>/libhysteria2.so`. (Mirror `buildScript/lib/mieru.sh`; here we can
   download prebuilt instead of cross-compiling.)
 - `PluginManager.initNativeInternal` already maps `hysteria2-plugin -> libhysteria2.so`.
-- CI: add a `Native Build (Hysteria2)` job + cache + verify across all 4 workflows (mirror
-  the Mieru jobs).
+- CI: the existing Mieru job was generalized into a combined `Native Build (Sidecars)` job
+  that builds/caches both `libmieru.so` and `libhysteria2.so` (one `app/executableSo` cache),
+  with a verify step covering all 4 ABIs and both binaries, across all 4 workflows.
 - `Executable.EXECUTABLES` already lists `libhysteria.so`; add `libhysteria2.so`.
 
 ## BoxInstance wiring
 - `init()`: for HysteriaBean with protocolVersion==2 && Gecko, `initPlugin("hysteria2-plugin")`
-  and store `buildHysteria2SidecarConfig(port)`.
-- `launch()`: new branch — write YAML to cache, invoke `libhysteria2.so client -c <file>`
-  (official CLI: `hysteria client --config <file>`; log level via `--log-level`).
+  and store `buildHysteria2SidecarConfig(port, protectPath)` (JSON config; viper detects the
+  format from the `.json` extension).
+- `launch()`: new branch — write the config to cache and invoke the official binary as
+  `libhysteria2.so --disable-update-check --config <file> --log-level <level> client`.
 
 ## UI (hysteria_preferences.xml + HysteriaSettingsActivity)
 - Replace the single obfs password field with an obfs **type selector** (None/Salamander/Gecko)

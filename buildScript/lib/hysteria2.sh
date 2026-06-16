@@ -17,7 +17,7 @@ BASE="https://github.com/apernet/hysteria/releases/download/app/${HYSTERIA_VERSI
 OUT="$(pwd)/app/executableSo"
 
 # Fetch the official checksums once for integrity verification.
-HASHES="$(curl -fsSL "$BASE/hashes.txt")"
+HASHES="$(curl -fsSL --retry 3 --retry-delay 2 --max-time 120 "$BASE/hashes.txt")"
 
 sha256_tool() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
@@ -28,7 +28,7 @@ dl() {
   local abi="$1" asset="$2"
   echo ">> downloading libhysteria2.so for $abi ($asset)"
   mkdir -p "$OUT/$abi"
-  curl -fL "$BASE/$asset" -o "$OUT/$abi/libhysteria2.so"
+  curl -fL --retry 3 --retry-delay 2 --max-time 300 "$BASE/$asset" -o "$OUT/$abi/libhysteria2.so"
   # Verify against the official SHA256 (hashes.txt lines: "<sha>  build/<asset>").
   local expected actual
   expected="$(printf '%s\n' "$HASHES" | awk -v a="build/$asset" '$2==a {print $1}')"
