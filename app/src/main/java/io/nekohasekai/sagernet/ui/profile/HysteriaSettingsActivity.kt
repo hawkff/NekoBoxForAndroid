@@ -96,6 +96,8 @@ class HysteriaSettingsActivity : ProfileSettingsActivity<HysteriaBean>() {
             val isHy2 = version == 2
             obfsType.isVisible = isHy2
             if (isHy2) {
+                // Both Salamander and Gecko require an obfs password (apernet/hysteria
+                // clientConfigObfsGecko.Password is mandatory), so show it for either.
                 obfsPassword.isVisible = type != HysteriaBean.OBFS_NONE
                 val isGecko = type == HysteriaBean.OBFS_GECKO
                 geckoMin.isVisible = isGecko

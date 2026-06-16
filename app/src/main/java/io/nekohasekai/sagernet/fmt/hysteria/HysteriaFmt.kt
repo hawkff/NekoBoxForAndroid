@@ -430,12 +430,15 @@ fun HysteriaBean.buildHysteria2SidecarConfig(
             if (caText.isNotBlank()) put("ca", caText)
         })
         if (hysteria2ObfsType == HysteriaBean.OBFS_GECKO && obfuscation.isNotBlank()) {
+            // Clamp to hysteria's accepted bounds: 1 <= min <= max <= 2048.
+            val min = geckoMinPacketSize.coerceIn(1, 2048)
+            val max = geckoMaxPacketSize.coerceIn(min, 2048)
             put("obfs", JSONObject().apply {
                 put("type", "gecko")
                 put("gecko", JSONObject().apply {
                     put("password", obfuscation)
-                    put("minPacketSize", geckoMinPacketSize)
-                    put("maxPacketSize", geckoMaxPacketSize)
+                    put("minPacketSize", min)
+                    put("maxPacketSize", max)
                 })
             })
         } else if (hysteria2ObfsType == HysteriaBean.OBFS_SALAMANDER && obfuscation.isNotBlank()) {
