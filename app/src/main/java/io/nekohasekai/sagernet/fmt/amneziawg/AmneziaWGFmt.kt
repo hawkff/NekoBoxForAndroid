@@ -23,8 +23,9 @@ fun buildSingBoxOutboundAmneziaWGBean(bean: AmneziaWGBean): SingBoxOptions.Outbo
         if (bean.jmax != 0) jmax = bean.jmax
         if (bean.s1 != 0) s1 = bean.s1
         if (bean.s2 != 0) s2 = bean.s2
-        if (bean.s3 != 0) s3 = bean.s3
-        if (bean.s4 != 0) s4 = bean.s4
+        // The bundled amneziawg-go v1.0.4 UAPI does not accept s3/s4 yet.
+        // Keep these fields importable/storable, but do not emit them until
+        // the core supports the corresponding device keys.
         if (bean.h1.isNotBlank()) h1 = bean.h1
         if (bean.h2.isNotBlank()) h2 = bean.h2
         if (bean.h3.isNotBlank()) h3 = bean.h3
