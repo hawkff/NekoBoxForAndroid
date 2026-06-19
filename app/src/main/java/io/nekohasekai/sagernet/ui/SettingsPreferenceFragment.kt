@@ -50,8 +50,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     private fun dnsReloadListener(preference: Preference, newValue: Any?): Boolean {
         val rawValue = newValue as? String ?: return reloadListener.onPreferenceChange(preference, newValue)
         val sanitizedValue = sanitizeDnsPreferenceValue(rawValue)
-        if (sanitizedValue != rawValue && preference is EditTextPreference) {
-            preference.text = sanitizedValue
+        if (sanitizedValue != rawValue) {
+            if (preference is EditTextPreference) {
+                preference.text = sanitizedValue
+            }
             needReload()
             return false
         }
