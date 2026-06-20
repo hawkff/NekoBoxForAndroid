@@ -48,5 +48,9 @@
         <item name="android:colorBackground">@color/dracula_background</item>
         <item name="colorOnBackground">@color/dracula_on_surface</item>
         <item name="protocolColor">@color/color_dracula_green</item>
+        <item name="profileNameColor">@color/color_dracula_yellow</item>
+        <item name="statusConnectedColor">@color/color_dracula_green</item>
+        <item name="statusStoppedColor">@color/color_dracula_red</item>
+        <item name="testFailColor">@color/color_dracula_red</item>
     </style>
 </resources>

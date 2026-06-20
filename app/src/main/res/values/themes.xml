@@ -7,8 +7,8 @@
         <!-- Per-theme semantic colors; default to primary text (no visible change),
              Dracula overrides them. -->
         <item name="profileNameColor">?android:attr/textColorPrimary</item>
-        <item name="statusConnectedColor">?android:attr/textColorPrimary</item>
-        <item name="statusStoppedColor">?android:attr/textColorPrimary</item>
+        <item name="statusConnectedColor">?attr/colorOnPrimary</item>
+        <item name="statusStoppedColor">?attr/colorOnPrimary</item>
         <item name="testFailColor">@color/material_red_500</item>
         <!-- Default nav-drawer selected-item fill; also satisfies the
              ?itemShapeFillColor self-reference in @color/navigation_item so the
@@ -73,8 +73,8 @@
         <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Solid</item>
         <item name="protocolColor">?attr/accentOrTextSecondary</item>
         <item name="profileNameColor">?android:attr/textColorPrimary</item>
-        <item name="statusConnectedColor">?android:attr/textColorPrimary</item>
-        <item name="statusStoppedColor">?android:attr/textColorPrimary</item>
+        <item name="statusConnectedColor">?attr/colorOnPrimary</item>
+        <item name="statusStoppedColor">?attr/colorOnPrimary</item>
         <item name="testFailColor">@color/material_red_500</item>
         <item name="itemShapeFillColor">?colorPrimary</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>
@@ -667,6 +667,10 @@
         <item name="colorMaterial300">@color/color_dracula_300</item>
         <item name="cardElevatedSurfaceColor">@color/card_elevated_dracula</item>
         <item name="protocolColor">@color/color_dracula_green</item>
+        <item name="profileNameColor">@color/color_dracula_yellow</item>
+        <item name="statusConnectedColor">@color/color_dracula_green</item>
+        <item name="statusStoppedColor">@color/color_dracula_red</item>
+        <item name="testFailColor">@color/color_dracula_red</item>
     </style>
 
     <style name="Theme.Start" parent="Theme.MaterialComponents.DayNight">
