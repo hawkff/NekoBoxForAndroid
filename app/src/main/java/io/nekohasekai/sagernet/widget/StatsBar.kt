@@ -172,8 +172,8 @@ class StatsBar @JvmOverloads constructor(
     fun testConnection() {
         val activity = context as MainActivity
         isEnabled = false
-        // "Testing…" in the detail color.
-        statusText.setTextColor(context.getColorAttr(R.attr.statusDetailColor))
+        // "Testing…" in the testing color.
+        statusText.setTextColor(context.getColorAttr(R.attr.statusTestingColor))
         setStatus(app.getText(R.string.connection_test_testing))
         runOnDefaultDispatcher {
             try {
@@ -197,7 +197,7 @@ class StatsBar @JvmOverloads constructor(
                 Logs.w(e.toString())
                 onMainDispatcher {
                     isEnabled = true
-                    statusText.setTextColor(context.getColorAttr(R.attr.statusDetailColor))
+                    statusText.setTextColor(context.getColorAttr(R.attr.statusTestingColor))
                     setStatus(app.getText(R.string.connection_test_testing))
 
                     activity.snackbar(

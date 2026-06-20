@@ -28,8 +28,10 @@
          statusStoppedColor used for the status text. -->
     <attr name="fabStoppedColor" format="color" />
     <!-- Secondary status text (the part after "Connected," / "Success:").
-         Default on-primary; Dracula = yellow. -->
+         Default on-primary; Dracula = cyan. -->
     <attr name="statusDetailColor" format="color" />
+    <!-- "Testing…" connection-test in-progress text. Default on-primary; Dracula = yellow. -->
+    <attr name="statusTestingColor" format="color" />
     <!-- Proxy route-rule color. Default blue; Dracula = cyan. -->
     <attr name="routeProxyColor" format="color" />
     <!-- Selected nav-drawer item color (fill tint + icon/text). Default primary;

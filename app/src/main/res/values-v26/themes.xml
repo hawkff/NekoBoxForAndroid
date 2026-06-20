@@ -14,6 +14,7 @@
         <item name="speedTextColor">?attr/colorOnPrimary</item>
         <item name="fabStoppedColor">?attr/colorOnPrimary</item>
         <item name="statusDetailColor">?attr/colorOnPrimary</item>
+        <item name="statusTestingColor">?attr/colorOnPrimary</item>
         <item name="routeProxyColor">@color/color_route_proxy</item>
         <item name="navSelectedColor">?attr/colorPrimary</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>

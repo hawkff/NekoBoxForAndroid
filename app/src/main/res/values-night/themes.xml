@@ -36,6 +36,7 @@
         <item name="speedTextColor">@color/color_dracula_cyan</item>
         <item name="fabStoppedColor">@color/color_dracula_cyan</item>
         <item name="statusDetailColor">@color/color_dracula_cyan</item>
+        <item name="statusTestingColor">@color/color_dracula_yellow</item>
         <item name="routeProxyColor">@color/color_dracula_cyan</item>
         <item name="navSelectedColor">?attr/colorAccent</item>
     </style>
@@ -60,6 +61,7 @@
         <item name="speedTextColor">@color/color_dracula_cyan</item>
         <item name="fabStoppedColor">@color/color_dracula_cyan</item>
         <item name="statusDetailColor">@color/color_dracula_cyan</item>
+        <item name="statusTestingColor">@color/color_dracula_yellow</item>
         <item name="routeProxyColor">@color/color_dracula_cyan</item>
     </style>
 </resources>
