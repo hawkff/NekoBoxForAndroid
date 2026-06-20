@@ -26,7 +26,6 @@
         <item name="android:colorBackground">@color/dracula_background</item>
         <item name="colorOnBackground">@color/dracula_on_surface</item>
         <item name="android:windowBackground">@color/dracula_background</item>
-        <item name="itemShapeFillColor">@color/color_dracula</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Dracula" parent="Theme.SagerNet.Dialog">
@@ -41,6 +40,5 @@
         <item name="colorOnSurface">@color/dracula_on_surface</item>
         <item name="android:colorBackground">@color/dracula_background</item>
         <item name="colorOnBackground">@color/dracula_on_surface</item>
-        <item name="itemShapeFillColor">@color/color_dracula</item>
     </style>
 </resources>
