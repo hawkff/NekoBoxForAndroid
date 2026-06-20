@@ -391,7 +391,10 @@ fun buildConfig(
                         // it (naive), so other apps on the device can't use this open
                         // 127.0.0.1 port to leak the egress IP (#1166). The plugin is
                         // configured to listen with the same generated credentials.
-                        if (bean is NaiveBean) {
+                        // Skip for export: the exported naive config (ProxyEntity.
+                        // buildNaiveConfig without creds) would otherwise mismatch and
+                        // produce a broken standalone config.
+                        if (bean is NaiveBean && !forExport) {
                             val user = "neko"
                             val pass = UUID.randomUUID().toString().replace("-", "")
                             localProxyCredentials[localPort] = user to pass
