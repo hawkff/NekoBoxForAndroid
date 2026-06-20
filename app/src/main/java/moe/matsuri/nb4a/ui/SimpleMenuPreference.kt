@@ -77,7 +77,7 @@ open class SimpleMenuPreference
         // text low-contrast on dark themes. ~20% alpha reads on any background
         // while keeping the text legible.
         private val selectedColor = ColorUtils.setAlphaComponent(
-            context.getColorAttr(R.attr.colorPrimary), 51
+            context.getColorAttr(R.attr.colorPrimary), 41 // 0.16 alpha, matches nav_item_fill.xml
         )
 
         private val topDrawable = GradientDrawable().apply {
