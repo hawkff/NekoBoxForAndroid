@@ -78,8 +78,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             if (themeId == Theme.DRACULA) {
                 if (previousTheme != Theme.DRACULA && DataStore.nightTheme != 1) {
                     DataStore.nightThemeBeforeDracula = DataStore.nightTheme
-                    DataStore.nightTheme = 1
                     Theme.currentNightMode = 1
+                    // nightTheme.value persists to configurationStore (same key as
+                    // DataStore.nightTheme) and refreshes the picker, so no separate
+                    // DataStore.nightTheme write is needed.
                     nightTheme.value = "1"
                     Theme.applyNightTheme()
                 }
@@ -88,7 +90,6 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
                 val restore = DataStore.nightThemeBeforeDracula
                 if (restore != -1) {
                     DataStore.nightThemeBeforeDracula = -1
-                    DataStore.nightTheme = restore
                     Theme.currentNightMode = restore
                     nightTheme.value = restore.toString()
                     Theme.applyNightTheme()
