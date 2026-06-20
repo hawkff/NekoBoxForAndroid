@@ -266,7 +266,7 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
     for (link in linksByLine) {
         link.parseLink(entitiesByLine)
     }
-    // No profile links parsed but we saw an unparyable http(s) URL: treat the whole
+    // No profile links parsed but we saw an unparsable http(s) URL: treat the whole
     // input as a subscription link (single-URL paste / file). When profiles WERE found,
     // the stray URL is ignored so the profiles still import (issue #1128).
     if (entities.isEmpty() && entitiesByLine.isEmpty()) {

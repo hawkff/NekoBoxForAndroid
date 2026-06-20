@@ -161,6 +161,9 @@ class AppManagerActivity : ThemedActivity() {
     private val proxiedUids = SparseBooleanArray()
     private var loader: Job? = null
     private var filterJob: Job? = null
+    // Read on Dispatchers.Default in computeFiltered(); written from Default/IO/Main.
+    // @Volatile guarantees cross-thread visibility so filtering never sees a stale list.
+    @Volatile
     private var apps = emptyList<ProxiedApp>()
     private val appsAdapter = AppsAdapter()
 
@@ -267,6 +270,7 @@ class AppManagerActivity : ThemedActivity() {
         loadApps()
     }
 
+    @Volatile
     private var sysApps = true
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
