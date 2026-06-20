@@ -138,7 +138,7 @@ class ServiceButton @JvmOverloads constructor(
         // which is the FAB's normal icon color, so those themes look unchanged.
         val attr = when (state) {
             BaseService.State.Connected -> R.attr.statusConnectedColor
-            BaseService.State.Stopped -> R.attr.statusStoppedColor
+            BaseService.State.Stopped -> R.attr.fabStoppedColor
             else -> com.google.android.material.R.attr.colorOnPrimary
         }
         imageTintList = ColorStateList.valueOf(context.getColorAttr(attr))

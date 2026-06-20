@@ -306,6 +306,8 @@
     <color name="color_dracula_red">#FF5555</color>
     <!-- Dracula yellow (#f1fa8c): profile name label. -->
     <color name="color_dracula_yellow">#F1FA8C</color>
+    <!-- Dracula cyan (#8be9fd): the Dracula "blue" (e.g. proxy route rules). -->
+    <color name="color_dracula_cyan">#8BE9FD</color>
 
     <color name="color_ng_black_accent">#9E9E9E</color>
     <color name="color_ng_black_primary">#2B2B2B</color>
