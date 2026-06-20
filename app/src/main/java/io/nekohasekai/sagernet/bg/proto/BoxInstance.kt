@@ -262,8 +262,13 @@ abstract class BoxInstance(
      * is sufficient. MasterDnsVPN is the exception: it only starts listening after DNS
      * MTU probing and session setup, which can take tens of seconds (with retries) on
      * lossy or restricted links, so it gets a longer readiness window.
+     *
+     * @param strict when true (URL test), a sidecar that never binds is a hard failure with
+     * a clear message, instead of the live-service behavior of logging and continuing
+     * (the live path keeps a long-lived connection that sing-box retries; a one-shot URL
+     * test has no such luxury and would otherwise surface a flaky "connection refused").
      */
-    suspend fun awaitExternalProcessesReady() {
+    suspend fun awaitExternalProcessesReady(strict: Boolean = false) {
         if (!::processes.isInitialized || processes.processCount == 0) return
         val ports = config.externalIndex.flatMap { it.chain.keys }.distinct()
         if (ports.isEmpty()) return
@@ -300,8 +305,10 @@ abstract class BoxInstance(
                 // otherwise), so a timeout there is fatal. Other sidecars (Mieru/Naïve/
                 // TrojanGo/Hysteria) were historically fire-and-forget: the first sing-box
                 // dial retries, so a slow bind shouldn't hard-fail VPN start — log and continue.
+                // For a URL test (strict), there is no retry window, so a listener that never
+                // binds is reported as a clear error instead of a flaky "connection refused".
                 val message = "sidecar listener not ready on port(s): ${pending.joinToString()}"
-                if (hasMasterDnsVpn) {
+                if (hasMasterDnsVpn || strict) {
                     throw IOException(message)
                 } else {
                     Logs.w("$message; continuing (sing-box will retry the connection)")
