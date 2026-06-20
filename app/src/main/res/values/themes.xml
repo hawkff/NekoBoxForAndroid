@@ -2,6 +2,8 @@
     <!-- Base application theme. -->
     <style name="Theme.SagerNet" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Solid</item>
+        <!-- Protocol/type label color; defaults to accent, Dracula overrides green. -->
+        <item name="protocolColor">?attr/accentOrTextSecondary</item>
         <!-- Default nav-drawer selected-item fill; also satisfies the
              ?itemShapeFillColor self-reference in @color/navigation_item so the
              ColorStateList resolves for every theme. Only Black overrides it;
@@ -63,6 +65,7 @@
 
     <style name="Theme.SagerNet.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
         <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Solid</item>
+        <item name="protocolColor">?attr/accentOrTextSecondary</item>
         <item name="itemShapeFillColor">?colorPrimary</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>
         <item name="colorButtonNormal">?colorAccent</item>
@@ -612,6 +615,7 @@
         <item name="colorMaterial100">@color/color_dracula_100</item>
         <item name="colorMaterial300">@color/color_dracula_300</item>
         <item name="cardElevatedSurfaceColor">@color/card_elevated_dracula</item>
+        <item name="protocolColor">@color/color_dracula_green</item>
     </style>
 
     <style name="Theme.SagerNet.Dialog.Black" parent="Theme.SagerNet.Dialog">
@@ -648,6 +652,7 @@
         <item name="colorMaterial100">@color/color_dracula_100</item>
         <item name="colorMaterial300">@color/color_dracula_300</item>
         <item name="cardElevatedSurfaceColor">@color/card_elevated_dracula</item>
+        <item name="protocolColor">@color/color_dracula_green</item>
     </style>
 
     <style name="Theme.Start" parent="Theme.MaterialComponents.DayNight">

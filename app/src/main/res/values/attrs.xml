@@ -10,6 +10,9 @@
     <attr name="fabColorBackground" format="color" />
     <attr name="selectedColorPrimary" format="color" />
     <attr name="whiteOrTextPrimary" format="color" />
+    <!-- Text color for the protocol/type label on a profile row. Defaults to
+         the accent color; Dracula overrides it with its green. -->
+    <attr name="protocolColor" format="color" />
     <!-- Tonal "elevated surface" color for cards (route / group); each theme
          variant tints toward its own primary. -->
     <attr name="cardElevatedSurfaceColor" format="color" />

@@ -5,6 +5,8 @@
         <!-- Default nav-drawer selected-item fill; satisfies the
              ?itemShapeFillColor self-reference in @color/navigation_item. -->
         <item name="itemShapeFillColor">?colorPrimary</item>
+        <!-- Protocol/type label color; defaults to accent, Dracula overrides green. -->
+        <item name="protocolColor">?attr/accentOrTextSecondary</item>
         <item name="actionModeCloseDrawable">@drawable/ic_navigation_close</item>
         <item name="colorButtonNormal">?colorAccent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
