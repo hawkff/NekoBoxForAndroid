@@ -80,8 +80,21 @@ class StatsBar @JvmOverloads constructor(
         TooltipCompat.setTooltipText(this, text)
     }
 
+    private fun setStatusColorByState(state: BaseService.State) {
+        // Connected = statusConnectedColor, Stopped = statusStoppedColor, transient
+        // states stay neutral. For non-Dracula themes these attrs default to the
+        // primary text color, so there is no visible change.
+        val attr = when (state) {
+            BaseService.State.Connected -> R.attr.statusConnectedColor
+            BaseService.State.Stopped -> R.attr.statusStoppedColor
+            else -> android.R.attr.textColorPrimary
+        }
+        statusText.setTextColor(context.getColorAttr(attr))
+    }
+
     fun changeState(state: BaseService.State) {
         val activity = context as MainActivity
+        setStatusColorByState(state)
         fun postWhenStarted(what: () -> Unit) = activity.lifecycleScope.launch(Dispatchers.Main) {
             delay(100L)
             activity.whenStarted { what() }

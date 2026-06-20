@@ -13,6 +13,14 @@
     <!-- Text color for the protocol/type label on a profile row. Defaults to
          the accent color; Dracula overrides it with its green. -->
     <attr name="protocolColor" format="color" />
+    <!-- Profile name label color. Defaults to primary text; Dracula = yellow. -->
+    <attr name="profileNameColor" format="color" />
+    <!-- Service status / connect-button colors. Default to primary text so non-
+         Dracula themes are unchanged; Dracula tints connected=green, stopped=red. -->
+    <attr name="statusConnectedColor" format="color" />
+    <attr name="statusStoppedColor" format="color" />
+    <!-- Connection-test failure color. Default Material red; Dracula = #ff5555. -->
+    <attr name="testFailColor" format="color" />
     <!-- Tonal "elevated surface" color for cards (route / group); each theme
          variant tints toward its own primary. -->
     <attr name="cardElevatedSurfaceColor" format="color" />

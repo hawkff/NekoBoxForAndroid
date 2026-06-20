@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.widget
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.util.AttributeSet
@@ -17,6 +18,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.progressindicator.BaseProgressIndicator
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.ktx.getColorAttr
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import java.util.*
@@ -118,6 +120,7 @@ class ServiceButton @JvmOverloads constructor(
         }
         checked = state == BaseService.State.Connected
         refreshDrawableState()
+        applyStateTint(state)
         val description = context.getText(if (state.canStop) R.string.stop else R.string.connect)
         contentDescription = description
         TooltipCompat.setTooltipText(this, description)
@@ -127,6 +130,18 @@ class ServiceButton @JvmOverloads constructor(
             context,
             if (enabled) PointerIcon.TYPE_HAND else PointerIcon.TYPE_WAIT
         )
+    }
+
+    private fun applyStateTint(state: BaseService.State) {
+        // Tint the connect FAB icon by state: connected=green, stopped=red,
+        // transient states neutral (cleared). Non-Dracula themes default these
+        // attrs to the primary text color, so there is no visible change.
+        val attr = when (state) {
+            BaseService.State.Connected -> R.attr.statusConnectedColor
+            BaseService.State.Stopped -> R.attr.statusStoppedColor
+            else -> null
+        }
+        imageTintList = attr?.let { ColorStateList.valueOf(context.getColorAttr(it)) }
     }
 
     private fun changeState(icon: AnimatedState, animate: Boolean) {
