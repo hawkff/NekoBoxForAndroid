@@ -124,7 +124,10 @@ fun Project.setupAppCommon() {
     // otherwise skip it so debug / PR / keyless builds don't fail. Empty-string env vars
     // (unset GitHub secrets expand to "") count as absent.
     val releaseKeystore = rootProject.file("release.keystore")
-    val canSign = !keystorePwd.isNullOrBlank() && releaseKeystore.exists()
+    val canSign = releaseKeystore.exists() &&
+        !keystorePwd.isNullOrBlank() &&
+        !alias.isNullOrBlank() &&
+        !pwd.isNullOrBlank()
 
     android.apply {
         if (canSign) {
