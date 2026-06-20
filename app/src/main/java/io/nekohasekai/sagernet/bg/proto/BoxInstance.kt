@@ -278,6 +278,11 @@ abstract class BoxInstance(
         }
         val readinessTimeoutMs = if (hasMasterDnsVpn) {
             maxOf(60_000L, DataStore.connectionTestTimeout.toLong())
+        } else if (strict) {
+            // URL test: a healthy sidecar binds well under a second. Cap the readiness
+            // wait so a slow/unbound sidecar can't make the total perceived test time
+            // roughly double the configured timeout (readiness wait + the url test itself).
+            minOf(2_000L, maxOf(1_000L, DataStore.connectionTestTimeout.toLong()))
         } else {
             maxOf(1_000L, DataStore.connectionTestTimeout.toLong())
         }
