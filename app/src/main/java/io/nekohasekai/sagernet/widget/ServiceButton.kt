@@ -12,6 +12,7 @@ import androidx.appcompat.widget.TooltipCompat
 import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.withStarted
 import androidx.vectordrawable.graphics.drawable.Animatable2Compat
 import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -67,8 +68,12 @@ class ServiceButton @JvmOverloads constructor(
             hideProgress()
             delayedAnimation = (context as LifecycleOwner).lifecycleScope.launch {
                 delay(context.resources.getInteger(android.R.integer.config_mediumAnimTime) + 1000L)
-                isIndeterminate = true
-                show()
+                // Gate the UI mutation on STARTED so a delayed progress reveal doesn't run
+                // while the activity is stopped (the old launchWhenStarted suspended here).
+                (context as LifecycleOwner).withStarted {
+                    isIndeterminate = true
+                    show()
+                }
             }
         }
     }
