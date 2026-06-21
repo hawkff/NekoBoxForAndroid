@@ -7,7 +7,6 @@ import android.content.pm.ShortcutManager
 import android.graphics.ImageDecoder
 import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
 import android.util.Size
 import android.view.Menu
 import android.view.MenuItem
@@ -132,6 +131,7 @@ class ScannerActivity : ThemedActivity() {
                 binding.fabTorch.visibility =
                     if (camera?.cameraInfo?.hasFlashUnit() == true) android.view.View.VISIBLE
                     else android.view.View.GONE
+                binding.fabTorch.contentDescription = getString(R.string.scan_torch_turn_on)
             } catch (e: Exception) {
                 Logs.w(e)
                 Toast.makeText(app, e.readableMessage, Toast.LENGTH_LONG).show()
@@ -150,8 +150,12 @@ class ScannerActivity : ThemedActivity() {
         val input = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
         barcodeScanner.process(input)
             .addOnSuccessListener { barcodes ->
-                barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue?.let {
-                    onText(it, multi = false)
+                val text = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
+                if (text != null && !finished.getAndSet(true)) {
+                    // First successful scan wins: finish the activity and import in the
+                    // background (the activity-scoped toast in onDestroy reports the count).
+                    finish()
+                    runOnDefaultDispatcher { importText(text) }
                 }
             }
             .addOnFailureListener { Logs.w(it) }
@@ -165,6 +169,10 @@ class ScannerActivity : ThemedActivity() {
         cam.cameraControl.enableTorch(torchOn)
         binding.fabTorch.setImageResource(
             if (torchOn) R.drawable.ic_baseline_flash_on_24 else R.drawable.ic_baseline_flash_off_24
+        )
+        // Keep the accessibility label describing the action the button will perform.
+        binding.fabTorch.contentDescription = getString(
+            if (torchOn) R.string.scan_torch_turn_off else R.string.scan_torch_turn_on
         )
     }
 
@@ -187,30 +195,25 @@ class ScannerActivity : ThemedActivity() {
     ) { uris ->
         if (uris.isEmpty()) return@registerForActivityResult
         runOnDefaultDispatcher {
-            var found = false
+            var foundQr = false
+            var imported = 0
             try {
                 uris.forEachTry { uri ->
-                    val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        ImageDecoder.decodeBitmap(
-                            ImageDecoder.createSource(contentResolver, uri)
-                        ) { decoder, _, _ ->
-                            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                            decoder.isMutableRequired = true
-                        }
-                    } else {
-                        @Suppress("DEPRECATION")
-                        MediaStore.Images.Media.getBitmap(contentResolver, uri)
+                    val bitmap = decodeBoundedBitmap(uri)
+                    val barcodes = try {
+                        com.google.android.gms.tasks.Tasks.await(
+                            barcodeScanner.process(InputImage.fromBitmap(bitmap, 0))
+                        )
+                    } finally {
+                        bitmap.recycle()
                     }
-                    val barcodes = com.google.android.gms.tasks.Tasks.await(
-                        barcodeScanner.process(InputImage.fromBitmap(bitmap, 0))
-                    )
                     val text = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
                     if (text != null) {
-                        found = true
-                        onText(text, multi = true)
+                        foundQr = true
+                        imported += importText(text)
                     }
                 }
-                if (!found) {
+                if (!foundQr) {
                     onMainDispatcher {
                         Toast.makeText(app, R.string.scan_no_qr_found, Toast.LENGTH_LONG).show()
                     }
@@ -221,48 +224,91 @@ class ScannerActivity : ThemedActivity() {
                     Toast.makeText(app, e.readableMessage, Toast.LENGTH_LONG).show()
                 }
             } finally {
-                if (found) onMainDispatcher { finish() }
+                // Only finish once the import actually completed (importText is awaited
+                // above) and at least one profile was created.
+                if (imported > 0) onMainDispatcher { finish() }
             }
         }
     }
 
     /**
-     * Handle a decoded QR payload. For live scanning (multi = false) only the first
-     * result is accepted and the activity finishes; for image import (multi = true)
-     * every selected image can contribute profiles.
+     * Decode a user-selected image bounded to [MAX_IMPORT_DIMEN] on its longer edge.
+     * Arbitrary gallery images can be huge; decoding at full resolution risks an OOM
+     * before any exception handler runs. ML Kit detects QR codes fine at this size.
      */
-    private fun onText(text: String, multi: Boolean) {
-        if (!multi && finished.getAndSet(true)) return
-        if (!multi) finish()
-        runOnDefaultDispatcher {
-            try {
-                val results = RawUpdater.parseRaw(text)
-                if (!results.isNullOrEmpty()) {
-                    val currentGroupId = DataStore.selectedGroupForImport()
-                    if (DataStore.selectedGroup != currentGroupId) {
-                        DataStore.selectedGroup = currentGroupId
-                    }
-                    for (profile in results) {
-                        ProfileManager.createProfile(currentGroupId, profile)
-                        importedN.addAndGet(1)
-                    }
-                } else {
-                    onMainDispatcher {
-                        Toast.makeText(app, R.string.action_import_err, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: SubscriptionFoundException) {
-                startActivity(Intent(this@ScannerActivity, MainActivity::class.java).apply {
-                    action = Intent.ACTION_VIEW
-                    data = e.link.toUri()
-                })
-            } catch (e: Throwable) {
-                Logs.w(e)
-                onMainDispatcher {
-                    val msg = getString(R.string.action_import_err) + "\n" + e.readableMessage
-                    Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+    private fun decodeBoundedBitmap(uri: android.net.Uri): android.graphics.Bitmap {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ImageDecoder.decodeBitmap(
+                ImageDecoder.createSource(contentResolver, uri)
+            ) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.isMutableRequired = true
+                val longer = maxOf(info.size.width, info.size.height)
+                if (longer > MAX_IMPORT_DIMEN) {
+                    val scale = MAX_IMPORT_DIMEN.toFloat() / longer
+                    decoder.setTargetSize(
+                        (info.size.width * scale).toInt().coerceAtLeast(1),
+                        (info.size.height * scale).toInt().coerceAtLeast(1)
+                    )
                 }
             }
+        } else {
+            // Pre-P: read bounds first, then decode with an inSampleSize so the full-res
+            // bitmap is never materialized.
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, bounds)
+            }
+            var sample = 1
+            val longer = maxOf(bounds.outWidth, bounds.outHeight)
+            while (longer / sample > MAX_IMPORT_DIMEN) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            (contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, opts)
+            }) ?: error("Cannot decode image")
+        }
+    }
+
+    /**
+     * Parse a decoded QR payload and create the resulting profile(s). Suspends until the
+     * import completes and returns the number of profiles created (0 if none / on error),
+     * so callers can wait before finishing. A SubscriptionFoundException opens the
+     * subscription import flow instead.
+     */
+    private suspend fun importText(text: String): Int {
+        return try {
+            val results = RawUpdater.parseRaw(text)
+            if (!results.isNullOrEmpty()) {
+                val currentGroupId = DataStore.selectedGroupForImport()
+                if (DataStore.selectedGroup != currentGroupId) {
+                    DataStore.selectedGroup = currentGroupId
+                }
+                var n = 0
+                for (profile in results) {
+                    ProfileManager.createProfile(currentGroupId, profile)
+                    n++
+                }
+                importedN.addAndGet(n)
+                n
+            } else {
+                onMainDispatcher {
+                    Toast.makeText(app, R.string.action_import_err, Toast.LENGTH_SHORT).show()
+                }
+                0
+            }
+        } catch (e: SubscriptionFoundException) {
+            startActivity(Intent(this@ScannerActivity, MainActivity::class.java).apply {
+                action = Intent.ACTION_VIEW
+                data = e.link.toUri()
+            })
+            0
+        } catch (e: Throwable) {
+            Logs.w(e)
+            onMainDispatcher {
+                val msg = getString(R.string.action_import_err) + "\n" + e.readableMessage
+                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+            }
+            0
         }
     }
 
@@ -275,5 +321,11 @@ class ScannerActivity : ThemedActivity() {
             val text = getString(R.string.action_import_msg) + "\n" + importedN.get() + " profile(s)"
             Toast.makeText(app, text, Toast.LENGTH_LONG).show()
         }
+    }
+
+    companion object {
+        // Bound for decoding imported images; large enough for ML Kit to read dense QR
+        // codes, small enough to avoid OOM on arbitrary full-resolution gallery photos.
+        private const val MAX_IMPORT_DIMEN = 2048
     }
 }
