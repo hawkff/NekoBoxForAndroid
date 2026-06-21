@@ -21,6 +21,7 @@ import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.ktx.getColorAttr
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.*
 
 class ServiceButton @JvmOverloads constructor(
@@ -64,7 +65,7 @@ class ServiceButton @JvmOverloads constructor(
     private val iconConnecting by lazy {
         AnimatedState(R.drawable.ic_service_connecting) {
             hideProgress()
-            delayedAnimation = (context as LifecycleOwner).lifecycleScope.launchWhenStarted {
+            delayedAnimation = (context as LifecycleOwner).lifecycleScope.launch {
                 delay(context.resources.getInteger(android.R.integer.config_mediumAnimTime) + 1000L)
                 isIndeterminate = true
                 show()
