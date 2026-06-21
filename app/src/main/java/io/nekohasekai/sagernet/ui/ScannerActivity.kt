@@ -152,10 +152,13 @@ class ScannerActivity : ThemedActivity() {
             .addOnSuccessListener { barcodes ->
                 val text = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
                 if (text != null && !finished.getAndSet(true)) {
-                    // First successful scan wins: finish the activity and import in the
-                    // background (the activity-scoped toast in onDestroy reports the count).
-                    finish()
-                    runOnDefaultDispatcher { importText(text) }
+                    // First successful scan wins. Import first, then finish on the main
+                    // thread, so importedN is populated before onDestroy() reads it for
+                    // the "N profile(s)" toast (finishing first raced the background import).
+                    runOnDefaultDispatcher {
+                        importText(text)
+                        onMainDispatcher { finish() }
+                    }
                 }
             }
             .addOnFailureListener { Logs.w(it) }
