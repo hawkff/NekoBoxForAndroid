@@ -57,14 +57,6 @@ fun Project.setupCommon() {
             sourceCompatibility = JavaVersion.VERSION_17
             targetCompatibility = JavaVersion.VERSION_17
         }
-        // Kotlin JVM target. Configured via the compilerOptions DSL on the Kotlin compile
-        // tasks; the legacy `kotlinOptions { jvmTarget = ... }` / KotlinJvmOptions API was
-        // removed (turned into a hard error) in Kotlin 2.3.
-        tasks.withType<KotlinCompile>().configureEach {
-            compilerOptions {
-                jvmTarget.set(JvmTarget.JVM_17)
-            }
-        }
         lint {
             showAll = true
             checkAllWarnings = true
@@ -113,6 +105,16 @@ fun Project.setupCommon() {
                     ).replace("-release", "").replace("-oss", "")
                 }
             }
+        }
+    }
+
+    // Kotlin JVM target. Configured via the compilerOptions DSL on the Kotlin compile tasks
+    // (a project-level call, hence outside the android.apply { } block above); the legacy
+    // `kotlinOptions { jvmTarget = ... }` / KotlinJvmOptions API was removed (turned into a
+    // hard error) in Kotlin 2.3.
+    tasks.withType<KotlinCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 }
