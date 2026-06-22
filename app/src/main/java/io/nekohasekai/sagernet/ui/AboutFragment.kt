@@ -16,6 +16,8 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.BuildConfig
@@ -64,7 +66,41 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
     }
 
     private fun rebuildList() {
-        val context = requireContext()
+        // PackageCache.awaitLoadSync() and the plugin enumeration can, in the worst case (cache
+        // still loading), block; build the list off the main thread and post the result back so
+        // the About screen never janks.
+        runOnIoDispatcher {
+            val pluginItems = mutableListOf<AboutItem>()
+            PackageCache.awaitLoadSync()
+            for ((_, pkg) in PackageCache.installedPluginPackages) {
+                try {
+                    val pluginId = pkg.providers?.get(0)?.loadString(Plugins.METADATA_KEY_ID)
+                    if (pluginId.isNullOrBlank()) continue
+                    pluginItems += AboutItem(
+                        icon = R.drawable.ic_baseline_nfc_24,
+                        text = getString(R.string.version_x, pluginId) +
+                            " (${Plugins.displayExeProvider(pkg.packageName)})",
+                        subText = "v" + pkg.versionName,
+                        onClick = {
+                            startActivity(Intent().apply {
+                                action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                data = Uri.fromParts("package", pkg.packageName, null)
+                            })
+                        },
+                    )
+                } catch (e: Exception) {
+                    Logs.w(e)
+                }
+            }
+            runOnMainDispatcher {
+                if (!isAdded) return@runOnMainDispatcher
+                adapter.submitList(buildItems(pluginItems))
+            }
+        }
+    }
+
+    /** Assembles the full item list. [pluginItems] is computed off the main thread by the caller. */
+    private fun buildItems(pluginItems: List<AboutItem>): List<AboutItem> {
         val items = mutableListOf<AboutItem>()
 
         items += AboutItem(
@@ -91,27 +127,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             subText = Libcore.versionBox(),
         )
 
-        PackageCache.awaitLoadSync()
-        for ((_, pkg) in PackageCache.installedPluginPackages) {
-            try {
-                val pluginId = pkg.providers?.get(0)?.loadString(Plugins.METADATA_KEY_ID)
-                if (pluginId.isNullOrBlank()) continue
-                items += AboutItem(
-                    icon = R.drawable.ic_baseline_nfc_24,
-                    text = getString(R.string.version_x, pluginId) +
-                        " (${Plugins.displayExeProvider(pkg.packageName)})",
-                    subText = "v" + pkg.versionName,
-                    onClick = {
-                        startActivity(Intent().apply {
-                            action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
-                            data = Uri.fromParts("package", pkg.packageName, null)
-                        })
-                    },
-                )
-            } catch (e: Exception) {
-                Logs.w(e)
-            }
-        }
+        items += pluginItems
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -141,7 +157,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             )
         }
 
-        adapter.submit(items)
+        return items
     }
 
     private fun checkUpdate(checkPreview: Boolean) {
@@ -224,14 +240,19 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         val onClick: (() -> Unit)? = null,
     )
 
-    private class AboutAdapter : RecyclerView.Adapter<AboutViewHolder>() {
+    private class AboutAdapter : ListAdapter<AboutItem, AboutViewHolder>(DIFF) {
 
-        private val items = mutableListOf<AboutItem>()
+        companion object {
+            // AboutItem carries an onClick lambda, so compare only the visible content.
+            private val DIFF = object : DiffUtil.ItemCallback<AboutItem>() {
+                override fun areItemsTheSame(oldItem: AboutItem, newItem: AboutItem) =
+                    oldItem.text == newItem.text
 
-        fun submit(newItems: List<AboutItem>) {
-            items.clear()
-            items += newItems
-            notifyDataSetChanged()
+                override fun areContentsTheSame(oldItem: AboutItem, newItem: AboutItem) =
+                    oldItem.icon == newItem.icon &&
+                        oldItem.text == newItem.text &&
+                        oldItem.subText == newItem.subText
+            }
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AboutViewHolder {
@@ -243,10 +264,8 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
         }
 
         override fun onBindViewHolder(holder: AboutViewHolder, position: Int) {
-            holder.bind(items[position])
+            holder.bind(getItem(position))
         }
-
-        override fun getItemCount() = items.size
     }
 
     private class AboutViewHolder(
