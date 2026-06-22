@@ -1,0 +1,13 @@
+TextMate assets in this directory are derived from Visual Studio Code
+(https://github.com/microsoft/vscode), licensed under the MIT License.
+
+Files:
+- json/syntaxes/json.tmLanguage.json  (extensions/json/syntaxes/JSON.tmLanguage.json)
+- json/language-configuration.json    (extensions/json/language-configuration.json)
+- dark_vs.json                        (extensions/theme-defaults/themes/dark_vs.json)
+- light_vs.json                       (extensions/theme-defaults/themes/light_vs.json)
+
+These are loaded at runtime by sora-editor's language-textmate module to provide
+JSON syntax highlighting and dark/light color schemes in the config editor.
+
+MIT License — Copyright (c) Microsoft Corporation.
