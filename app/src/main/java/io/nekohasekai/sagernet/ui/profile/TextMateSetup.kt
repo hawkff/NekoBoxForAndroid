@@ -53,7 +53,8 @@ object TextMateSetup {
         dark: Boolean,
     ) {
         val input = FileProviderRegistry.getInstance().tryGetInputStream(assetPath)
-        val source = IThemeSource.fromInputStream(input, assetPath, null)
+            ?: error("Missing TextMate theme asset: $assetPath")
+        val source = input.use { IThemeSource.fromInputStream(it, assetPath, null) }
         registry.loadTheme(ThemeModel(source, name).apply { isDark = dark })
     }
 
