@@ -42,7 +42,8 @@ import org.json.JSONObject
  */
 class AboutFragment : ToolbarFragment(R.layout.layout_about) {
 
-    private lateinit var binding: LayoutAboutBinding
+    private var _binding: LayoutAboutBinding? = null
+    private val binding get() = _binding!!
     private val adapter = AboutAdapter()
 
     private val requestIgnoreBatteryOptimizations = registerForActivityResult(
@@ -57,12 +58,20 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        binding = LayoutAboutBinding.bind(view)
+        _binding = LayoutAboutBinding.bind(view)
         ViewCompat.setOnApplyWindowInsetsListener(view, ListListener)
         toolbar.setTitle(R.string.menu_about)
 
         binding.aboutList.adapter = adapter
         rebuildList()
+    }
+
+    override fun onDestroyView() {
+        // The fragment instance outlives its view; release the view-scoped binding and detach
+        // the adapter so the destroyed RecyclerView/view tree isn't leaked.
+        _binding?.aboutList?.adapter = null
+        _binding = null
+        super.onDestroyView()
     }
 
     private fun rebuildList() {
