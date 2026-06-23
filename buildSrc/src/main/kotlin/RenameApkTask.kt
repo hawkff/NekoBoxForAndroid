@@ -2,6 +2,7 @@ import com.android.build.api.variant.BuiltArtifactsLoader
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
@@ -43,8 +44,10 @@ abstract class RenameApkTask : DefaultTask() {
     /**
      * Friendly base name to use instead of the default project/module name, e.g.
      * `NekoBox-1.4.2-mod-12` or `NekoBox-pre-1.4.2-20260214-1` for the preview flavor.
+     * Declared as @Input so a version bump invalidates the task and the APKs are re-copied
+     * with the new name rather than leaving stale files in the output directory.
      */
-    @get:Internal
+    @get:Input
     abstract val baseName: Property<String>
 
     @TaskAction
