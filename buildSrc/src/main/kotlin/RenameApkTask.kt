@@ -83,9 +83,12 @@ abstract class RenameApkTask : DefaultTask() {
             )
         }
 
-        // Persist the artifact metadata (output-metadata.json) alongside the copies. This keeps the
-        // directory self-describing and is required if the artifact is consumed further downstream.
-        builtArtifacts.save(outputDir)
+        // NOTE: we intentionally do NOT call builtArtifacts.save(outputDir). That would write an
+        // output-metadata.json whose `outputFile` entries still point at the original (un-renamed)
+        // APK paths in outputs/apk/<variant>/, not at the NekoBox-* copies next to it - which would
+        // mislead any BuiltArtifactsLoader consumer back to the originals. Nothing downstream
+        // consumes this metadata (CI just globs the *.apk files), so we omit it rather than emit a
+        // misleading file.
     }
 
     private companion object {
