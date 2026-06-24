@@ -117,15 +117,25 @@ class AssetsActivity : ThemedActivity() {
                         parentFile?.mkdirs()
                     }
 
-                    contentResolver.openInputStream(file)?.use(outFile.outputStream())
-                        ?: error("Unable to open the selected file")
+                    // Copy into a temp file first, then atomically replace the
+                    // target so a failed copy can't leave a partial/corrupt .db.
+                    val tmpFile = File(outFile.parentFile, "$fileName.tmp")
+                    try {
+                        contentResolver.openInputStream(file)?.use(tmpFile.outputStream())
+                            ?: error("Unable to open the selected file")
+
+                        if (outFile.exists()) outFile.delete()
+                        if (!tmpFile.renameTo(outFile)) {
+                            error("Unable to save the imported asset")
+                        }
+                    } finally {
+                        if (tmpFile.exists()) tmpFile.delete()
+                    }
 
                     File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
                         if (isFile) delete()
                         createNewFile()
-                        val fw = FileWriter(this)
-                        fw.write("Custom")
-                        fw.close()
+                        FileWriter(this).use { it.write("Custom") }
                     }
 
                     adapter.reloadAssets()

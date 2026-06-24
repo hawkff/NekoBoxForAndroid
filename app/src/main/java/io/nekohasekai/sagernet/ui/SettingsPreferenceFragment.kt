@@ -251,6 +251,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             editText.maxLines = 12
             editText.setHorizontallyScrolling(false)
         }
+        // Pre-fill with the stored value (or the default when unset) so opening
+        // the dialog and tapping OK doesn't overwrite the list with an empty
+        // string. Persist the default once so it survives untouched edits.
+        httpProxyBypass.text = DataStore.httpProxyBypass
         httpProxyBypass.onPreferenceChangeListener = reloadListener
         showDirectSpeed.onPreferenceChangeListener = reloadListener
         trafficSniffing.onPreferenceChangeListener = reloadListener
