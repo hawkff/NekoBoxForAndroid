@@ -151,3 +151,15 @@ jobs:
         with:
           name: NekoBox-debug-apks
           path: ${{ env.APK }}
+      - name: Publish APK to Namespace workspace store
+        # Also push the arm64-v8a APK into the Namespace *workspace* artifact
+        # store so it can be fetched locally with `nsc artifact download`
+        # (the GitHub-Actions artifact above is only reachable from a runner or
+        # the dashboard). Path: nekobox/<branch>/<run>/<file>.apk. See AGENTS.md.
+        run: |
+          set -euo pipefail
+          APK_FILE=$(find "${{ env.APK }}" -name '*arm64-v8a*.apk' | head -n 1)
+          BRANCH="${GITHUB_REF_NAME//\//-}"
+          DEST="nekobox/${BRANCH}/${GITHUB_RUN_ID}/$(basename "$APK_FILE")"
+          nsc artifact upload "$APK_FILE" "$DEST"
+          echo "Uploaded to Namespace workspace store: $DEST"
