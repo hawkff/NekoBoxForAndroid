@@ -17,19 +17,28 @@ fi
 export GOBIND=gobind-matsuri
 
 # Inject the real sing-box version so the About screen shows it instead of "unknown".
-# Upstream's Makefile sets constant.Version via read_tag; mirror that here. The sing-box
-# source is cloned to ../sing-box by buildScript/lib/core/get_source.sh.
+# Upstream's Makefile sets constant.Version via read_tag; mirror that here.
+# get_source.sh clones sing-box to the parent of the repo root; build.sh runs from
+# libcore/, so the clone is two levels up (../../sing-box). Probe a few candidates so
+# this works regardless of how the build is invoked.
+SING_BOX_DIR=""
+for cand in ../../sing-box ../sing-box ../../../sing-box; do
+  if [ -d "$cand" ] && [ -e "$cand/go.mod" ]; then
+    SING_BOX_DIR="$cand"
+    break
+  fi
+done
 SING_BOX_VERSION=""
-if [ -d ../sing-box ]; then
-  SING_BOX_VERSION="$(cd ../sing-box && CGO_ENABLED=0 go run ./cmd/internal/read_tag 2>/dev/null || true)"
+if [ -n "$SING_BOX_DIR" ]; then
+  SING_BOX_VERSION="$(cd "$SING_BOX_DIR" && CGO_ENABLED=0 go run ./cmd/internal/read_tag 2>/dev/null || true)"
   if [ -z "$SING_BOX_VERSION" ]; then
-    SING_BOX_VERSION="$(git -C ../sing-box describe --tags --always 2>/dev/null || true)"
+    SING_BOX_VERSION="$(git -C "$SING_BOX_DIR" describe --tags --always 2>/dev/null || true)"
   fi
 fi
 if [ -z "$SING_BOX_VERSION" ]; then
-  echo ">> WARNING: could not determine sing-box version; About will show 'unknown'"
+  echo ">> WARNING: could not determine sing-box version (dir='$SING_BOX_DIR'); About will show 'unknown'"
 else
-  echo ">> sing-box version: $SING_BOX_VERSION"
+  echo ">> sing-box version: $SING_BOX_VERSION (from '$SING_BOX_DIR')"
 fi
 VERSION_LDFLAG=""
 if [ -n "$SING_BOX_VERSION" ]; then
