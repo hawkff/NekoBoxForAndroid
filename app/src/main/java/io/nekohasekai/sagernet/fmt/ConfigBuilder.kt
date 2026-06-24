@@ -7,6 +7,8 @@ import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyEntity.Companion.TYPE_CONFIG
+import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.ConfigBuildResult.IndexEntity
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
@@ -52,6 +54,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 private fun sanitizeDnsEntry(value: String): String {
     return value.filterNot { it.isISOControl() }.trim()
+}
+
+// Extract the server hostname for a bean, mirroring the bypassDNSBeans logic
+// (ConfigBean stores its address inside the parsed JSON "server" field).
+private fun serverHostOf(bean: AbstractBean): String? {
+    if (bean is ConfigBean) {
+        return try {
+            val map = gson.fromJson(bean.config, mutableMapOf<String, Any>().javaClass)
+            map["server"]?.toString()?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return bean.serverAddress?.takeIf { it.isNotBlank() }
 }
 
 const val TAG_MIXED = "mixed-in"
@@ -156,6 +172,16 @@ fun buildConfig(
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
+    // Per-subscription custom resolver (#71). Maps a subscription group's resolver to the
+    // exact server hostnames imported from that subscription, so the resolver is used ONLY
+    // for those domains. Populated for the final-hop (global) outbound of each chain.
+    val perGroupResolver = HashMap<Long, String>() // groupId -> resolver address
+    val perGroupServerHosts = HashMap<Long, MutableSet<String>>() // groupId -> server hosts
+    // host -> set of resolver addresses requested for it (across all groups). A host is only
+    // routed to a custom resolver when it maps to exactly one resolver; ambiguous hosts
+    // (same domain, different resolvers in different subscriptions) fall back to global DNS.
+    val hostResolvers = HashMap<String, MutableSet<String>>()
+    val groupCache = HashMap<Long, ProxyGroup?>() // groupId -> group (build-time cache)
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
     // Whether the local mixed (SOCKS/HTTP) inbound is present in the final config.
@@ -365,6 +391,28 @@ fun buildConfig(
                     needGlobal = true
                     tagOut = "g-" + proxyEntity.id
                     bypassDNSBeans += proxyEntity.requireBean()
+
+                    // Per-subscription custom resolver (#71): associate this final-hop
+                    // server's domain with its originating subscription's resolver (if any).
+                    if (!forTest) {
+                        val gid = proxyEntity.groupId
+                        val grp = groupCache.getOrPut(gid) {
+                            SagerDatabase.groupDao.getById(gid)
+                        }
+                        val resolver = grp
+                            ?.takeIf { it.type == GroupType.SUBSCRIPTION }
+                            ?.subscription?.customDnsResolver
+                            ?.let { sanitizeDnsEntry(it) }
+                            ?.takeIf { it.isNotBlank() }
+                        if (resolver != null) {
+                            val host = serverHostOf(bean)
+                            if (host != null && !host.isIpAddress()) {
+                                perGroupResolver[gid] = resolver
+                                perGroupServerHosts.getOrPut(gid) { mutableSetOf() }.add(host)
+                                hostResolvers.getOrPut(host) { mutableSetOf() }.add(resolver)
+                            }
+                        }
+                    }
                 }
 
                 if (index == 0) {
@@ -859,7 +907,16 @@ fun buildConfig(
             }
 
             if (!serverAddr.isIpAddress()) {
-                domainListDNSDirectForce.add("full:${serverAddr}")
+                // Servers belonging to a subscription with a custom resolver are handled
+                // by a dedicated per-subscription DNS server/rule below, so keep them out
+                // of the global direct-DNS force list to avoid conflicting routing (#71).
+                // Only do this for hosts that map to exactly ONE resolver; if the same
+                // hostname is claimed by multiple subscriptions with different resolvers,
+                // routing is ambiguous, so keep it on the global direct path instead.
+                val unambiguousCustom = hostResolvers[serverAddr]?.size == 1
+                if (!unambiguousCustom) {
+                    domainListDNSDirectForce.add("full:${serverAddr}")
+                }
             }
         }
 
@@ -968,6 +1025,32 @@ fun buildConfig(
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {
                     makeSingBoxRule(domainListDNSDirectForce.toHashSet().toList())
                     server = "dns-direct"
+                })
+            }
+
+            // Per-subscription custom resolver (#71): one DNS server per subscription group,
+            // routed directly (TAG_DIRECT) so it never loops through the proxy outbound, and
+            // a DNS rule matching ONLY that subscription's server domains. Inserted at the top
+            // so it takes precedence over the global direct-DNS force rule above. Hosts shared
+            // by multiple subscriptions with different resolvers are ambiguous and are skipped
+            // here (they stay on the global direct path).
+            perGroupResolver.forEach { (gid, resolver) ->
+                val hosts = perGroupServerHosts[gid]
+                    ?.filter { it.isNotBlank() && hostResolvers[it]?.size == 1 }
+                    ?.map { "full:$it" }
+                if (hosts.isNullOrEmpty()) return@forEach
+
+                val serverTag = "dns-sub-$gid"
+                dns.servers.add(DNSServerOptions().apply {
+                    address = resolver
+                    tag = serverTag
+                    detour = TAG_DIRECT
+                    address_resolver = "dns-local"
+                    strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
+                })
+                dns.rules.add(0, DNSRule_DefaultOptions().apply {
+                    makeSingBoxRule(hosts)
+                    server = serverTag
                 })
             }
         }
