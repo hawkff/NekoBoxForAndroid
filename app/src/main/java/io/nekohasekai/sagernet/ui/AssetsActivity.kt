@@ -112,21 +112,31 @@ class AssetsActivity : ThemedActivity() {
             val filesDir = getExternalFilesDir(null) ?: filesDir
 
             runOnDefaultDispatcher {
-                val outFile = File(filesDir, fileName).apply {
-                    parentFile?.mkdirs()
+                runCatching {
+                    val outFile = File(filesDir, fileName).apply {
+                        parentFile?.mkdirs()
+                    }
+
+                    contentResolver.openInputStream(file)?.use(outFile.outputStream())
+                        ?: error("Unable to open the selected file")
+
+                    File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
+                        if (isFile) delete()
+                        createNewFile()
+                        val fw = FileWriter(this)
+                        fw.write("Custom")
+                        fw.close()
+                    }
+
+                    adapter.reloadAssets()
+                }.onFailure {
+                    Logs.w(it)
+                    onMainDispatcher {
+                        if (!isFinishing && !isDestroyed) {
+                            alert(it.readableMessage).tryToShow()
+                        }
+                    }
                 }
-
-                contentResolver.openInputStream(file)?.use(outFile.outputStream())
-
-                File(outFile.parentFile, outFile.nameWithoutExtension + ".version.txt").apply {
-                    if (isFile) delete()
-                    createNewFile()
-                    val fw = FileWriter(this)
-                    fw.write("Custom")
-                    fw.close()
-                }
-
-                adapter.reloadAssets()
             }
 
         }
