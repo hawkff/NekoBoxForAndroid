@@ -57,17 +57,20 @@ private fun sanitizeDnsEntry(value: String): String {
 }
 
 // Extract the server hostname for a bean, mirroring the bypassDNSBeans logic
-// (ConfigBean stores its address inside the parsed JSON "server" field).
+// (ConfigBean stores its address inside the parsed JSON "server" field). Falls back to
+// bean.serverAddress when the JSON has no usable "server" so custom-resolver host mapping
+// is preserved for those configs.
 private fun serverHostOf(bean: AbstractBean): String? {
+    val fallback = bean.serverAddress?.takeIf { it.isNotBlank() }
     if (bean is ConfigBean) {
         return try {
             val map = gson.fromJson(bean.config, mutableMapOf<String, Any>().javaClass)
-            map["server"]?.toString()?.takeIf { it.isNotBlank() }
+            map["server"]?.toString()?.takeIf { it.isNotBlank() } ?: fallback
         } catch (_: Exception) {
-            null
+            fallback
         }
     }
-    return bean.serverAddress?.takeIf { it.isNotBlank() }
+    return fallback
 }
 
 const val TAG_MIXED = "mixed-in"
@@ -174,13 +177,18 @@ fun buildConfig(
     val bypassDNSBeans = hashSetOf<AbstractBean>()
     // Per-subscription custom resolver (#71). Maps a subscription group's resolver to the
     // exact server hostnames imported from that subscription, so the resolver is used ONLY
-    // for those domains. Populated for the final-hop (global) outbound of each chain.
+    // for those domains.
     val perGroupResolver = HashMap<Long, String>() // groupId -> resolver address
     val perGroupServerHosts = HashMap<Long, MutableSet<String>>() // groupId -> server hosts
-    // host -> set of resolver addresses requested for it (across all groups). A host is only
-    // routed to a custom resolver when it maps to exactly one resolver; ambiguous hosts
-    // (same domain, different resolvers in different subscriptions) fall back to global DNS.
+    // host -> set of resolver addresses requested for it (across all custom-resolver groups).
+    // A host is only routed to a custom resolver when it maps to exactly one resolver; hosts
+    // claimed by multiple subscriptions with different resolvers are ambiguous and fall back
+    // to the global DNS.
     val hostResolvers = HashMap<String, MutableSet<String>>()
+    // Every final-hop server host that does NOT belong to a custom-resolver subscription.
+    // If a host appears here too, it is shared with a normal profile, so we must NOT hijack
+    // it onto a per-subscription resolver (keep it on the global direct path).
+    val nonCustomFinalHosts = hashSetOf<String>()
     val groupCache = HashMap<Long, ProxyGroup?>() // groupId -> group (build-time cache)
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
     val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
@@ -392,24 +400,49 @@ fun buildConfig(
                     tagOut = "g-" + proxyEntity.id
                     bypassDNSBeans += proxyEntity.requireBean()
 
-                    // Per-subscription custom resolver (#71): associate this final-hop
-                    // server's domain with its originating subscription's resolver (if any).
+                    // Per-subscription custom resolver (#71). The resolver belongs to the
+                    // subscription that owns this chain (entity.groupId), not necessarily the
+                    // last hop's group (a front/landing proxy may come from another group).
+                    // We record the server hostnames of the chain hops that belong to that
+                    // same subscription, so the resolver is scoped to its own servers only.
                     if (!forTest) {
-                        val gid = proxyEntity.groupId
-                        val grp = groupCache.getOrPut(gid) {
-                            SagerDatabase.groupDao.getById(gid)
+                        val ownerGid = entity.groupId
+                        val ownerGroup = groupCache.getOrPut(ownerGid) {
+                            SagerDatabase.groupDao.getById(ownerGid)
                         }
-                        val resolver = grp
+                        val resolver = ownerGroup
                             ?.takeIf { it.type == GroupType.SUBSCRIPTION }
                             ?.subscription?.customDnsResolver
                             ?.let { sanitizeDnsEntry(it) }
                             ?.takeIf { it.isNotBlank() }
+
                         if (resolver != null) {
-                            val host = serverHostOf(bean)
-                            if (host != null && !host.isIpAddress()) {
-                                perGroupResolver[gid] = resolver
-                                perGroupServerHosts.getOrPut(gid) { mutableSetOf() }.add(host)
-                                hostResolvers.getOrPut(host) { mutableSetOf() }.add(resolver)
+                            // Record hosts of every chain hop owned by this subscription.
+                            profileList.forEach { hop ->
+                                if (hop.groupId == ownerGid) {
+                                    val host = serverHostOf(hop.requireBean())
+                                    if (host != null && !host.isIpAddress()) {
+                                        perGroupResolver[ownerGid] = resolver
+                                        perGroupServerHosts.getOrPut(ownerGid) { mutableSetOf() }
+                                            .add(host)
+                                        hostResolvers.getOrPut(host) { mutableSetOf() }.add(resolver)
+                                    }
+                                } else {
+                                    // hop from another (non-custom) group sharing this chain
+                                    val host = serverHostOf(hop.requireBean())
+                                    if (host != null && !host.isIpAddress()) {
+                                        nonCustomFinalHosts.add(host)
+                                    }
+                                }
+                            }
+                        } else {
+                            // No custom resolver for this chain: none of its hosts (any hop)
+                            // must be hijacked by another subscription's resolver.
+                            profileList.forEach { hop ->
+                                val host = serverHostOf(hop.requireBean())
+                                if (host != null && !host.isIpAddress()) {
+                                    nonCustomFinalHosts.add(host)
+                                }
                             }
                         }
                     }
@@ -894,6 +927,13 @@ fun buildConfig(
             outbounds.add(fragmentOutbound)
         }
 
+        // Per-subscription custom resolver (#71): a host is eligible for a dedicated resolver
+        // only when it maps to exactly one resolver AND is not shared with any non-custom
+        // profile. Otherwise it stays on the global direct DNS path.
+        fun isExclusiveCustomHost(host: String): Boolean {
+            return hostResolvers[host]?.size == 1 && !nonCustomFinalHosts.contains(host)
+        }
+
         // Bypass Lookup for the first profile
         bypassDNSBeans.forEach {
             var serverAddr = it.serverAddress
@@ -907,14 +947,10 @@ fun buildConfig(
             }
 
             if (!serverAddr.isIpAddress()) {
-                // Servers belonging to a subscription with a custom resolver are handled
-                // by a dedicated per-subscription DNS server/rule below, so keep them out
-                // of the global direct-DNS force list to avoid conflicting routing (#71).
-                // Only do this for hosts that map to exactly ONE resolver; if the same
-                // hostname is claimed by multiple subscriptions with different resolvers,
-                // routing is ambiguous, so keep it on the global direct path instead.
-                val unambiguousCustom = hostResolvers[serverAddr]?.size == 1
-                if (!unambiguousCustom) {
+                // Servers handled by a dedicated per-subscription resolver are kept out of the
+                // global direct-DNS force list to avoid conflicting routing (#71). Only do this
+                // for hosts exclusive to a single custom-resolver subscription.
+                if (!isExclusiveCustomHost(serverAddr)) {
                     domainListDNSDirectForce.add("full:${serverAddr}")
                 }
             }
@@ -1036,7 +1072,7 @@ fun buildConfig(
             // here (they stay on the global direct path).
             perGroupResolver.forEach { (gid, resolver) ->
                 val hosts = perGroupServerHosts[gid]
-                    ?.filter { it.isNotBlank() && hostResolvers[it]?.size == 1 }
+                    ?.filter { it.isNotBlank() && isExclusiveCustomHost(it) }
                     ?.map { "full:$it" }
                 if (hosts.isNullOrEmpty()) return@forEach
 
@@ -1046,7 +1082,10 @@ fun buildConfig(
                     tag = serverTag
                     detour = TAG_DIRECT
                     address_resolver = "dns-local"
-                    strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy(tag))
+                    // Reached via direct detour, so use the direct domain strategy (like
+                    // dns-direct), not the server strategy (the tag would otherwise fall into
+                    // the "server" arm of domainStrategy).
+                    strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct"))
                 })
                 dns.rules.add(0, DNSRule_DefaultOptions().apply {
                     makeSingBoxRule(hosts)
