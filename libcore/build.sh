@@ -32,15 +32,19 @@ for cand in ../../sing-box ../sing-box ../../../sing-box; do
 done
 SING_BOX_VERSION=""
 if [ -n "$SING_BOX_DIR" ]; then
+  # Ensure tags are present so read_tag / git describe can resolve a version.
+  git -C "$SING_BOX_DIR" fetch --tags --force origin 2>/dev/null || true
   SING_BOX_VERSION="$(cd "$SING_BOX_DIR" && CGO_ENABLED=0 go run ./cmd/internal/read_tag 2>/dev/null || true)"
-  if [ -z "$SING_BOX_VERSION" ]; then
+  # read_tag prints the literal "unknown" when it cannot resolve a tag; treat that
+  # (and empty) as failure and fall back to git describe.
+  if [ -z "$SING_BOX_VERSION" ] || [ "$SING_BOX_VERSION" = "unknown" ]; then
     SING_BOX_VERSION="$(git -C "$SING_BOX_DIR" describe --tags --always 2>/dev/null || true)"
   fi
 fi
 # Remove any stale generated file so a failed lookup falls back to constant's default
 # ("unknown") rather than a previous run's value.
 rm -f version_gen.go
-if [ -z "$SING_BOX_VERSION" ]; then
+if [ -z "$SING_BOX_VERSION" ] || [ "$SING_BOX_VERSION" = "unknown" ]; then
   echo ">> WARNING: could not determine sing-box version (dir='$SING_BOX_DIR'); About will show 'unknown'"
 else
   echo ">> sing-box version: $SING_BOX_VERSION (from '$SING_BOX_DIR')"
