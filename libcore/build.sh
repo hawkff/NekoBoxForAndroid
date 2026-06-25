@@ -31,12 +31,16 @@ for cand in ../../sing-box ../sing-box ../../../sing-box; do
   fi
 done
 SING_BOX_VERSION=""
-if [ -n "$SING_BOX_DIR" ]; then
-  # Ensure tags are present so read_tag / git describe can resolve a version.
+# Preferred source: explicit pin in get_source_env.sh (deterministic, no tag dependency).
+if [ -f ../buildScript/lib/core/get_source_env.sh ]; then
+  # shellcheck disable=SC1091
+  source ../buildScript/lib/core/get_source_env.sh 2>/dev/null || true
+  SING_BOX_VERSION="${VERSION_SING_BOX:-}"
+fi
+# Fallbacks if the pin is missing: read_tag, then git describe.
+if [ -z "$SING_BOX_VERSION" ] && [ -n "$SING_BOX_DIR" ]; then
   git -C "$SING_BOX_DIR" fetch --tags --force origin 2>/dev/null || true
   SING_BOX_VERSION="$(cd "$SING_BOX_DIR" && CGO_ENABLED=0 go run ./cmd/internal/read_tag 2>/dev/null || true)"
-  # read_tag prints the literal "unknown" when it cannot resolve a tag; treat that
-  # (and empty) as failure and fall back to git describe.
   if [ -z "$SING_BOX_VERSION" ] || [ "$SING_BOX_VERSION" = "unknown" ]; then
     SING_BOX_VERSION="$(git -C "$SING_BOX_DIR" describe --tags --always 2>/dev/null || true)"
   fi
