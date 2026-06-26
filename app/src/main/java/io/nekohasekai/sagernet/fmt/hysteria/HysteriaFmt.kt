@@ -190,7 +190,7 @@ fun HysteriaBean.toUri(): String {
 }
 
 fun JSONObject.parseHysteria1Json(): HysteriaBean {
-    // TODO parse HY2 JSON+YAML
+    // HY1 JSON (legacy). HY2 JSON is handled by parseHysteria2Json below.
     return HysteriaBean().apply {
         protocolVersion = 1
         serverAddress = optString("server").substringBeforeLast(":")
@@ -224,6 +224,60 @@ fun JSONObject.parseHysteria1Json(): HysteriaBean {
         streamReceiveWindow = getIntNya("recv_window_conn")
         connectionReceiveWindow = getIntNya("recv_window")
         disableMtuDiscovery = getBool("disable_mtu_discovery")
+    }
+}
+
+/**
+ * Parse a Hysteria 2 client config in JSON (or Clash/Mihomo-style) form into a HysteriaBean.
+ *
+ * Mirrors the official HY2 client config schema and the parseHysteria2(url) field mapping:
+ *   server: "host:port"            -> serverAddress / serverPorts
+ *   auth: "<string>"               -> authPayload (string type)
+ *   tls: { sni, insecure }         -> sni / allowInsecure
+ *   obfs: { type, salamander|gecko: { password, minPacketSize, maxPacketSize } } -> obfs fields
+ *   bandwidth: { up, down }        -> uploadMbps / downloadMbps (Mbps ints when numeric)
+ */
+fun JSONObject.parseHysteria2Json(): HysteriaBean {
+    return HysteriaBean().apply {
+        protocolVersion = 2
+        val server = optString("server")
+        serverAddress = server.substringBeforeLast(":")
+        serverPorts = server.substringAfterLast(":")
+        getStr("auth")?.also {
+            authPayloadType = HysteriaBean.TYPE_STRING
+            authPayload = it
+        }
+        // tls block (sni / insecure).
+        optJSONObject("tls")?.also { tls ->
+            tls.getStr("sni")?.also { sni = it }
+            tls.getBool("insecure")?.also { allowInsecure = it }
+        }
+        // obfs block: { type: "salamander"|"gecko", salamander: { password }, gecko: {...} }.
+        optJSONObject("obfs")?.also { obfs ->
+            when (obfs.getStr("type")?.lowercase()) {
+                "gecko" -> {
+                    hysteria2ObfsType = HysteriaBean.OBFS_GECKO
+                    obfs.optJSONObject("gecko")?.also { g ->
+                        g.getStr("password")?.also { obfuscation = it }
+                        g.getIntNya("min_packet_size")?.also { geckoMinPacketSize = it }
+                        g.getIntNya("max_packet_size")?.also { geckoMaxPacketSize = it }
+                    }
+                }
+
+                "salamander" -> {
+                    hysteria2ObfsType = HysteriaBean.OBFS_SALAMANDER
+                    obfs.optJSONObject("salamander")?.getStr("password")?.also { obfuscation = it }
+                }
+
+                else -> hysteria2ObfsType = HysteriaBean.OBFS_NONE
+            }
+        }
+        // bandwidth block (Mbps when the value is a bare integer).
+        optJSONObject("bandwidth")?.also { bw ->
+            bw.getIntNya("up")?.also { uploadMbps = it }
+            bw.getIntNya("down")?.also { downloadMbps = it }
+        }
+        name = optString("name").takeIf { it.isNotBlank() }
     }
 }
 
