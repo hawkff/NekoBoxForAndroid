@@ -34,6 +34,8 @@ import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
+import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 
 @Suppress("DEPRECATION")
 class QuickToggleShortcut : Activity(), SagerConnection.Callback {
@@ -77,27 +79,34 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
     }
 
     override fun onServiceConnected(service: ISagerNetService) {
-        // The "profile" extra comes from an untrusted launching intent (these shortcut
-        // activities are reachable by the launcher and by other apps). Only honor a profile
-        // id that resolves to a real profile in the DB; otherwise fall back to a plain toggle
-        // of the current profile, so a crafted intent cannot pin the user to an arbitrary id.
-        val validProfileId = profileId.takeIf { it >= 0L && SagerDatabase.proxyDao.getById(it) != null } ?: -1L
         val state = BaseService.State.values()[service.state]
-        when {
-            state.canStop -> {
-                if (validProfileId == DataStore.selectedProxy || validProfileId == -1L) {
-                    SagerNet.stopService()
-                } else {
-                    DataStore.selectedProxy = validProfileId
-                    SagerNet.reloadService()
+        // The "profile" extra comes from an untrusted launching intent (these shortcut
+        // activities are reachable by the launcher and by other apps). Validate it against the
+        // DB off the main thread, then apply the service action on the main thread. Only honor
+        // a profile id that resolves to a real profile; otherwise fall back to a plain toggle
+        // of the current profile, so a crafted intent cannot pin the user to an arbitrary id.
+        val requestedId = profileId
+        runOnDefaultDispatcher {
+            val validProfileId =
+                requestedId.takeIf { it >= 0L && SagerDatabase.proxyDao.getById(it) != null } ?: -1L
+            runOnMainDispatcher {
+                when {
+                    state.canStop -> {
+                        if (validProfileId == DataStore.selectedProxy || validProfileId == -1L) {
+                            SagerNet.stopService()
+                        } else {
+                            DataStore.selectedProxy = validProfileId
+                            SagerNet.reloadService()
+                        }
+                    }
+                    state == BaseService.State.Stopped -> {
+                        if (validProfileId >= 0L) DataStore.selectedProxy = validProfileId
+                        SagerNet.startService()
+                    }
                 }
-            }
-            state == BaseService.State.Stopped -> {
-                if (validProfileId >= 0L) DataStore.selectedProxy = validProfileId
-                SagerNet.startService()
+                finish()
             }
         }
-        finish()
     }
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {}
