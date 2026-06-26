@@ -33,6 +33,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SagerDatabase
 
 @Suppress("DEPRECATION")
 class QuickToggleShortcut : Activity(), SagerConnection.Callback {
@@ -76,18 +77,23 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
     }
 
     override fun onServiceConnected(service: ISagerNetService) {
+        // The "profile" extra comes from an untrusted launching intent (these shortcut
+        // activities are reachable by the launcher and by other apps). Only honor a profile
+        // id that resolves to a real profile in the DB; otherwise fall back to a plain toggle
+        // of the current profile, so a crafted intent cannot pin the user to an arbitrary id.
+        val validProfileId = profileId.takeIf { it >= 0L && SagerDatabase.proxyDao.getById(it) != null } ?: -1L
         val state = BaseService.State.values()[service.state]
         when {
             state.canStop -> {
-                if (profileId == DataStore.selectedProxy || profileId == -1L) {
+                if (validProfileId == DataStore.selectedProxy || validProfileId == -1L) {
                     SagerNet.stopService()
                 } else {
-                    DataStore.selectedProxy = profileId
+                    DataStore.selectedProxy = validProfileId
                     SagerNet.reloadService()
                 }
             }
             state == BaseService.State.Stopped -> {
-                if (profileId >= 0L) DataStore.selectedProxy = profileId
+                if (validProfileId >= 0L) DataStore.selectedProxy = validProfileId
                 SagerNet.startService()
             }
         }
