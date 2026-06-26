@@ -165,6 +165,8 @@ fun Project.setupApp() {
             versionCode = verCode
             versionName = verName
             buildConfigField("String", "PRE_VERSION_NAME", "\"\"")
+            // Runner for instrumented (androidTest) tests, e.g. the Room migration test.
+            testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
     }
     setupAppCommon()
