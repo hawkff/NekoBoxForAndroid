@@ -75,4 +75,20 @@ class HysteriaFmtTest {
         assertEquals(100, bean.geckoMinPacketSize)
         assertEquals(900, bean.geckoMaxPacketSize)
     }
+
+    @Test
+    fun parseHysteria2Json_bareHostDefaultsPort443() {
+        val bean = JSONObject("""{ "server": "example.com", "auth": "a" }""").parseHysteria2Json()
+        assertEquals("example.com", bean.serverAddress)
+        assertEquals("443", bean.serverPorts)
+    }
+
+    @Test
+    fun parseHysteria2Json_bandwidthStringUnits() {
+        val bean = JSONObject(
+            """{ "server": "h:443", "auth": "a", "bandwidth": { "up": "100 mbps", "down": "1 gbps" } }"""
+        ).parseHysteria2Json()
+        assertEquals(100, bean.uploadMbps)
+        assertEquals(1000, bean.downloadMbps)
+    }
 }

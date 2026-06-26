@@ -1094,10 +1094,10 @@ object RawUpdater : GroupUpdater() {
                     return listOf(json.parseHysteria1Json())
                 }
 
-                // HY2 client config: server + a string auth, distinguished from HY1 by the
-                // HY2-only blocks (tls/obfs/bandwidth) and the absence of HY1's up/up_mbps.
-                json.has("server") && json.has("auth") &&
-                    (json.has("tls") || json.has("obfs") || json.has("bandwidth")) -> {
+                // HY2 client config: server + a string auth. Distinguished from HY1 by the
+                // absence of HY1's up/up_mbps (tls/obfs/bandwidth are optional in HY2).
+                json.has("server") && json.getStr("auth") != null &&
+                    !json.has("up") && !json.has("up_mbps") -> {
                     return listOf(json.parseHysteria2Json())
                 }
 

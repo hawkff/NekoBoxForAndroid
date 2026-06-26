@@ -241,8 +241,18 @@ fun JSONObject.parseHysteria2Json(): HysteriaBean {
     return HysteriaBean().apply {
         protocolVersion = 2
         val server = optString("server")
-        serverAddress = server.substringBeforeLast(":")
-        serverPorts = server.substringAfterLast(":")
+        // Only split off a port when there's an explicit one. A bare host or an IPv6 literal
+        // without a port must keep the whole string as the address (default port 443),
+        // matching parseHysteria2(url)'s HttpUrl behavior.
+        val lastColon = server.lastIndexOf(':')
+        val portPart = if (lastColon >= 0) server.substring(lastColon + 1) else ""
+        if (lastColon >= 0 && portPart.toIntOrNull() != null && !server.endsWith("]")) {
+            serverAddress = server.substring(0, lastColon)
+            serverPorts = portPart
+        } else {
+            serverAddress = server
+            serverPorts = "443"
+        }
         getStr("auth")?.also {
             authPayloadType = HysteriaBean.TYPE_STRING
             authPayload = it
@@ -272,13 +282,31 @@ fun JSONObject.parseHysteria2Json(): HysteriaBean {
                 else -> hysteria2ObfsType = HysteriaBean.OBFS_NONE
             }
         }
-        // bandwidth block (Mbps when the value is a bare integer).
+        // bandwidth block: accept a bare integer (Mbps) or a unit-suffixed string ("100 mbps",
+        // "1 gbps"), normalizing to Mbps. HY2 configs commonly use the string form.
         optJSONObject("bandwidth")?.also { bw ->
-            bw.getIntNya("up")?.also { uploadMbps = it }
-            bw.getIntNya("down")?.also { downloadMbps = it }
+            parseBandwidthMbps(bw, "up")?.also { uploadMbps = it }
+            parseBandwidthMbps(bw, "down")?.also { downloadMbps = it }
         }
         name = optString("name").takeIf { it.isNotBlank() }
     }
+}
+
+/** Read a HY2 bandwidth value as Mbps: a bare int, or a unit-suffixed string (bps/kbps/mbps/gbps/tbps). */
+private fun parseBandwidthMbps(obj: JSONObject, key: String): Int? {
+    obj.getIntNya(key)?.let { return it }
+    val raw = obj.getStr(key)?.trim()?.lowercase() ?: return null
+    val match = Regex("""^(\d+(?:\.\d+)?)\s*([a-z]*)$""").matchEntire(raw) ?: return null
+    val value = match.groupValues[1].toDoubleOrNull() ?: return null
+    val mbps = when (match.groupValues[2]) {
+        "", "mbps", "m" -> value
+        "bps", "b" -> value / 1_000_000.0
+        "kbps", "k" -> value / 1_000.0
+        "gbps", "g" -> value * 1_000.0
+        "tbps", "t" -> value * 1_000_000.0
+        else -> return null
+    }
+    return mbps.toInt().coerceAtLeast(0)
 }
 
 fun HysteriaBean.buildHysteria1Config(port: Int, cacheFile: (() -> File)?): String {
