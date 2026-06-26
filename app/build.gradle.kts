@@ -102,6 +102,13 @@ dependencies {
     ksp("androidx.room:room-compiler:2.7.2")
     implementation("androidx.room:room-ktx:2.7.2")
 
+    // Unit tests (pure-JVM, run via :app:testOssDebugUnitTest — no device/libcore needed).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    // Robolectric is available for tests that must touch Android framework classes;
+    // prefer extracting pure functions over using it (see Plan 007).
+    testImplementation("org.robolectric:robolectric:4.13")
+
     // Instrumented tests (androidTest) — Room migration verification on a real SQLite.
     // Runs on a device/emulator (see .depot/workflows/android-instrumented.yml), not the JVM.
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
