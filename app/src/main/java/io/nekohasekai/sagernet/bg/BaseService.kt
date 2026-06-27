@@ -91,14 +91,18 @@ class BaseService {
         val binder = Binder(this)
         var connectingJob: Job? = null
 
-        // Bumped on every state transition. An async reload() captures this at entry and bails if
-        // it advanced (a stop/start raced the reload) so a stale reload can't revive a stopped
-        // service. ABA-safe (monotonic).
-        val lifecycleGeneration = AtomicLong(0)
+        // Bumped only when the service transitions into a stop (Stopping/Stopped). An async
+        // reload() captures this at entry and bails in reloadInner() if it advanced, so a stop
+        // that raced the async refresh can't revive a stopped service. Crucially this does NOT
+        // bump on Connecting->Connected progress, so a legitimate reload/profile-switch issued
+        // while connecting is not falsely dropped. ABA-safe (monotonic).
+        val stopGeneration = AtomicLong(0)
 
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
-            lifecycleGeneration.incrementAndGet()
+            if (s == State.Stopping || s == State.Stopped) {
+                stopGeneration.incrementAndGet()
+            }
             state = s
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
@@ -200,17 +204,18 @@ class BaseService {
             // config store + profile DB. The IPC-carried profileId (when >= 0) is authoritative
             // for the freshly-selected profile so we don't depend on the UI's async write-through
             // DB commit having landed yet.
-            // Capture the lifecycle generation now (on the receiver thread) so a stop/start that
-            // races the async refresh below makes reloadInner() a no-op instead of reviving a
-            // stopped service.
-            val reloadGeneration = data.lifecycleGeneration.get()
+            // Capture the stop generation now (on the receiver thread) so a stop that races the
+            // async refresh below makes reloadInner() a no-op instead of reviving a stopped
+            // service. This does NOT trip on Connecting->Connected progress, so a reload issued
+            // while connecting still applies.
+            val reloadStopGeneration = data.stopGeneration.get()
             runOnDefaultDispatcher {
                 try {
                     DataStore.configurationStore.refreshSuspend()
                     if (profileId >= 0L && SagerDatabase.proxyDao.getById(profileId) != null) {
                         DataStore.selectedProxy = profileId
                     }
-                    onMainDispatcher { reloadInner(reloadGeneration) }
+                    onMainDispatcher { reloadInner(reloadStopGeneration) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -225,10 +230,11 @@ class BaseService {
             }
         }
 
-        private fun reloadInner(reloadGeneration: Long) {
-            // A stop (or stop+start) raced the async refresh: drop this stale reload so it can't
-            // restart a service the user stopped, or act on a superseded state.
-            if (data.lifecycleGeneration.get() != reloadGeneration) return
+        private fun reloadInner(reloadStopGeneration: Long) {
+            // A stop raced the async refresh: drop this stale reload so it can't restart a service
+            // the user stopped. (A Connecting->Connected transition does NOT bump stopGeneration,
+            // so an in-flight legitimate reload still applies.)
+            if (data.stopGeneration.get() != reloadStopGeneration) return
             if (DataStore.selectedProxy == 0L) {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
             }

@@ -5,6 +5,7 @@ import androidx.room.InvalidationTracker
 import androidx.room.RoomDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -140,11 +141,13 @@ open class RoomPreferenceDataStore(
             latch.await()
             error[0]?.let { throw it } // do not mark primed on a failed load (no silent empty cache)
             val dbRows = holder[0] ?: emptyMap()
-            // Apply the same reset-generation + pending-overlay logic as doRefresh under writeLock
-            // so a put*/reset that raced the load is neither rolled back nor resurrected.
-            val resetIntervened = resetGeneration.get() != resetGenAtSchedule
-            val built = if (resetIntervened) HashMap<String, CachedValue>() else HashMap(dbRows)
+            // Apply the same reset-generation + pending-overlay logic as doRefresh under writeLock.
+            // The reset re-check MUST be inside the lock so a reset() that takes writeLock after
+            // the SELECT but before the swap is detected here (otherwise we'd resurrect cleared
+            // rows after reset() returned).
             synchronized(writeLock) {
+                val resetIntervened = resetGeneration.get() != resetGenAtSchedule
+                val built = if (resetIntervened) HashMap<String, CachedValue>() else HashMap(dbRows)
                 synchronized(pendingLock) {
                     for ((k, p) in pendingWrites) {
                         if (p.value == null) built.remove(k) else built[k] = p.value
@@ -196,18 +199,19 @@ open class RoomPreferenceDataStore(
         // pending overlay below reapply any post-reset local writes.
         val resetGenAtStart = resetGeneration.get()
         val dbRows = buildSnapshot()
-        val resetGenAfterRead = resetGeneration.get()
-        val resetIntervened =
-            resetGenAfterRead != resetGenAtSchedule || resetGenAfterRead != resetGenAtStart
-        val refreshed = if (resetIntervened) {
-            HashMap<String, CachedValue>()
-        } else {
-            dbRows.toMutableMap()
-        }
-        // Serialize the overlay-apply + snapshot swap with writeLock so a concurrent cacheWrite()
-        // cannot land between reading pendingWrites and assigning snapshot (which would roll the
-        // just-written value back).
+        // Serialize the reset re-check + overlay-apply + snapshot swap under writeLock. The final
+        // resetGeneration read MUST happen inside the lock so a reset() that takes writeLock after
+        // we read the DB but before we swap is detected here (otherwise we'd overwrite the
+        // cleared snapshot with stale rows).
         synchronized(writeLock) {
+            val resetGenAtSwap = resetGeneration.get()
+            val resetIntervened =
+                resetGenAtSwap != resetGenAtSchedule || resetGenAtSwap != resetGenAtStart
+            val refreshed = if (resetIntervened) {
+                HashMap<String, CachedValue>()
+            } else {
+                dbRows.toMutableMap()
+            }
             synchronized(pendingLock) {
                 for ((k, p) in pendingWrites) {
                     if (p.value == null) refreshed.remove(k) else refreshed[k] = p.value
@@ -233,16 +237,25 @@ open class RoomPreferenceDataStore(
      */
     suspend fun awaitWrites() {
         if (!cached) return
+        // Capture the write generation BEFORE the barrier. Every put*/remove issued before this
+        // call has a pending-overlay entry with gen <= awaitGen; a SUCCESSFUL persist removes it.
+        // Because the disk executor is a single ordered worker, after the barrier task runs every
+        // such persist has executed, so any pending entry still present with gen <= awaitGen is a
+        // write that FAILED to commit. That is the authoritative durability signal.
+        val awaitGen = generation.get()
         withContext(Dispatchers.IO) {
             val latch = CountDownLatch(1)
             diskExecutor.execute { latch.countDown() }
             latch.await()
-            // Surface any write-through failure that occurred in a prior persist() so callers do
-            // not proceed to a cross-process reload that would re-read stale DB rows. Non-destructive
-            // read: the latch only barriers writes enqueued before it, and clearing here would let a
-            // concurrent awaitWrites() caller miss the failure. The flag is cleared by a later
-            // SUCCESSFUL persist (see persist()), which is the real proof the DB is consistent again.
-            writeThroughError.get()?.let { throw it }
+            val leftover = synchronized(pendingLock) {
+                pendingWrites.values.any { it.gen <= awaitGen }
+            }
+            if (leftover) {
+                throw (
+                    writeThroughError.get()
+                        ?: IOException("preference write-through did not commit")
+                    )
+            }
         }
     }
 

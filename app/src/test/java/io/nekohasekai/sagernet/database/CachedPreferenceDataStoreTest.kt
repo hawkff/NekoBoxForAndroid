@@ -182,6 +182,38 @@ class CachedPreferenceDataStoreTest {
     }
 
     @Test
+    fun awaitWrites_failedWriteNotMaskedByLaterUnrelatedSuccess() {
+        // DAO that fails to persist key "bad" but succeeds for every other key.
+        val dao = object : KeyValuePair.Dao {
+            val rows = LinkedHashMap<String, KeyValuePair>()
+            override fun all(): List<KeyValuePair> = rows.values.map { it.deepCopy() }
+            override fun get(key: String): KeyValuePair? = rows[key]?.deepCopy()
+            override fun put(value: KeyValuePair): Long {
+                if (value.key == "bad") throw IllegalStateException("disk full for bad")
+                rows[value.key] = value.deepCopy()
+                return 1
+            }
+            override fun delete(key: String): Int = if (rows.remove(key) != null) 1 else 0
+            override fun reset(): Int {
+                rows.clear()
+                return 0
+            }
+            override fun insert(list: List<KeyValuePair>) {
+                list.forEach { rows[it.key] = it.deepCopy() }
+            }
+        }
+        val store =
+            RoomPreferenceDataStore(dao, cached = true, database = null, diskExecutor = directExecutor)
+        store.prime()
+
+        store.putString("bad", "v") // fails to persist; pending overlay retained
+        store.putString("good", "ok") // later UNRELATED successful write
+        // awaitWrites() must still fail: the "bad" write never reached disk, so a reload would
+        // re-read a stale DB. A successful unrelated write must not mask it.
+        assertThrows(Exception::class.java) { runBlocking { store.awaitWrites() } }
+    }
+
+    @Test
     fun uncachedMode_passesThroughToDao() {
         val dao = FakeDao()
         val store = RoomPreferenceDataStore(dao) // cached = false
