@@ -11,6 +11,7 @@ import io.nekohasekai.sagernet.fmt.TAG_PROXY
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 
 class TrafficLooper(
     val data: BaseService.Data,
