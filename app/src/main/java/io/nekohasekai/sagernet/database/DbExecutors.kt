@@ -17,17 +17,19 @@ import java.util.concurrent.atomic.AtomicInteger
  * letting the queue grow without bound. Threads are daemon + named for diagnostics.
  */
 internal object DbExecutors {
+    private val threadCount = AtomicInteger(0)
+
+    private val threadFactory = ThreadFactory { runnable ->
+        Thread(runnable, "room-db-${threadCount.incrementAndGet()}").apply { isDaemon = true }
+    }
+
     val query: Executor = ThreadPoolExecutor(
         2,
         2,
         30L,
         TimeUnit.SECONDS,
         ArrayBlockingQueue(256),
-        object : ThreadFactory {
-            private val n = AtomicInteger(0)
-            override fun newThread(r: Runnable) =
-                Thread(r, "room-db-${n.incrementAndGet()}").apply { isDaemon = true }
-        },
+        threadFactory,
         ThreadPoolExecutor.CallerRunsPolicy(),
     ).apply { allowCoreThreadTimeOut(true) }
 }
