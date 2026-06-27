@@ -48,4 +48,26 @@ class BoundedReadTest {
             ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)).readTextBounded(limit = 1024)
         }
     }
+
+    /**
+     * Mirrors the ConfigurationFragment WireGuard-zip loop, which caps each entry at the
+     * REMAINING budget so cumulative decompressed bytes across entries can never exceed the
+     * total cap (defeats a many-entry zip bomb). Verifies the remaining-budget arithmetic and
+     * that the entry overflowing the cumulative cap is the one that throws.
+     */
+    @Test
+    fun cumulativeRemainingBudgetEnforcedAcrossEntries() {
+        val total = 4096L
+        var remaining = total
+        // Two entries, each 1500 bytes: both fit (3000 <= 4096).
+        repeat(2) {
+            val bytes = ByteArrayInputStream(ByteArray(1500)).readBytesBounded(remaining)
+            remaining -= bytes.size
+        }
+        assertEquals(1096L, remaining)
+        // A third 1500-byte entry exceeds the remaining 1096-byte budget -> throws.
+        assertThrows(ImportTooLargeException::class.java) {
+            ByteArrayInputStream(ByteArray(1500)).readBytesBounded(remaining)
+        }
+    }
 }

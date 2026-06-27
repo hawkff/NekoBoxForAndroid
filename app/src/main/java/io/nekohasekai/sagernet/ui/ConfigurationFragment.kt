@@ -69,7 +69,6 @@ import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.RawUpdater
 import io.nekohasekai.sagernet.ktx.FixedGridLayoutManager
 import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
-import io.nekohasekai.sagernet.ktx.ImportTooLargeException
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.MAX_IMPORT_BYTES
 import io.nekohasekai.sagernet.ktx.SubscriptionFoundException
@@ -343,15 +342,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                             ZipInputStream(
                                 requireContext().contentResolver.openInputStream(file)!!,
                             ).use { zip ->
-                                var total = 0L
+                                var remaining = MAX_IMPORT_BYTES
                                 while (true) {
                                     val entry = zip.nextEntry ?: break
                                     if (entry.isDirectory) continue
-                                    val bytes = zip.readBytesBounded(MAX_IMPORT_BYTES)
-                                    total += bytes.size
-                                    if (total > MAX_IMPORT_BYTES) {
-                                        throw ImportTooLargeException(MAX_IMPORT_BYTES)
-                                    }
+                                    // Cap each entry at the REMAINING budget so cumulative
+                                    // decompressed bytes across all entries can never exceed
+                                    // MAX_IMPORT_BYTES (defeats a many-entry zip bomb).
+                                    val bytes = zip.readBytesBounded(remaining)
+                                    remaining -= bytes.size
                                     RawUpdater.parseRaw(bytes.toString(Charsets.UTF_8), entry.name)
                                         ?.let { pl -> proxies.addAll(pl) }
                                     zip.closeEntry()
