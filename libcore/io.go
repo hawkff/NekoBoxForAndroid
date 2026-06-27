@@ -2,32 +2,59 @@ package libcore
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"os"
-        "path/filepath"
+	"path/filepath"
 
-	"github.com/ulikunitz/xz"
 	"github.com/sagernet/sing/common"
-        E "github.com/sagernet/sing/common/exceptions"
+	E "github.com/sagernet/sing/common/exceptions"
+	"github.com/ulikunitz/xz"
 )
 
-func Unxz(archive string, path string) error {
+const defaultUnxzFileLimit = 256 * 1024 * 1024
+
+func Unxz(archive string, path string) (err error) {
 	i, err := os.Open(archive)
 	if err != nil {
 		return err
 	}
+	defer i.Close()
+
 	r, err := xz.NewReader(i)
 	if err != nil {
-		i.Close()
 		return err
 	}
-	o, err := os.Create(path)
+
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	o, err := os.CreateTemp(dir, base+".*.tmp")
 	if err != nil {
-		i.Close()
 		return err
 	}
-	_, err = io.Copy(o, r)
-	i.Close()
+	tmpPath := o.Name()
+	if err = o.Chmod(0666); err != nil {
+		_ = o.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	defer func() {
+		if closeErr := o.Close(); err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(tmpPath, path)
+		}
+	}()
+
+	_, err = copyLimited(o, r, defaultUnxzFileLimit)
 	return err
 }
 
