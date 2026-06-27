@@ -28,7 +28,9 @@ class TrafficLooper(
     private val selectChannel = Channel<Long>(Channel.CONFLATED)
 
     suspend fun stop() {
-        job?.cancel()
+        // cancelAndJoin (not cancel): wait for the loop coroutine to actually finish before the
+        // final flush, so persist() reads idMap/tagMap only after the loop stops mutating them.
+        job?.cancelAndJoin()
         selectChannel.close()
         // finally traffic post
         persist()
