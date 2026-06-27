@@ -124,7 +124,6 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                     binding.backupRules.isChecked,
                     binding.backupSettings.isChecked,
                 )
-                app.cacheDir.mkdirs()
                 val shareDir = File(app.cacheDir, "share").apply { mkdirs() }
                 val cacheFile = File(
                     shareDir,
