@@ -120,6 +120,11 @@ open class RoomPreferenceDataStore(
         if (!cached || primed) return
         synchronized(primeLock) {
             if (primed) return
+            // Register the invalidation observer BEFORE the bulk SELECT so a cross-process write
+            // that lands between the SELECT and observer registration still schedules a refresh
+            // (otherwise that write would be silently missed until the next local write/refresh).
+            registerObserver()
+            val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
             val latch = CountDownLatch(1)
             val holder = arrayOfNulls<Map<String, CachedValue>>(1)
             val error = arrayOfNulls<Throwable>(1)
@@ -134,9 +139,20 @@ open class RoomPreferenceDataStore(
             }
             latch.await()
             error[0]?.let { throw it } // do not mark primed on a failed load (no silent empty cache)
-            snapshot = holder[0] ?: emptyMap()
-            primed = true
-            registerObserver()
+            val dbRows = holder[0] ?: emptyMap()
+            // Apply the same reset-generation + pending-overlay logic as doRefresh under writeLock
+            // so a put*/reset that raced the load is neither rolled back nor resurrected.
+            val resetIntervened = resetGeneration.get() != resetGenAtSchedule
+            val built = if (resetIntervened) HashMap<String, CachedValue>() else HashMap(dbRows)
+            synchronized(writeLock) {
+                synchronized(pendingLock) {
+                    for ((k, p) in pendingWrites) {
+                        if (p.value == null) built.remove(k) else built[k] = p.value
+                    }
+                }
+                snapshot = built
+                primed = true
+            }
         }
     }
 
@@ -222,8 +238,11 @@ open class RoomPreferenceDataStore(
             diskExecutor.execute { latch.countDown() }
             latch.await()
             // Surface any write-through failure that occurred in a prior persist() so callers do
-            // not proceed to a cross-process reload that would re-read stale DB rows.
-            writeThroughError.getAndSet(null)?.let { throw it }
+            // not proceed to a cross-process reload that would re-read stale DB rows. Non-destructive
+            // read: the latch only barriers writes enqueued before it, and clearing here would let a
+            // concurrent awaitWrites() caller miss the failure. The flag is cleared by a later
+            // SUCCESSFUL persist (see persist()), which is the real proof the DB is consistent again.
+            writeThroughError.get()?.let { throw it }
         }
     }
 
@@ -279,6 +298,9 @@ open class RoomPreferenceDataStore(
                 // newer write for this key superseded it. On failure the overlay is kept so a
                 // later refresh can't roll the snapshot back to the un-persisted value.
                 if (persisted) {
+                    // A successful commit proves the DB is writable again: clear any latched
+                    // write-through error so awaitWrites() stops failing.
+                    writeThroughError.set(null)
                     synchronized(pendingLock) {
                         if (pendingWrites[key]?.gen == gen) pendingWrites.remove(key)
                     }

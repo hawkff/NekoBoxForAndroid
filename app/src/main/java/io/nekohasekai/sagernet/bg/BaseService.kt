@@ -28,6 +28,7 @@ import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.utils.Util
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 class BaseService {
 
@@ -90,8 +91,14 @@ class BaseService {
         val binder = Binder(this)
         var connectingJob: Job? = null
 
+        // Bumped on every state transition. An async reload() captures this at entry and bails if
+        // it advanced (a stop/start raced the reload) so a stale reload can't revive a stopped
+        // service. ABA-safe (monotonic).
+        val lifecycleGeneration = AtomicLong(0)
+
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
+            lifecycleGeneration.incrementAndGet()
             state = s
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
@@ -193,13 +200,19 @@ class BaseService {
             // config store + profile DB. The IPC-carried profileId (when >= 0) is authoritative
             // for the freshly-selected profile so we don't depend on the UI's async write-through
             // DB commit having landed yet.
+            // Capture the lifecycle generation now (on the receiver thread) so a stop/start that
+            // races the async refresh below makes reloadInner() a no-op instead of reviving a
+            // stopped service.
+            val reloadGeneration = data.lifecycleGeneration.get()
             runOnDefaultDispatcher {
                 try {
                     DataStore.configurationStore.refreshSuspend()
                     if (profileId >= 0L && SagerDatabase.proxyDao.getById(profileId) != null) {
                         DataStore.selectedProxy = profileId
                     }
-                    onMainDispatcher { reloadInner() }
+                    onMainDispatcher { reloadInner(reloadGeneration) }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Logs.w(e)
                     onMainDispatcher {
@@ -212,7 +225,10 @@ class BaseService {
             }
         }
 
-        private fun reloadInner() {
+        private fun reloadInner(reloadGeneration: Long) {
+            // A stop (or stop+start) raced the async refresh: drop this stale reload so it can't
+            // restart a service the user stopped, or act on a superseded state.
+            if (data.lifecycleGeneration.get() != reloadGeneration) return
             if (DataStore.selectedProxy == 0L) {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
             }
@@ -408,6 +424,8 @@ class BaseService {
                         // tracked job once the inner connect job exists.
                         data.connectingJob = onStartConnect(profile)
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Logs.w(e)
                     onMainDispatcher {

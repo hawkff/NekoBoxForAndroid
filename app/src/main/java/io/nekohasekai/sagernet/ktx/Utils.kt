@@ -269,7 +269,18 @@ fun Fragment.startFilesForResult(launcher: ActivityResultLauncher<String>, input
 fun Fragment.needReload() {
     if (DataStore.serviceState.started) {
         snackbar(getString(R.string.need_reload)).setAction(R.string.apply) {
-            SagerNet.reloadService()
+            // Drain the cached settings store's async write-through commits before telling :bg to
+            // reload, so the service re-reads the just-changed setting from a durable DB rather
+            // than a stale row.
+            runOnDefaultDispatcher {
+                try {
+                    DataStore.configurationStore.awaitWrites()
+                    SagerNet.reloadService()
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher { snackbar(getString(R.string.service_failed)).show() }
+                }
+            }
         }.show()
     }
 }
