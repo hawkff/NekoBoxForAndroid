@@ -125,17 +125,22 @@ open class RoomPreferenceDataStore(
             // that lands between the SELECT and observer registration still schedules a refresh
             // (otherwise that write would be silently missed until the next local write/refresh).
             registerObserver()
-            val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
             val latch = CountDownLatch(1)
             val holder = arrayOfNulls<Map<String, CachedValue>>(1)
             val error = arrayOfNulls<Throwable>(1)
-            diskExecutor.execute {
-                try {
-                    holder[0] = buildSnapshot()
-                } catch (t: Throwable) {
-                    error[0] = t
-                } finally {
-                    latch.countDown()
+            // Capture resetGen + submit the SELECT under writeLock so it is ordered consistently
+            // with concurrent writes/resets (all of which submit under writeLock).
+            val resetGenAtSchedule: Long
+            synchronized(writeLock) {
+                resetGenAtSchedule = resetGeneration.get()
+                diskExecutor.execute {
+                    try {
+                        holder[0] = buildSnapshot()
+                    } catch (t: Throwable) {
+                        error[0] = t
+                    } finally {
+                        latch.countDown()
+                    }
                 }
             }
             latch.await()
@@ -183,13 +188,14 @@ open class RoomPreferenceDataStore(
     private fun scheduleRefresh() {
         if (!cached) return
         if (!refreshScheduled.compareAndSet(false, true)) return
-        // Capture the reset generation at enqueue time so a reset() that committed its bump
-        // BEFORE this refresh task starts is still detected (the in-task recheck only catches a
-        // reset that races the DB read itself).
-        val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
-        diskExecutor.execute {
-            refreshScheduled.set(false)
-            doRefresh(resetGenAtSchedule)
+        // Capture the reset generation and enqueue the refresh task under writeLock so the submit
+        // is ordered consistently with concurrent writes/resets (which also submit under writeLock).
+        synchronized(writeLock) {
+            val resetGenAtSchedule = resetGeneration.get()
+            diskExecutor.execute {
+                refreshScheduled.set(false)
+                doRefresh(resetGenAtSchedule)
+            }
         }
     }
 
@@ -242,10 +248,15 @@ open class RoomPreferenceDataStore(
         // Because the disk executor is a single ordered worker, after the barrier task runs every
         // such persist has executed, so any pending entry still present with gen <= awaitGen is a
         // write that FAILED to commit. That is the authoritative durability signal.
-        val awaitGen = generation.get()
-        withContext(Dispatchers.IO) {
-            val latch = CountDownLatch(1)
+        val awaitGen: Long
+        val latch = CountDownLatch(1)
+        // Capture the generation and submit the barrier under writeLock so the barrier is enqueued
+        // strictly after every write with gen <= awaitGen (writes also submit under writeLock).
+        synchronized(writeLock) {
+            awaitGen = generation.get()
             diskExecutor.execute { latch.countDown() }
+        }
+        withContext(Dispatchers.IO) {
             latch.await()
             val leftover = synchronized(pendingLock) {
                 pendingWrites.values.any { it.gen <= awaitGen }
@@ -269,53 +280,56 @@ open class RoomPreferenceDataStore(
     fun refreshBlocking() {
         if (!cached) return
         ensureLoaded()
-        val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
         val latch = CountDownLatch(1)
         val error = arrayOfNulls<Throwable>(1)
-        diskExecutor.execute {
-            try {
-                doRefresh(resetGenAtSchedule)
-            } catch (t: Throwable) {
-                error[0] = t
-            } finally {
-                latch.countDown()
+        // Capture resetGen + submit under writeLock so the refresh is ordered consistently with
+        // concurrent writes/resets (all of which submit under writeLock).
+        synchronized(writeLock) {
+            val resetGenAtSchedule = resetGeneration.get()
+            diskExecutor.execute {
+                try {
+                    doRefresh(resetGenAtSchedule)
+                } catch (t: Throwable) {
+                    error[0] = t
+                } finally {
+                    latch.countDown()
+                }
             }
         }
         latch.await()
         error[0]?.let { throw it }
     }
 
-    // Apply a local write to the snapshot + pending overlay synchronously, then persist off-main.
-    private fun cacheWrite(key: String, value: CachedValue?): Long {
+    // Apply a local write to the snapshot + pending overlay AND enqueue the off-main DB persist,
+    // all under writeLock. Holding the lock across the executor submit is essential: it keeps the
+    // executor submission order consistent with `generation`, so an awaitWrites() barrier or a
+    // reset() (which also submit under writeLock) can never be enqueued between the pending-overlay
+    // update and the DB write (which would break the durability/ordering guarantees).
+    private fun writeThrough(key: String, value: CachedValue?, kv: KeyValuePair?) {
         synchronized(writeLock) {
             val gen = generation.incrementAndGet()
             val next = HashMap(snapshot)
             if (value == null) next.remove(key) else next[key] = value
             snapshot = next
             synchronized(pendingLock) { pendingWrites[key] = Pending(value, gen) }
-            return gen
-        }
-    }
-
-    private fun persist(key: String, kv: KeyValuePair?, gen: Long) {
-        diskExecutor.execute {
-            var persisted = false
-            try {
-                if (kv == null) kvPairDao.delete(key) else kvPairDao.put(kv)
-                persisted = true
-            } catch (t: Throwable) {
-                // Record the first write-through failure so awaitWrites() can surface it.
-                writeThroughError.compareAndSet(null, t)
-            } finally {
-                // Drop the pending overlay entry only after a SUCCESSFUL DB write and only if no
-                // newer write for this key superseded it. On failure the overlay is kept so a
-                // later refresh can't roll the snapshot back to the un-persisted value.
-                if (persisted) {
-                    // A successful commit proves the DB is writable again: clear any latched
-                    // write-through error so awaitWrites() stops failing.
-                    writeThroughError.set(null)
-                    synchronized(pendingLock) {
-                        if (pendingWrites[key]?.gen == gen) pendingWrites.remove(key)
+            diskExecutor.execute {
+                var persisted = false
+                try {
+                    if (kv == null) kvPairDao.delete(key) else kvPairDao.put(kv)
+                    persisted = true
+                } catch (t: Throwable) {
+                    // Record the first write-through failure so awaitWrites() can surface a cause.
+                    writeThroughError.compareAndSet(null, t)
+                } finally {
+                    // Drop the pending overlay entry only after a SUCCESSFUL DB write and only if no
+                    // newer write for this key superseded it. On failure the overlay is kept so a
+                    // later refresh can't roll the snapshot back to the un-persisted value, and
+                    // awaitWrites() (which checks for leftover pending entries) still fails.
+                    if (persisted) {
+                        writeThroughError.set(null)
+                        synchronized(pendingLock) {
+                            if (pendingWrites[key]?.gen == gen) pendingWrites.remove(key)
+                        }
                     }
                 }
             }
@@ -385,8 +399,7 @@ open class RoomPreferenceDataStore(
 
     override fun putBoolean(key: String, value: Boolean) {
         if (cached) {
-            val gen = cacheWrite(key, CachedValue.Bool(value))
-            persist(key, KeyValuePair(key).put(value), gen)
+            writeThrough(key, CachedValue.Bool(value), KeyValuePair(key).put(value))
         } else {
             kvPairDao.put(KeyValuePair(key).put(value))
         }
@@ -395,8 +408,7 @@ open class RoomPreferenceDataStore(
 
     override fun putFloat(key: String, value: Float) {
         if (cached) {
-            val gen = cacheWrite(key, CachedValue.Flt(value))
-            persist(key, KeyValuePair(key).put(value), gen)
+            writeThrough(key, CachedValue.Flt(value), KeyValuePair(key).put(value))
         } else {
             kvPairDao.put(KeyValuePair(key).put(value))
         }
@@ -405,8 +417,7 @@ open class RoomPreferenceDataStore(
 
     override fun putInt(key: String, value: Int) {
         if (cached) {
-            val gen = cacheWrite(key, CachedValue.Lng(value.toLong()))
-            persist(key, KeyValuePair(key).put(value.toLong()), gen)
+            writeThrough(key, CachedValue.Lng(value.toLong()), KeyValuePair(key).put(value.toLong()))
         } else {
             kvPairDao.put(KeyValuePair(key).put(value.toLong()))
         }
@@ -415,8 +426,7 @@ open class RoomPreferenceDataStore(
 
     override fun putLong(key: String, value: Long) {
         if (cached) {
-            val gen = cacheWrite(key, CachedValue.Lng(value))
-            persist(key, KeyValuePair(key).put(value), gen)
+            writeThrough(key, CachedValue.Lng(value), KeyValuePair(key).put(value))
         } else {
             kvPairDao.put(KeyValuePair(key).put(value))
         }
@@ -427,8 +437,7 @@ open class RoomPreferenceDataStore(
         remove(key)
     } else {
         if (cached) {
-            val gen = cacheWrite(key, CachedValue.Str(value))
-            persist(key, KeyValuePair(key).put(value), gen)
+            writeThrough(key, CachedValue.Str(value), KeyValuePair(key).put(value))
         } else {
             kvPairDao.put(KeyValuePair(key).put(value))
         }
@@ -442,8 +451,7 @@ open class RoomPreferenceDataStore(
             // One defensive copy reused for both the cached snapshot value and the DB write, so
             // neither aliases the caller's mutable set.
             val copy = HashSet(values)
-            val gen = cacheWrite(key, CachedValue.StrSet(copy))
-            persist(key, KeyValuePair(key).put(copy), gen)
+            writeThrough(key, CachedValue.StrSet(copy), KeyValuePair(key).put(copy))
         } else {
             kvPairDao.put(KeyValuePair(key).put(values))
         }
@@ -452,8 +460,7 @@ open class RoomPreferenceDataStore(
 
     fun remove(key: String) {
         if (cached) {
-            val gen = cacheWrite(key, null)
-            persist(key, null, gen)
+            writeThrough(key, null, null)
         } else {
             kvPairDao.delete(key)
         }

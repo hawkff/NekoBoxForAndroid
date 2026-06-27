@@ -237,8 +237,14 @@ class BaseService {
             if (data.stopGeneration.get() != reloadStopGeneration) return
             if (DataStore.selectedProxy == 0L) {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
+                return
             }
-            if (canReloadSelector()) {
+            val s = data.state
+            // Only take the in-place selector fast-path when fully Connected: during Connecting
+            // data.proxy is set but proxy.init() may not have built config/box yet, and during
+            // Stopping the box is being torn down — touching them would throw or act on a dead
+            // instance. In those states fall through to the state machine below.
+            if (s == State.Connected && canReloadSelector()) {
                 val ent = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
                 val tag = data.proxy!!.config.profileTagMap[ent?.id] ?: ""
                 if (tag.isNotBlank() && ent != null) {
@@ -249,7 +255,6 @@ class BaseService {
                 }
                 return
             }
-            val s = data.state
             when {
                 s == State.Stopped -> startRunner()
                 s.canStop -> stopRunner(true)
