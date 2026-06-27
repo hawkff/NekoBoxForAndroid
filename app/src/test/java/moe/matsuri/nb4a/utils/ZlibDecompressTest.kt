@@ -38,4 +38,16 @@ class ZlibDecompressTest {
         val restored = Util.zlibDecompress(compressed, limit = 1024)
         assertArrayEquals(data, restored)
     }
+
+    @Test
+    fun truncatedStreamThrows() {
+        val original = "a reasonably long config payload ".repeat(50).toByteArray(Charsets.UTF_8)
+        val compressed = Util.zlibCompress(original, Deflater.BEST_COMPRESSION)
+        // Drop the tail so the stream never reaches finished(); must be rejected, not accepted
+        // as partial output.
+        val truncated = compressed.copyOf(compressed.size / 2)
+        assertThrows(Exception::class.java) {
+            Util.zlibDecompress(truncated)
+        }
+    }
 }

@@ -119,6 +119,11 @@ object Util {
                     if (total > limit) throw ImportTooLargeException(limit)
                     outputStream.write(buffer, 0, count)
                 }
+                // inflate() also returns 0 when it needs more input (truncated/corrupt stream),
+                // not only when finished; reject partial output instead of accepting it.
+                if (!inflater.finished()) {
+                    throw java.util.zip.DataFormatException("truncated or corrupt zlib stream")
+                }
                 outputStream.toByteArray()
             } finally {
                 // Always release the native inflater, even on a malformed-input exception.
