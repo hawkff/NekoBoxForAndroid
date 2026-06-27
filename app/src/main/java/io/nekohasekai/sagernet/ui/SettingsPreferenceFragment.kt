@@ -295,8 +295,20 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
                 setMessage(R.string.reset_settings_message)
                 setNegativeButton(R.string.no, null)
                 setPositiveButton(R.string.yes) { _, _ ->
-                    DataStore.configurationStore.reset()
-                    triggerFullRestart(requireContext())
+                    // reset() clears the snapshot synchronously but commits the DB wipe on the
+                    // ordered disk executor; await it before restarting so the rebirth can't race
+                    // ahead of the commit and leave old settings on disk.
+                    runOnDefaultDispatcher {
+                        try {
+                            DataStore.configurationStore.reset()
+                            DataStore.configurationStore.awaitWrites()
+                        } catch (e: Exception) {
+                            Logs.w(e)
+                        }
+                        onMainDispatcher {
+                            if (isAdded) triggerFullRestart(requireContext())
+                        }
+                    }
                 }
             }.show()
             true

@@ -296,6 +296,15 @@ fun Fragment.needRestart() {
 
 fun triggerFullRestart(ctx: Context) {
     runOnDefaultDispatcher {
+        // Drain async preference write-through before tearing down + rebirthing, so same-gesture
+        // restart-required settings (e.g. logLevel/logBufSize, read by SagerNet.onCreate in both
+        // processes) are durable before the process restarts. Best-effort: a drain failure must
+        // not block the user-requested restart.
+        try {
+            DataStore.configurationStore.awaitWrites()
+        } catch (e: Exception) {
+            Logs.w(e)
+        }
         SagerNet.stopService()
         delay(500)
         SagerConnection.restartingApp = true

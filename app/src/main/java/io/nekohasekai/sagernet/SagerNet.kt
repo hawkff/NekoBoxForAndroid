@@ -219,7 +219,11 @@ class SagerNet :
             }
         }
 
-        fun startService(profileId: Long = -1L) = ContextCompat.startForegroundService(
+        // Default to carrying the current in-process selection so :bg starts the profile the UI
+        // last selected, even if the async write-through DB commit hasn't landed yet. Callers with
+        // a specific id (e.g. a shortcut switching profile) pass it explicitly. A non-resolving id
+        // (incl. 0L "none") is ignored by :bg, which then falls back to its refreshed snapshot/DB.
+        fun startService(profileId: Long = DataStore.selectedProxy) = ContextCompat.startForegroundService(
             application,
             Intent(application, SagerConnection.serviceClass).apply {
                 if (profileId >= 0L) putExtra(Action.EXTRA_PROFILE_ID, profileId)
