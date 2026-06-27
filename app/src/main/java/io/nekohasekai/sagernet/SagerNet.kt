@@ -64,11 +64,21 @@ class SagerNet :
             // synchronous read below (logBufSize/logLevel). PublicDatabase no longer allows
             // main-thread queries, so the bulk-SELECT prime must run on PrefSnapshotExecutor;
             // join here so cold-start reads are served from the snapshot. One-time, pre-UI.
-            Thread { DataStore.configurationStore.prime() }.apply {
+            // Capture any prime failure off the daemon thread (Thread.join does not rethrow) so
+            // it is logged here rather than silently deferred to the first read.
+            val primeError = arrayOfNulls<Throwable>(1)
+            Thread {
+                try {
+                    DataStore.configurationStore.prime()
+                } catch (t: Throwable) {
+                    primeError[0] = t
+                }
+            }.apply {
                 isDaemon = true
                 start()
                 join()
             }
+            primeError[0]?.let { Logs.w("configurationStore prime failed", it) }
             Libcore.initCore(
                 process,
                 cacheDir.absolutePath + "/",

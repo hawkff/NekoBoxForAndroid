@@ -4,9 +4,11 @@ import androidx.preference.PreferenceDataStore
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.database.preference.RoomPreferenceDataStore
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.Executor
@@ -156,6 +158,27 @@ class CachedPreferenceDataStoreTest {
         // a subsequent refresh must not resurrect the cleared row
         store.refreshBlocking()
         assertNull(store.getString("k", null))
+    }
+
+    @Test
+    fun awaitWrites_surfacesWriteThroughFailure() {
+        // A DAO whose put() throws simulates a failed DB commit on the disk worker.
+        val failingDao = object : KeyValuePair.Dao {
+            override fun all(): List<KeyValuePair> = emptyList()
+            override fun get(key: String): KeyValuePair? = null
+            override fun put(value: KeyValuePair): Long = throw IllegalStateException("disk full")
+            override fun delete(key: String): Int = 0
+            override fun reset(): Int = 0
+            override fun insert(list: List<KeyValuePair>) {}
+        }
+        val store =
+            RoomPreferenceDataStore(failingDao, cached = true, database = null, diskExecutor = directExecutor)
+        store.prime()
+
+        store.putString("k", "v") // snapshot updated; persist() fails on the worker and records it
+        assertEquals("v", store.getString("k", null)) // read-after-write still works from snapshot
+        // awaitWrites() must surface the recorded write-through failure rather than report success.
+        assertThrows(IllegalStateException::class.java) { runBlocking { store.awaitWrites() } }
     }
 
     @Test

@@ -402,7 +402,11 @@ class BaseService {
                     }
                     val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
                     onMainDispatcher {
-                        onStartConnect(profile)
+                        // Assign connectingJob to the inner connect job from HERE (after
+                        // onStartConnect returns it), not from inside onStartConnect, so a
+                        // racing stopRunner() never sees this outer setup coroutine as the
+                        // tracked job once the inner connect job exists.
+                        data.connectingJob = onStartConnect(profile)
                     }
                 } catch (e: Exception) {
                     Logs.w(e)
@@ -417,13 +421,13 @@ class BaseService {
             return Service.START_NOT_STICKY
         }
 
-        private fun onStartConnect(profile: ProxyEntity?) {
+        private fun onStartConnect(profile: ProxyEntity?): Job? {
             this as Context
             val data = data
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
                 data.notification = createNotification("")
                 stopRunner(false, getString(R.string.profile_empty))
-                return
+                return null
             }
 
             val proxy = ProxyInstance(profile, this)
@@ -459,7 +463,7 @@ class BaseService {
                 data.closeReceiverRegistered = true
             }
 
-            data.connectingJob = runOnMainDispatcher {
+            return runOnMainDispatcher {
                 try {
                     data.notification = createNotification(ServiceNotification.genTitle(profile))
 

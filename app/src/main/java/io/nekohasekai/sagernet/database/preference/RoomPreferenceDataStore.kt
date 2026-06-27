@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * androidx [PreferenceDataStore] backed by a Room `KeyValuePair.Dao`.
@@ -78,6 +79,10 @@ open class RoomPreferenceDataStore(
 
     private val pendingWrites = HashMap<String, Pending>()
     private val pendingLock = Any()
+
+    // Captures the most recent write-through failure from persist(); surfaced (and cleared) by
+    // awaitWrites() so a caller does not trigger a cross-process reload off a failed commit.
+    private val writeThroughError = AtomicReference<Throwable?>(null)
 
     private val refreshScheduled = AtomicBoolean(false)
 
@@ -159,29 +164,41 @@ open class RoomPreferenceDataStore(
     private fun scheduleRefresh() {
         if (!cached) return
         if (!refreshScheduled.compareAndSet(false, true)) return
+        // Capture the reset generation at enqueue time so a reset() that committed its bump
+        // BEFORE this refresh task starts is still detected (the in-task recheck only catches a
+        // reset that races the DB read itself).
+        val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
         diskExecutor.execute {
             refreshScheduled.set(false)
-            doRefresh()
+            doRefresh(resetGenAtSchedule)
         }
     }
 
-    private fun doRefresh() {
-        // Capture the reset generation BEFORE reading the DB. If a reset() lands while we read,
-        // the DB rows we got are stale-relative-to-reset, so drop them (start from empty) and let
-        // the pending overlay below reapply any post-reset local writes.
+    private fun doRefresh(resetGenAtSchedule: Long) {
+        // If a reset() landed at or after this refresh was scheduled, or while we read the DB,
+        // the DB rows are stale-relative-to-reset: drop them (start from empty) and let the
+        // pending overlay below reapply any post-reset local writes.
         val resetGenAtStart = resetGeneration.get()
         val dbRows = buildSnapshot()
-        val refreshed = if (resetGeneration.get() != resetGenAtStart) {
+        val resetGenAfterRead = resetGeneration.get()
+        val resetIntervened =
+            resetGenAfterRead != resetGenAtSchedule || resetGenAfterRead != resetGenAtStart
+        val refreshed = if (resetIntervened) {
             HashMap<String, CachedValue>()
         } else {
             dbRows.toMutableMap()
         }
-        synchronized(pendingLock) {
-            for ((k, p) in pendingWrites) {
-                if (p.value == null) refreshed.remove(k) else refreshed[k] = p.value
+        // Serialize the overlay-apply + snapshot swap with writeLock so a concurrent cacheWrite()
+        // cannot land between reading pendingWrites and assigning snapshot (which would roll the
+        // just-written value back).
+        synchronized(writeLock) {
+            synchronized(pendingLock) {
+                for ((k, p) in pendingWrites) {
+                    if (p.value == null) refreshed.remove(k) else refreshed[k] = p.value
+                }
             }
+            snapshot = refreshed
         }
-        snapshot = refreshed
     }
 
     /** Suspend until a full refresh has been read off-main and swapped in. Used by `:bg`. */
@@ -204,6 +221,9 @@ open class RoomPreferenceDataStore(
             val latch = CountDownLatch(1)
             diskExecutor.execute { latch.countDown() }
             latch.await()
+            // Surface any write-through failure that occurred in a prior persist() so callers do
+            // not proceed to a cross-process reload that would re-read stale DB rows.
+            writeThroughError.getAndSet(null)?.let { throw it }
         }
     }
 
@@ -217,11 +237,12 @@ open class RoomPreferenceDataStore(
     fun refreshBlocking() {
         if (!cached) return
         ensureLoaded()
+        val resetGenAtSchedule = synchronized(writeLock) { resetGeneration.get() }
         val latch = CountDownLatch(1)
         val error = arrayOfNulls<Throwable>(1)
         diskExecutor.execute {
             try {
-                doRefresh()
+                doRefresh(resetGenAtSchedule)
             } catch (t: Throwable) {
                 error[0] = t
             } finally {
@@ -250,6 +271,9 @@ open class RoomPreferenceDataStore(
             try {
                 if (kv == null) kvPairDao.delete(key) else kvPairDao.put(kv)
                 persisted = true
+            } catch (t: Throwable) {
+                // Record the first write-through failure so awaitWrites() can surface it.
+                writeThroughError.compareAndSet(null, t)
             } finally {
                 // Drop the pending overlay entry only after a SUCCESSFUL DB write and only if no
                 // newer write for this key superseded it. On failure the overlay is kept so a
@@ -300,8 +324,10 @@ open class RoomPreferenceDataStore(
                 resetGeneration.incrementAndGet()
                 snapshot = emptyMap()
                 synchronized(pendingLock) { pendingWrites.clear() }
+                // Enqueue the DB reset while holding writeLock so a refresh task cannot capture a
+                // resetGenAtSchedule that slips between the cache clear and the reset commit.
+                diskExecutor.execute { kvPairDao.reset() }
             }
-            diskExecutor.execute { kvPairDao.reset() }
         } else {
             kvPairDao.reset()
         }
