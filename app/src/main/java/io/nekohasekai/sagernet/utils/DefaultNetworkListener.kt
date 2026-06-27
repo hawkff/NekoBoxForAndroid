@@ -99,19 +99,27 @@ object DefaultNetworkListener {
     suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
 
     // NB: this runs in ConnectivityThread; offer events non-blocking (trySend) so we never
-    // park the framework callback thread on the actor. The actor is UNLIMITED, so trySend
-    // always enqueues for these low-rate control messages.
+    // park the framework callback thread on the actor. The actor is UNLIMITED, so trySend only
+    // fails if the actor channel is closed (actor coroutine died) - log that rather than
+    // silently dropping, since it means network-change handling has stopped working.
+    private fun offer(message: NetworkMessage) {
+        val result = networkActor.trySend(message)
+        if (result.isFailure) {
+            Logs.w("DefaultNetworkListener: dropped ${message.javaClass.simpleName} (actor closed?)")
+        }
+    }
+
     private object Callback : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            networkActor.trySend(NetworkMessage.Put(network))
+            offer(NetworkMessage.Put(network))
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) { // it's a good idea to refresh capabilities
-            networkActor.trySend(NetworkMessage.Update(network))
+            offer(NetworkMessage.Update(network))
         }
 
         override fun onLost(network: Network) {
-            networkActor.trySend(NetworkMessage.Lost(network))
+            offer(NetworkMessage.Lost(network))
         }
     }
 
