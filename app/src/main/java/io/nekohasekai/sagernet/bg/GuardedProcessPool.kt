@@ -63,7 +63,11 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
                     val proc = process
                     thread(name = "waitFor-$cmdName") {
                         val code = proc.waitFor()
-                        exitChannel.trySendBlocking(code)
+                        // If the channel is already closed/failed, log rather than silently drop
+                        // (the NonCancellable teardown below also bounds its receive()).
+                        if (exitChannel.trySendBlocking(code).isFailure) {
+                            Logs.w("$cmdName: could not deliver exit code $code (channel closed)")
+                        }
                     }
                     val startTime = SystemClock.elapsedRealtime()
                     val exitCode = exitChannel.receive()
@@ -104,7 +108,8 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
                             if (withTimeoutOrNull(1000) { exitChannel.receive() } != null) return@withContext
                             process.destroyForcibly() // Force to kill the process if it's still alive
                         }
-                        exitChannel.receive()
+                        // Bounded so a missed exit-code send (closed channel) can't hang teardown.
+                        withTimeoutOrNull(1000) { exitChannel.receive() }
                     } // otherwise process already exited, nothing to be done
                 }
             }
