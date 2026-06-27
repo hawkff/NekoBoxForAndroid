@@ -278,7 +278,10 @@ fun Fragment.needReload() {
                     SagerNet.reloadService()
                 } catch (e: Exception) {
                     Logs.w(e)
-                    onMainDispatcher { snackbar(getString(R.string.service_failed)).show() }
+                    // The coroutine can outlive the fragment; only touch fragment APIs while attached.
+                    onMainDispatcher {
+                        if (isAdded) snackbar(getString(R.string.service_failed)).show()
+                    }
                 }
             }
         }.show()

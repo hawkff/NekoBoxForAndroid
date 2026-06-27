@@ -455,7 +455,10 @@ class MainActivity :
                             } catch (e: Exception) {
                                 Logs.w(e)
                                 onMainDispatcher {
-                                    snackbar(getString(R.string.service_failed)).show()
+                                    // The coroutine can outlive the activity; guard fragment/UI APIs.
+                                    if (!isFinishing && !isDestroyed) {
+                                        snackbar(getString(R.string.service_failed)).show()
+                                    }
                                 }
                             }
                         }
