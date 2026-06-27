@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
 import io.nekohasekai.sagernet.bg.proto.ProxyInstance
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.plugin.PluginManager
@@ -55,7 +56,9 @@ class BaseService {
         val receiver = broadcastReceiverWithSelf { self, ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats(self)
-                Action.RELOAD -> service.reload()
+                Action.RELOAD -> service.reload(
+                    intent.getLongExtra(Action.EXTRA_PROFILE_ID, -1L),
+                )
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -184,7 +187,32 @@ class BaseService {
 
         fun onBind(intent: Intent): IBinder? = if (intent.action == Action.SERVICE) data.binder else null
 
-        fun reload() {
+        fun reload(profileId: Long = -1L) {
+            // Run off the main thread: refreshSuspend() does a DB read (PublicDatabase no longer
+            // allows main-thread queries) and the selectedProxy/getById lookups below read the
+            // config store + profile DB. The IPC-carried profileId (when >= 0) is authoritative
+            // for the freshly-selected profile so we don't depend on the UI's async write-through
+            // DB commit having landed yet.
+            runOnDefaultDispatcher {
+                try {
+                    DataStore.configurationStore.refreshSuspend()
+                    if (profileId >= 0L && SagerDatabase.proxyDao.getById(profileId) != null) {
+                        DataStore.selectedProxy = profileId
+                    }
+                    onMainDispatcher { reloadInner() }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        stopRunner(
+                            false,
+                            "${(this@Interface as Context).getString(R.string.service_failed)}: ${e.readableMessage}",
+                        )
+                    }
+                }
+            }
+        }
+
+        private fun reloadInner() {
             if (DataStore.selectedProxy == 0L) {
                 stopRunner(false, (this as Context).getString(R.string.profile_empty))
             }
@@ -349,12 +377,53 @@ class BaseService {
 
             val data = data
             if (data.state != State.Stopped) return Service.START_NOT_STICKY
-            val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
+
+            // The IPC-carried profile id (when >= 0) is authoritative for a cold start triggered
+            // right after a UI profile selection, so :bg does not depend on the UI's async
+            // write-through DB commit having landed. -1 / absent => read selectedProxy from store.
+            val ipcProfileId = intent?.getLongExtra(Action.EXTRA_PROFILE_ID, -1L) ?: -1L
+
+            data.changeState(State.Connecting)
+            // Read config off-main first (PublicDatabase no longer allows main-thread queries),
+            // then run the existing connect logic on the main dispatcher. onStartCommand returns
+            // synchronously; the null-profile short-circuit now lives inside the job.
+            // Track the connect coroutine so stopRunner()/reload() can cancel an in-flight
+            // start. Without this, data.connectingJob stays null and stopRunner's
+            // cancelAndJoin() is a no-op: a superseded start's awaitExternalProcessesReady()
+            // keeps polling a now-killed sidecar port for its full (60s for MasterDnsVPN)
+            // window and then throws "sidecar listener not ready", surfacing a false
+            // "connection failed" even though the live instance is already carrying traffic.
+            data.connectingJob = runOnDefaultDispatcher {
+                try {
+                    DataStore.configurationStore.refreshSuspend()
+                    if (ipcProfileId >= 0L && SagerDatabase.proxyDao.getById(ipcProfileId) != null) {
+                        DataStore.selectedProxy = ipcProfileId
+                    }
+                    val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+                    onMainDispatcher {
+                        onStartConnect(profile)
+                    }
+                } catch (e: Exception) {
+                    Logs.w(e)
+                    onMainDispatcher {
+                        stopRunner(
+                            false,
+                            "${getString(R.string.service_failed)}: ${e.readableMessage}",
+                        )
+                    }
+                }
+            }
+            return Service.START_NOT_STICKY
+        }
+
+        private fun onStartConnect(profile: ProxyEntity?) {
+            this as Context
+            val data = data
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
                 data.notification = createNotification("")
                 stopRunner(false, getString(R.string.profile_empty))
-                return Service.START_NOT_STICKY
+                return
             }
 
             val proxy = ProxyInstance(profile, this)
@@ -390,13 +459,6 @@ class BaseService {
                 data.closeReceiverRegistered = true
             }
 
-            data.changeState(State.Connecting)
-            // Track the connect coroutine so stopRunner()/reload() can cancel an in-flight
-            // start. Without this, data.connectingJob stays null and stopRunner's
-            // cancelAndJoin() is a no-op: a superseded start's awaitExternalProcessesReady()
-            // keeps polling a now-killed sidecar port for its full (60s for MasterDnsVPN)
-            // window and then throws "sidecar listener not ready", surfacing a false
-            // "connection failed" even though the live instance is already carrying traffic.
             data.connectingJob = runOnMainDispatcher {
                 try {
                     data.notification = createNotification(ServiceNotification.genTitle(profile))
@@ -438,7 +500,6 @@ class BaseService {
                     data.connectingJob = null
                 }
             }
-            return Service.START_NOT_STICKY
         }
     }
 }

@@ -60,6 +60,15 @@ class SagerNet :
         if (isMainProcess || isBgProcess) {
             externalAssets.mkdirs()
             Seq.setContext(this)
+            // Prime the cached configurationStore off the main thread before the first
+            // synchronous read below (logBufSize/logLevel). PublicDatabase no longer allows
+            // main-thread queries, so the bulk-SELECT prime must run on PrefSnapshotExecutor;
+            // join here so cold-start reads are served from the snapshot. One-time, pre-UI.
+            Thread { DataStore.configurationStore.prime() }.apply {
+                isDaemon = true
+                start()
+                join()
+            }
             Libcore.initCore(
                 process,
                 cacheDir.absolutePath + "/",
@@ -200,12 +209,18 @@ class SagerNet :
             }
         }
 
-        fun startService() = ContextCompat.startForegroundService(
+        fun startService(profileId: Long = -1L) = ContextCompat.startForegroundService(
             application,
-            Intent(application, SagerConnection.serviceClass),
+            Intent(application, SagerConnection.serviceClass).apply {
+                if (profileId >= 0L) putExtra(Action.EXTRA_PROFILE_ID, profileId)
+            },
         )
 
-        fun reloadService() = application.sendBroadcast(Intent(Action.RELOAD).setPackage(application.packageName))
+        fun reloadService(profileId: Long = -1L) = application.sendBroadcast(
+            Intent(Action.RELOAD).setPackage(application.packageName).apply {
+                if (profileId >= 0L) putExtra(Action.EXTRA_PROFILE_ID, profileId)
+            },
+        )
 
         fun stopService() = application.sendBroadcast(Intent(Action.CLOSE).setPackage(application.packageName))
 

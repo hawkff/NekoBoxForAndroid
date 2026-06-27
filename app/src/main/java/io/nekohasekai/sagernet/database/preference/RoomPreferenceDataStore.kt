@@ -1,18 +1,311 @@
 package io.nekohasekai.sagernet.database.preference
 
 import androidx.preference.PreferenceDataStore
+import androidx.room.InvalidationTracker
+import androidx.room.RoomDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * androidx [PreferenceDataStore] backed by a Room `KeyValuePair.Dao`.
+ *
+ * Two modes:
+ *  - **uncached** (default, e.g. `profileCacheStore` over the in-memory `TempDatabase`): every
+ *    getter is a synchronous SELECT and every setter a synchronous write, as before. Behaviour
+ *    unchanged.
+ *  - **cached** (`configurationStore` over the disk `PublicDatabase`): reads serve from an
+ *    immutable in-memory snapshot (no SQLite on any thread after priming); writes update the
+ *    snapshot synchronously and persist to the DB off-main on [PrefSnapshotExecutor]; a
+ *    `KeyValuePair` `InvalidationTracker.Observer` coalesces cross-process refreshes. This lets
+ *    `PublicDatabase` drop `allowMainThreadQueries()` because the hot read path never touches the
+ *    DB on the main thread.
+ *
+ * Cached values are stored as typed [CachedValue]s (not mutable [KeyValuePair]/`ByteArray`), and
+ * `StringSet` values are defensively copied on store and on return.
+ *
+ * @param cached enable the snapshot cache (only for the single-writer-ish settings store).
+ * @param database the `RoomDatabase` whose `KeyValuePair` invalidations should refresh the
+ *   snapshot. When non-null, cross-process / other-instance writes are picked up automatically
+ *   via an `InvalidationTracker` observer. May be null to disable automatic invalidation
+ *   (single-process or test usage); callers then refresh explicitly via
+ *   `refreshSuspend()`/`refreshBlocking()`.
+ * @param diskExecutor ordered single-thread disk executor for prime/refresh/write-through.
+ *   Defaults to `PrefSnapshotExecutor.disk`; overridable in tests.
+ */
 @Suppress("MemberVisibilityCanBePrivate", "unused")
-open class RoomPreferenceDataStore(private val kvPairDao: KeyValuePair.Dao) :
-    PreferenceDataStore() {
+open class RoomPreferenceDataStore(
+    private val kvPairDao: KeyValuePair.Dao,
+    private val cached: Boolean = false,
+    private val database: RoomDatabase? = null,
+    private val diskExecutor: Executor = PrefSnapshotExecutor.disk,
+) : PreferenceDataStore() {
 
-    fun getBoolean(key: String) = kvPairDao[key]?.boolean
-    fun getFloat(key: String) = kvPairDao[key]?.float
-    fun getInt(key: String) = kvPairDao[key]?.long?.toInt()
-    fun getLong(key: String) = kvPairDao[key]?.long
-    fun getString(key: String) = kvPairDao[key]?.string
-    fun getStringSet(key: String) = kvPairDao[key]?.stringSet
-    fun reset() = kvPairDao.reset()
+    // ---- snapshot cache (cached mode only) -------------------------------------------------
+
+    private sealed interface CachedValue {
+        data class Bool(val v: Boolean) : CachedValue
+        data class Flt(val v: Float) : CachedValue
+        data class Lng(val v: Long) : CachedValue
+        data class Str(val v: String) : CachedValue
+        data class StrSet(val v: Set<String>) : CachedValue
+    }
+
+    @Volatile
+    private var snapshot: Map<String, CachedValue> = emptyMap()
+
+    @Volatile
+    private var primed = false
+
+    private val primeLock = Any()
+
+    // Serializes write-through + refresh so a refresh's all() cannot interleave a write and roll
+    // back a just-written value (combined with the pending-write generation overlay below).
+    private val writeLock = Any()
+
+    // Monotonic generation bumped on every local write. A refresh captures the generation BEFORE
+    // its all() read; if a write landed during the read, the refreshed snapshot is rebased so the
+    // local write wins (it is the more recent same-process value).
+    private val generation = AtomicLong(0)
+
+    // Local writes since a refresh started, applied on top of the refreshed map (rebase overlay).
+    // Value carries the generation at which it was written so a stale persist's cleanup cannot
+    // drop a newer pending entry for the same key.
+    private data class Pending(val value: CachedValue?, val gen: Long)
+
+    private val pendingWrites = HashMap<String, Pending>()
+    private val pendingLock = Any()
+
+    private val refreshScheduled = AtomicBoolean(false)
+
+    // Generation of the most recent reset(). A refresh that started before this reset must not
+    // resurrect rows it read from the DB before kvPairDao.reset() committed; doRefresh compares
+    // the generation it captured at entry against this and drops its DB base if a reset intervened.
+    private val resetGeneration = AtomicLong(0)
+
+    private fun KeyValuePair.toCached(): CachedValue? {
+        // Use the entity's typed accessors (long already folds the deprecated TYPE_INT into
+        // TYPE_LONG), so this never references the deprecated constant directly.
+        boolean?.let { return CachedValue.Bool(it) }
+        float?.let { return CachedValue.Flt(it) }
+        long?.let { return CachedValue.Lng(it) }
+        string?.let { return CachedValue.Str(it) }
+        stringSet?.let { return CachedValue.StrSet(HashSet(it)) }
+        return null
+    }
+
+    private fun buildSnapshot(): Map<String, CachedValue> {
+        val rows = kvPairDao.all()
+        val map = HashMap<String, CachedValue>(rows.size)
+        for (row in rows) {
+            row.toCached()?.let { map[row.key] = it }
+        }
+        return map
+    }
+
+    /**
+     * Prime the snapshot once with a single bulk SELECT, on [PrefSnapshotExecutor], blocking the
+     * caller until loaded. Must be called off the main thread (it would otherwise just block the
+     * main thread on the worker; callers are responsible for off-main invocation at startup).
+     */
+    fun prime() {
+        if (!cached || primed) return
+        synchronized(primeLock) {
+            if (primed) return
+            val latch = CountDownLatch(1)
+            val holder = arrayOfNulls<Map<String, CachedValue>>(1)
+            val error = arrayOfNulls<Throwable>(1)
+            diskExecutor.execute {
+                try {
+                    holder[0] = buildSnapshot()
+                } catch (t: Throwable) {
+                    error[0] = t
+                } finally {
+                    latch.countDown()
+                }
+            }
+            latch.await()
+            error[0]?.let { throw it } // do not mark primed on a failed load (no silent empty cache)
+            snapshot = holder[0] ?: emptyMap()
+            primed = true
+            registerObserver()
+        }
+    }
+
+    private fun ensureLoaded() {
+        if (primed) return
+        prime()
+    }
+
+    @Volatile
+    private var observerRegistered = false
+
+    private fun registerObserver() {
+        val db = database ?: return
+        if (observerRegistered) return
+        observerRegistered = true
+        val observer = object : InvalidationTracker.Observer(arrayOf("KeyValuePair")) {
+            override fun onInvalidated(tables: Set<String>) {
+                scheduleRefresh()
+            }
+        }
+        db.invalidationTracker.addObserver(observer)
+    }
+
+    /** Coalesce a single full refresh + atomic swap (refresh+swap, not clear-and-miss). */
+    private fun scheduleRefresh() {
+        if (!cached) return
+        if (!refreshScheduled.compareAndSet(false, true)) return
+        diskExecutor.execute {
+            refreshScheduled.set(false)
+            doRefresh()
+        }
+    }
+
+    private fun doRefresh() {
+        // Capture the reset generation BEFORE reading the DB. If a reset() lands while we read,
+        // the DB rows we got are stale-relative-to-reset, so drop them (start from empty) and let
+        // the pending overlay below reapply any post-reset local writes.
+        val resetGenAtStart = resetGeneration.get()
+        val dbRows = buildSnapshot()
+        val refreshed = if (resetGeneration.get() != resetGenAtStart) {
+            HashMap<String, CachedValue>()
+        } else {
+            dbRows.toMutableMap()
+        }
+        synchronized(pendingLock) {
+            for ((k, p) in pendingWrites) {
+                if (p.value == null) refreshed.remove(k) else refreshed[k] = p.value
+            }
+        }
+        snapshot = refreshed
+    }
+
+    /** Suspend until a full refresh has been read off-main and swapped in. Used by `:bg`. */
+    suspend fun refreshSuspend() {
+        if (!cached) return
+        ensureLoadedSuspend()
+        withContext(Dispatchers.IO) { refreshBlocking() }
+    }
+
+    /**
+     * Suspend until all currently-enqueued write-through DB commits have drained. Because the
+     * disk executor is a single ordered worker, a task enqueued after all pending writes runs
+     * only once they have committed; awaiting it guarantees prior `put*`/`remove` writes are
+     * durable. Use before triggering a cross-process action (e.g. service reload) that re-reads
+     * a just-written config key from the DB. No-op when uncached.
+     */
+    suspend fun awaitWrites() {
+        if (!cached) return
+        withContext(Dispatchers.IO) {
+            val latch = CountDownLatch(1)
+            diskExecutor.execute { latch.countDown() }
+            latch.await()
+        }
+    }
+
+    private suspend fun ensureLoadedSuspend() {
+        if (primed) return
+        withContext(Dispatchers.IO) { prime() }
+    }
+
+    /** Run a full refresh on [PrefSnapshotExecutor], blocking the caller until swapped in. Must
+     *  NOT be called on the main thread. */
+    fun refreshBlocking() {
+        if (!cached) return
+        ensureLoaded()
+        val latch = CountDownLatch(1)
+        val error = arrayOfNulls<Throwable>(1)
+        diskExecutor.execute {
+            try {
+                doRefresh()
+            } catch (t: Throwable) {
+                error[0] = t
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await()
+        error[0]?.let { throw it }
+    }
+
+    // Apply a local write to the snapshot + pending overlay synchronously, then persist off-main.
+    private fun cacheWrite(key: String, value: CachedValue?): Long {
+        synchronized(writeLock) {
+            val gen = generation.incrementAndGet()
+            val next = HashMap(snapshot)
+            if (value == null) next.remove(key) else next[key] = value
+            snapshot = next
+            synchronized(pendingLock) { pendingWrites[key] = Pending(value, gen) }
+            return gen
+        }
+    }
+
+    private fun persist(key: String, kv: KeyValuePair?, gen: Long) {
+        diskExecutor.execute {
+            var persisted = false
+            try {
+                if (kv == null) kvPairDao.delete(key) else kvPairDao.put(kv)
+                persisted = true
+            } finally {
+                // Drop the pending overlay entry only after a SUCCESSFUL DB write and only if no
+                // newer write for this key superseded it. On failure the overlay is kept so a
+                // later refresh can't roll the snapshot back to the un-persisted value.
+                if (persisted) {
+                    synchronized(pendingLock) {
+                        if (pendingWrites[key]?.gen == gen) pendingWrites.remove(key)
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- getters ---------------------------------------------------------------------------
+
+    fun getBoolean(key: String): Boolean? =
+        if (cached) cachedRead(key) { (it as? CachedValue.Bool)?.v } else kvPairDao[key]?.boolean
+
+    fun getFloat(key: String): Float? =
+        if (cached) cachedRead(key) { (it as? CachedValue.Flt)?.v } else kvPairDao[key]?.float
+
+    fun getInt(key: String): Int? =
+        if (cached) cachedRead(key) { (it as? CachedValue.Lng)?.v?.toInt() } else kvPairDao[key]?.long?.toInt()
+
+    fun getLong(key: String): Long? =
+        if (cached) cachedRead(key) { (it as? CachedValue.Lng)?.v } else kvPairDao[key]?.long
+
+    fun getString(key: String): String? =
+        if (cached) cachedRead(key) { (it as? CachedValue.Str)?.v } else kvPairDao[key]?.string
+
+    fun getStringSet(key: String): Set<String>? = if (cached) {
+        cachedRead(
+            key,
+        ) { (it as? CachedValue.StrSet)?.v?.let { s -> HashSet(s) } }
+    } else {
+        kvPairDao[key]?.stringSet
+    }
+
+    private inline fun <T> cachedRead(key: String, extract: (CachedValue?) -> T?): T? {
+        ensureLoaded()
+        return extract(snapshot[key])
+    }
+
+    fun reset() {
+        if (cached) {
+            synchronized(writeLock) {
+                generation.incrementAndGet()
+                resetGeneration.incrementAndGet()
+                snapshot = emptyMap()
+                synchronized(pendingLock) { pendingWrites.clear() }
+            }
+            diskExecutor.execute { kvPairDao.reset() }
+        } else {
+            kvPairDao.reset()
+        }
+    }
 
     override fun getBoolean(key: String, defValue: Boolean) = getBoolean(key) ?: defValue
     override fun getFloat(key: String, defValue: Float) = getFloat(key) ?: defValue
@@ -28,42 +321,81 @@ open class RoomPreferenceDataStore(private val kvPairDao: KeyValuePair.Dao) :
     fun putInt(key: String, value: Int?) = if (value == null) remove(key) else putLong(key, value.toLong())
 
     fun putLong(key: String, value: Long?) = if (value == null) remove(key) else putLong(key, value)
+
     override fun putBoolean(key: String, value: Boolean) {
-        kvPairDao.put(KeyValuePair(key).put(value))
+        if (cached) {
+            val gen = cacheWrite(key, CachedValue.Bool(value))
+            persist(key, KeyValuePair(key).put(value), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(value))
+        }
         fireChangeListener(key)
     }
 
     override fun putFloat(key: String, value: Float) {
-        kvPairDao.put(KeyValuePair(key).put(value))
+        if (cached) {
+            val gen = cacheWrite(key, CachedValue.Flt(value))
+            persist(key, KeyValuePair(key).put(value), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(value))
+        }
         fireChangeListener(key)
     }
 
     override fun putInt(key: String, value: Int) {
-        kvPairDao.put(KeyValuePair(key).put(value.toLong()))
+        if (cached) {
+            val gen = cacheWrite(key, CachedValue.Lng(value.toLong()))
+            persist(key, KeyValuePair(key).put(value.toLong()), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(value.toLong()))
+        }
         fireChangeListener(key)
     }
 
     override fun putLong(key: String, value: Long) {
-        kvPairDao.put(KeyValuePair(key).put(value))
+        if (cached) {
+            val gen = cacheWrite(key, CachedValue.Lng(value))
+            persist(key, KeyValuePair(key).put(value), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(value))
+        }
         fireChangeListener(key)
     }
 
     override fun putString(key: String, value: String?) = if (value == null) {
         remove(key)
     } else {
-        kvPairDao.put(KeyValuePair(key).put(value))
+        if (cached) {
+            val gen = cacheWrite(key, CachedValue.Str(value))
+            persist(key, KeyValuePair(key).put(value), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(value))
+        }
         fireChangeListener(key)
     }
 
     override fun putStringSet(key: String, values: MutableSet<String>?) = if (values == null) {
         remove(key)
     } else {
-        kvPairDao.put(KeyValuePair(key).put(values))
+        if (cached) {
+            // One defensive copy reused for both the cached snapshot value and the DB write, so
+            // neither aliases the caller's mutable set.
+            val copy = HashSet(values)
+            val gen = cacheWrite(key, CachedValue.StrSet(copy))
+            persist(key, KeyValuePair(key).put(copy), gen)
+        } else {
+            kvPairDao.put(KeyValuePair(key).put(values))
+        }
         fireChangeListener(key)
     }
 
     fun remove(key: String) {
-        kvPairDao.delete(key)
+        if (cached) {
+            val gen = cacheWrite(key, null)
+            persist(key, null, gen)
+        } else {
+            kvPairDao.delete(key)
+        }
         fireChangeListener(key)
     }
 
