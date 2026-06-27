@@ -295,6 +295,8 @@ class BaseService {
             GlobalScope.launch(Dispatchers.IO) {
                 try {
                     withTimeoutOrNull(5_000) { looper.persist() }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                 } finally {
                     pending.finish()
