@@ -62,7 +62,11 @@ class BaseService {
                 )
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // Only act once fully Connected: the close receiver is now registered during
+                    // Connecting (so stop/reload aren't lost), but proxy.box is a lateinit that
+                    // isn't built until proxy.init() finishes, so sleep()/wake() here during
+                    // startup would throw UninitializedPropertyAccessException.
+                    if (state == State.Connected && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         if (SagerNet.power.isDeviceIdleMode) {
                             proxy?.box?.sleep()
                         } else {

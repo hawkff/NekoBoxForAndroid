@@ -208,8 +208,13 @@ class CachedPreferenceDataStoreTest {
 
         store.putString("bad", "v") // fails to persist; pending overlay retained
         store.putString("good", "ok") // later UNRELATED successful write
-        // awaitWrites() must still fail: the "bad" write never reached disk, so a reload would
-        // re-read a stale DB. A successful unrelated write must not mask it.
+        // The unrelated write succeeded and is durable in the fake DB...
+        assertEquals("ok", dao.get("good")?.string)
+        assertEquals("ok", store.getString("good", null))
+        // ...but awaitWrites() must STILL fail: the "bad" write never reached disk (its pending
+        // overlay entry remains), so a reload would re-read a stale DB. The leftover-pending check
+        // is authoritative even though the later successful write cleared the best-effort cause
+        // flag, so a generic durability failure is thrown rather than success being reported.
         assertThrows(Exception::class.java) { runBlocking { store.awaitWrites() } }
     }
 
