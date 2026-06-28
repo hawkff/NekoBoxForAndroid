@@ -12,10 +12,11 @@ import io.nekohasekai.sagernet.ktx.use
 import io.nekohasekai.sagernet.utils.CrashHandler
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.io.IOException
 
 object SendLog {
+    // Cap the neko.log slice included in an exported report (keeps memory bounded).
+    private const val MAX_EXPORT_LOG_BYTES = 4L * 1024 * 1024
+
     // Create full log and send
     fun sendLog(context: Context, title: String) {
         val logFile = File.createTempFile(
@@ -31,20 +32,28 @@ object SendLog {
         logFile.writeText(report)
 
         try {
-            Runtime.getRuntime().exec(arrayOf("logcat", "-d")).inputStream.use(
-                FileOutputStream(
-                    logFile,
-                    true,
-                ),
-            )
-            logFile.appendText("\n")
-        } catch (e: IOException) {
+            val process = ProcessBuilder("logcat", "-d")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            if (process.waitFor() == 0) {
+                // Strip ANSI codes for consistency with the neko.log section below so the
+                // shared .log is plain text everywhere.
+                logFile.appendText(AnsiLog.strip(output))
+                logFile.appendText("\n")
+            } else {
+                logFile.appendText("Export logcat error: $output")
+            }
+        } catch (e: Exception) {
             Logs.w(e)
             logFile.appendText("Export logcat error: " + CrashHandler.formatThrowable(e))
         }
 
         logFile.appendText("\n")
-        logFile.appendBytes(getNekoLog(0))
+        // Strip ANSI color codes so a shared .log opened in a text editor is readable
+        // (the in-app Logs screen renders the colors instead). neko.log is size-capped
+        // by maxLogSizeKb, but bound the export defensively to avoid large copies.
+        logFile.appendText(AnsiLog.strip(String(getNekoLog(MAX_EXPORT_LOG_BYTES))))
 
         context.startActivity(
             Intent.createChooser(
