@@ -108,20 +108,24 @@ object AnsiLog {
                 code == 39 -> color = null // default foreground
                 code == 38 -> {
                     // Extended foreground: 38;5;n (256) or 38;2;r;g;b (truecolor).
-                    val mode = codes.getOrNull(k + 1)?.toIntOrNull()
-                    when (mode) {
+                    when (codes.getOrNull(k + 1)?.toIntOrNull()) {
                         5 -> {
                             val idx = codes.getOrNull(k + 2)?.toIntOrNull()
                             if (idx != null) color = color256(idx)
                             k += 2
                         }
                         2 -> {
-                            val r = codes.getOrNull(k + 2)?.toIntOrNull() ?: 0
-                            val g = codes.getOrNull(k + 3)?.toIntOrNull() ?: 0
-                            val b = codes.getOrNull(k + 4)?.toIntOrNull() ?: 0
-                            color = argb(r, g, b)
+                            val r = codes.getOrNull(k + 2)?.toIntOrNull()
+                            val g = codes.getOrNull(k + 3)?.toIntOrNull()
+                            val b = codes.getOrNull(k + 4)?.toIntOrNull()
+                            // Only apply when all components are present; otherwise leave
+                            // the active color unchanged (don't coerce missing parts to 0).
+                            if (r != null && g != null && b != null) color = argb(r, g, b)
                             k += 4
                         }
+                        // Unknown sub-mode (e.g. a future 38;6;...): advance past the mode
+                        // value so it is not re-processed as a standalone SGR code.
+                        else -> k += 1
                     }
                 }
                 // Background (40..47, 100..107, 48;...), bold/dim/etc: ignore.

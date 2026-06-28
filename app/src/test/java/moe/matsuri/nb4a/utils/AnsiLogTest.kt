@@ -88,6 +88,25 @@ class AnsiLogTest {
     }
 
     @Test
+    fun incompleteTruecolor_leavesActiveColorUnchanged() {
+        // ESC[38;2;255m is missing g/b: must NOT coerce to black; keep the prior color.
+        val raw = "$ESC[33mWA$ESC[38;2;255mRN$ESC[0m"
+        val r = AnsiLog.render(raw)
+        assertEquals("WARN", r.text)
+        // The whole "WARN" stays yellow (the malformed truecolor is ignored).
+        assertTrue(r.spans.all { it.color == yellow })
+    }
+
+    @Test
+    fun unknownExtendedSubMode_doesNotLeakAsColor() {
+        // ESC[38;33;100m: 33 is the (unknown) sub-mode, must not be applied as yellow.
+        val raw = "$ESC[38;33;100mtext$ESC[0m"
+        val r = AnsiLog.render(raw)
+        assertEquals("text", r.text)
+        assertTrue("unknown 38 sub-mode must not color text", r.spans.none { it.color == yellow })
+    }
+
+    @Test
     fun truncatedTrailingEsc_isDropped() {
         // Window cut right after an ESC (or an unterminated CSI) at end of input.
         assertEquals("hello", AnsiLog.render("hello$ESC").text)
