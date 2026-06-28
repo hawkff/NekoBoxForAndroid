@@ -110,10 +110,11 @@ object SubscriptionUpdater {
             var attempted = false
             var failed = false
             if (subscriptions.isNotEmpty()) {
-                val nowSeconds = (System.currentTimeMillis() / 1000).toInt()
+                val nowSeconds = System.currentTimeMillis() / 1000L
                 for ((profile, subscription) in subscriptions) {
-                    val lastUpdated = subscription.lastUpdated ?: 0
-                    val delaySeconds = (subscription.autoUpdateDelay ?: 1440).coerceAtLeast(15) * 60
+                    val lastUpdated = (subscription.lastUpdated ?: 0).toLong()
+                    val delaySeconds =
+                        (subscription.autoUpdateDelay ?: 1440).toLong().coerceAtLeast(15L) * 60L
                     if (nowSeconds - lastUpdated < delaySeconds) {
                         Logs.d("work: not updating " + profile.displayName())
                         continue

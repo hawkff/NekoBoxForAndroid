@@ -35,8 +35,12 @@ var errFailConnectSocks5 = errors.New("fail connect socks5")
 const (
 	defaultHTTPTimeout     = 120 * time.Second
 	defaultHTTPDialTimeout = 30 * time.Second
-	defaultHTTPStringLimit = 10 * 1024 * 1024
-	defaultHTTPFileLimit   = 256 * 1024 * 1024
+	// defaultHTTPRequestTimeout bounds the whole request including body reads,
+	// so GetContentLimited/WriteToLimited cannot block forever on a stalled body.
+	// It is generous enough for large rule-asset downloads over slow links.
+	defaultHTTPRequestTimeout = 10 * time.Minute
+	defaultHTTPStringLimit    = 10 * 1024 * 1024
+	defaultHTTPFileLimit      = 256 * 1024 * 1024
 )
 
 type HTTPClient interface {
@@ -95,6 +99,8 @@ func NewHttpClient() HTTPClient {
 	client.h1h2Transport.TLSHandshakeTimeout = defaultHTTPTimeout
 	client.h1h2Transport.ResponseHeaderTimeout = defaultHTTPTimeout
 	client.h1h2Transport.DisableKeepAlives = true
+	// Bound the full request (including body read) so callers cannot hang forever.
+	client.h1h2Client.Timeout = defaultHTTPRequestTimeout
 	return client
 }
 
@@ -259,6 +265,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 		func() (response *http.Response, err error) {
 			request := r.request.Clone(context.Background())
 			echClient := &http.Client{
+				Timeout: defaultHTTPRequestTimeout,
 				Transport: &http.Transport{
 					DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 						var d net.Dialer
@@ -282,6 +289,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 		func() (response *http.Response, err error) {
 			request := r.request.Clone(context.Background())
 			h3Client := &http.Client{
+				Timeout: defaultHTTPRequestTimeout,
 				Transport: &http3.Transport{
 					TLSClientConfig: r.tls.Clone(),
 					QUICConfig: &quic.Config{
@@ -362,7 +370,6 @@ type httpResponse struct {
 
 	contentMu    sync.Mutex
 	contentRead  bool
-	contentLimit int64
 	content      []byte
 	contentError error
 }
@@ -400,7 +407,6 @@ func (h *httpResponse) GetContentLimited(limit int64) ([]byte, error) {
 	}
 	defer h.Body.Close()
 	h.contentRead = true
-	h.contentLimit = limit
 	h.content, h.contentError = readAllLimited(h.Body, limit)
 	return h.content, h.contentError
 }
@@ -444,11 +450,6 @@ func (h *httpResponse) WriteToLimited(path string, limit int64) (err error) {
 		return err
 	}
 	tmpPath := file.Name()
-	if err = file.Chmod(0666); err != nil {
-		_ = file.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
 	defer func() {
 		if err != nil {
 			_ = os.Remove(tmpPath)

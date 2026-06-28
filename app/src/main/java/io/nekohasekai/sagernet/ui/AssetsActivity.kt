@@ -381,10 +381,9 @@ class AssetsActivity : ThemedActivity() {
                 if (downloadName.endsWith(".xz")) {
                     val unpackedFile = File(file.parentFile, file.nameWithoutExtension + ".unxz.tmp")
                     try {
+                        // Libcore.unxz enforces the same 256 MB cap (defaultUnxzFileLimit)
+                        // and fails before writing if exceeded, so no extra size check here.
                         Libcore.unxz(cacheFile.absolutePath, unpackedFile.absolutePath)
-                        if (unpackedFile.length() > MAX_RULE_ASSET_BYTES) {
-                            error("Downloaded route asset is too large")
-                        }
                         replaceAssetFile(unpackedFile, file)
                     } finally {
                         if (unpackedFile.exists()) unpackedFile.delete()

@@ -2,7 +2,6 @@ package libcore
 
 import (
 	"archive/zip"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -35,11 +34,6 @@ func Unxz(archive string, path string) (err error) {
 		return err
 	}
 	tmpPath := o.Name()
-	if err = o.Chmod(0666); err != nil {
-		_ = o.Close()
-		_ = os.Remove(tmpPath)
-		return err
-	}
 	defer func() {
 		if err != nil {
 			_ = os.Remove(tmpPath)

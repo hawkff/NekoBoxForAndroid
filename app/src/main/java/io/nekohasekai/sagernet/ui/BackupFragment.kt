@@ -371,9 +371,9 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
 
                 // get the latest backup file name
                 val latestBackup = client.newCall(propfindRequest).execute().use { response ->
-                    if (!response.isSuccessful && response.code != 207) {
+                    if (response.code != 207) {
                         Logs.e("WebDAV restore - PROPFIND failed: ${response.code} ${response.message}")
-                        throw Exception("Failed to list directory: ${response.message}")
+                        throw Exception("Failed to list directory (${response.code}): ${response.message}")
                     }
 
                     val responseBody = response.body?.byteStream()
