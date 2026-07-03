@@ -26,13 +26,16 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -72,7 +75,7 @@ func main() {
 	// network use, so the j library's http.DefaultClient websocket dials resolve
 	// off the VPN fake-IP resolver and route their sockets around the tun.
 	if *protectPath != "" {
-		installProtectedDefaults(prot, *dnsServer)
+		installProtectedDefaults(prot, *dnsServer, *debug)
 		mobile.SetProtector(prot)
 	}
 	if *dnsServer != "" {
@@ -103,18 +106,34 @@ func main() {
 // the default HTTP client (the j library's websocket handshakes) is protected via
 // protect_path before connect. Must run before any goroutine creates a client.
 //
+// The protected signaling sockets are also MSS-clamped (TCP_MAXSEG) so an oversized
+// inbound TLS certificate flight cannot be silently dropped on a reduced-MTU routed
+// path, and the transport carries explicit handshake/response timeouts so any stall
+// surfaces as a typed error in seconds rather than blocking until the readiness
+// deadline. Under debug, each request's connection stages are traced.
+//
 // IPv4-only: the signaling dials are forced to tcp4, which also limits lookups to A
 // records. On a routed/VPN path the underlying physical interface is commonly
 // v4-only; a carrier host that also publishes an AAAA (e.g. framatalk.org) would
 // otherwise have its protected socket dial the unreachable v6 address and hang
 // silently until the readiness deadline instead of connecting over v4. DNS queries
 // themselves are forced to udp4/tcp4 too, unless dnsServer is a v6 literal.
-func installProtectedDefaults(prot *protector, dnsServer string) {
-	control := func(_, _ string, c syscall.RawConn) error {
+func installProtectedDefaults(prot *protector, dnsServer string, debug bool) {
+	control := func(network, _ string, c syscall.RawConn) error {
 		var perr error
 		if err := c.Control(func(fd uintptr) {
 			if !prot.Protect(int(fd)) {
 				perr = unix.EPERM
+				return
+			}
+			// Cap the advertised MSS on the protected signaling sockets. On a routed
+			// path the effective MTU is often below 1500 with ICMP frag-needed
+			// filtered, so path-MTU discovery never converges and a peer whose TLS
+			// certificate flight arrives in full-size segments (e.g. framatalk.org on
+			// Hetzner) is silently dropped mid-handshake -> the read blocks until the
+			// readiness deadline. A conservative MSS makes those inbound segments fit.
+			if strings.HasPrefix(network, "tcp") {
+				_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG, 1200)
 			}
 		}); err != nil {
 			return err
@@ -165,7 +184,7 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		Control:   control,
 		Resolver:  net.DefaultResolver,
 	}
-	http.DefaultTransport = &http.Transport{
+	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer.DialContext(ctx, forceIPv4Network(network), addr)
@@ -174,8 +193,42 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
+	if debug {
+		// Stage-trace the signaling dials so a stall (DNS / TCP connect / TLS
+		// handshake / header write / first response byte) is pinpointed instead of
+		// showing up as 60s of silence. Only under -debug (logs request URLs).
+		http.DefaultTransport = traceTransport{next: transport}
+	} else {
+		http.DefaultTransport = transport
+	}
+}
+
+// traceTransport wraps an http.RoundTripper and logs the connection stages of each
+// request via net/http/httptrace, so a stall is attributable to a specific stage
+// (DNS / TCP connect / TLS handshake / header write / first response byte) rather
+// than showing up as silence until the readiness deadline. Debug-only.
+type traceTransport struct{ next http.RoundTripper }
+
+func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	trace := &httptrace.ClientTrace{
+		GetConn:           func(hp string) { log.Printf("trace: get-conn %s", hp) },
+		DNSStart:          func(i httptrace.DNSStartInfo) { log.Printf("trace: dns-start %s", i.Host) },
+		DNSDone:           func(i httptrace.DNSDoneInfo) { log.Printf("trace: dns-done %v err=%v", i.Addrs, i.Err) },
+		ConnectStart:      func(nw, addr string) { log.Printf("trace: connect-start %s %s", nw, addr) },
+		ConnectDone:       func(nw, addr string, err error) { log.Printf("trace: connect-done %s %s err=%v", nw, addr, err) },
+		TLSHandshakeStart: func() { log.Printf("trace: tls-start") },
+		TLSHandshakeDone: func(cs tls.ConnectionState, err error) {
+			log.Printf("trace: tls-done proto=%q err=%v", cs.NegotiatedProtocol, err)
+		},
+		WroteHeaders:         func() { log.Printf("trace: wrote-headers") },
+		GotFirstResponseByte: func() { log.Printf("trace: first-byte") },
+	}
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	log.Printf("trace: round-trip %s %s", req.Method, req.URL)
+	return t.next.RoundTrip(req)
 }
 
 // protector sends each new socket fd to libcore's protect_path unix-socket
