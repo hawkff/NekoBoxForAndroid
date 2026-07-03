@@ -111,7 +111,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     // Robolectric is available for tests that must touch Android framework classes;
     // prefer extracting pure functions over using it (see Plan 007).
-    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 
     // Instrumented tests (androidTest) — Room migration verification on a real SQLite.
     // Runs on a device/emulator (see .depot/workflows/android-instrumented.yml), not the JVM.
