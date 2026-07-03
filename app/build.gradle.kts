@@ -57,7 +57,7 @@ dependencies {
 
     implementation(fileTree("libs"))
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.activity:activity-ktx:1.10.1")
@@ -108,7 +108,7 @@ dependencies {
 
     // Unit tests (pure-JVM, run via :app:testOssDebugUnitTest — no device/libcore needed).
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     // Robolectric is available for tests that must touch Android framework classes;
     // prefer extracting pure functions over using it (see Plan 007).
     testImplementation("org.robolectric:robolectric:4.16")
