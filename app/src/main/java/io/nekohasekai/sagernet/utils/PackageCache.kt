@@ -28,12 +28,20 @@ object PackageCache {
     // called from init (suspend)
     fun register() {
         if (registerd.getAndSet(true)) return
-        reload()
-        app.listenForPackageChanges(false) {
+        try {
             reload()
-            labelMap.clear()
+            app.listenForPackageChanges(false) {
+                reload()
+                labelMap.clear()
+            }
+        } catch (e: Throwable) {
+            // Never leave `loaded` permanently locked or block a later retry: on a
+            // failed first load, allow re-registration and still unlock waiters.
+            registerd.set(false)
+            throw e
+        } finally {
+            if (loaded.isLocked) loaded.unlock()
         }
-        loaded.unlock()
     }
 
     @SuppressLint("InlinedApi")

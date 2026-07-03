@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.ui.ThemedActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -56,6 +57,8 @@ class GroupInterfaceAdapter(val context: ThemedActivity) : GroupManager.Interfac
                                 group.displayName(),
                             ),
                         ).show()
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Logs.w(e)
                     }
@@ -104,6 +107,8 @@ class GroupInterfaceAdapter(val context: ThemedActivity) : GroupManager.Interfac
                             group.displayName(),
                         ),
                     ).setMessage(status.trim()).setPositiveButton(android.R.string.ok, null).show()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Logs.w(e)
                 }
@@ -116,6 +121,8 @@ class GroupInterfaceAdapter(val context: ThemedActivity) : GroupManager.Interfac
             if (context.isFinishing || context.isDestroyed) return@onMainDispatcher
             try {
                 context.snackbar(message).show()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Logs.w(e)
             }
