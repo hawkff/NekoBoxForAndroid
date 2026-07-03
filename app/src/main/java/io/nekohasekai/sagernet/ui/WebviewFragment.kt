@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.MenuItem
@@ -68,12 +69,24 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
 
     private fun dashboardUrl(): String {
         val base = DataStore.yacdURL
-        // Only inject the token into the local controller's own UI; never append
-        // it to a user-configured remote dashboard URL.
-        if (!base.startsWith("http://127.0.0.1:9090")) return base
-        if (base.contains("secret=")) return base
-        val sep = if (base.contains('?')) "&" else "?"
-        return base + sep + "hostname=127.0.0.1&port=9090&secret=" + DataStore.clashApiSecret
+        val uri = try {
+            Uri.parse(base)
+        } catch (e: Exception) {
+            return base
+        }
+        // Only inject the token into the local controller's own UI; never append it
+        // to a user-configured remote dashboard URL. Match host + port exactly (a
+        // prefix check would also match e.g. 127.0.0.1:90909).
+        if (!(uri.scheme == "http" && uri.host == "127.0.0.1" && uri.port == 9090)) return base
+        if (uri.getQueryParameter("secret") != null) return base
+        // Build the query via Uri so the params land in the query component, not
+        // inside a #fragment (appending a raw "?..." after a fragment hides them).
+        return uri.buildUpon()
+            .appendQueryParameter("hostname", "127.0.0.1")
+            .appendQueryParameter("port", "9090")
+            .appendQueryParameter("secret", DataStore.clashApiSecret)
+            .build()
+            .toString()
     }
 
     @SuppressLint("CheckResult")
