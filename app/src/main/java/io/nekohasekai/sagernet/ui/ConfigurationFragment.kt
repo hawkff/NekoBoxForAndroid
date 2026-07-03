@@ -814,9 +814,14 @@ class ConfigurationFragment @JvmOverloads constructor(
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
+        // Group display name for the minimize->notification callback. The DAO read must stay off
+        // the main thread, so it is fetched inside the worker below and cached here for the
+        // callback (which fires later, on user tap).
+        var groupName = ""
 
         val mainJob = runOnDefaultDispatcher {
             val group = DataStore.currentGroup()
+            groupName = group.displayName()
             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id).filter {
                 if (icmpPing) {
                     if (it.requireBean().canICMPing()) {
@@ -952,7 +957,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.dialogStatus.set(1)
             test.notification = ConnectionTestNotification(
                 dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}",
+                "[${groupName}] ${getString(R.string.connection_test)}",
             )
             dialog.hide()
         }
@@ -964,9 +969,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         val test = TestDialog()
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
+        // See pingTest(): cache the group name off-thread for the minimize callback.
+        var groupName = ""
 
         val mainJob = runOnDefaultDispatcher {
             val group = DataStore.currentGroup()
+            groupName = group.displayName()
             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
             test.proxyN = profilesList.size
             val profiles = ConcurrentLinkedQueue(profilesList)
@@ -1034,7 +1042,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.dialogStatus.set(1)
             test.notification = ConnectionTestNotification(
                 dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}",
+                "[${groupName}] ${getString(R.string.connection_test)}",
             )
             dialog.hide()
         }

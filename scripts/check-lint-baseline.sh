@@ -14,7 +14,11 @@ if [ ! -f "$BASELINE" ]; then
     exit 0
 fi
 
-count_issues() { grep -c "<issue" "$1" 2>/dev/null || echo 0; }
+count_issues() {
+    # grep -c prints the count but exits 1 when there are no matches; under `set -e` that would
+    # abort, so tolerate the no-match case and normalize to a single integer.
+    grep -c "<issue" "$1" || true
+}
 
 current=$(count_issues "$BASELINE")
 
@@ -40,7 +44,7 @@ if [ -z "$merge_base" ]; then
 fi
 
 if git cat-file -e "$merge_base:$BASELINE" 2>/dev/null; then
-    baseline_old=$(git show "$merge_base:$BASELINE" | grep -c "<issue" || echo 0)
+    baseline_old=$(git show "$merge_base:$BASELINE" | { grep -c "<issue" || true; })
 else
     baseline_old=0
 fi

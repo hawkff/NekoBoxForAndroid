@@ -70,22 +70,21 @@ class TrafficLooper(
     }
 
     /**
-     * Add this session's not-yet-persisted delta into the profile's lifetime columns and advance
-     * the flushed marker. Idempotent: a second call before more traffic flows adds nothing, so
-     * re-entrant persist() / a selector switch never double-counts. Gated by the same
-     * profileTrafficStatistics preference as the callers.
+     * Add this session's not-yet-persisted delta into the profile's lifetime columns, advancing
+     * the flushed marker only AFTER the DB write completes so a failed/incomplete write does not
+     * silently drop bytes. suspend so the caller awaits the write on its own coroutine.
+     * Idempotent: a second call before more traffic flows adds nothing, so re-entrant persist()
+     * / a selector switch never double-counts. Gated by profileTrafficStatistics like its callers.
      */
-    private fun flushLifetimeDelta(id: Long, item: TrafficUpdater.TrafficLooperData) {
+    private suspend fun flushLifetimeDelta(id: Long, item: TrafficUpdater.TrafficLooperData) {
         val rxDelta = (item.rx - item.rxBase) - item.lifetimeFlushedRx
         val txDelta = (item.tx - item.txBase) - item.lifetimeFlushedTx
-        if (rxDelta <= 0 && txDelta <= 0) return
         val rxAdd = if (rxDelta > 0) rxDelta else 0
         val txAdd = if (txDelta > 0) txDelta else 0
+        if (rxAdd == 0L && txAdd == 0L) return
+        ProfileManager.addLifetimeTraffic(id, rxAdd, txAdd)
         item.lifetimeFlushedRx += rxAdd
         item.lifetimeFlushedTx += txAdd
-        runOnDefaultDispatcher {
-            ProfileManager.addLifetimeTraffic(id, rxAdd, txAdd)
-        }
     }
 
     fun start() {
@@ -110,13 +109,14 @@ class TrafficLooper(
             ignore = true
             // post traffic when switch
             if (DataStore.profileTrafficStatistics) {
+                val switchedFrom = this
                 data.proxy?.config?.trafficMap?.get(tag)?.firstOrNull()?.let {
                     it.rx = rx
                     it.tx = tx
                     runOnDefaultDispatcher {
                         ProfileManager.updateTraffic(it.id, it.rx, it.tx)
+                        flushLifetimeDelta(it.id, switchedFrom)
                     }
-                    flushLifetimeDelta(it.id, this)
                 }
             }
         }
