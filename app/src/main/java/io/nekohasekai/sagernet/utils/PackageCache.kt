@@ -19,7 +19,9 @@ object PackageCache {
     lateinit var installedPluginPackages: Map<String, PackageInfo>
     lateinit var installedApps: Map<String, ApplicationInfo>
     lateinit var packageMap: Map<String, Int>
-    val uidMap = HashMap<Int, HashSet<String>>()
+
+    @Volatile
+    var uidMap: Map<Int, Set<String>> = emptyMap()
     val loaded = Mutex(true)
     var registerd = AtomicBoolean(false)
 
@@ -57,29 +59,25 @@ object PackageCache {
         val installed = app.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
         installedApps = installed.associateBy { it.packageName }
         packageMap = installed.associate { it.packageName to it.uid }
-        uidMap.clear()
+        val newUidMap = HashMap<Int, HashSet<String>>()
         for (info in installed) {
-            val uid = info.uid
-            uidMap.getOrPut(uid) { HashSet() }.add(info.packageName)
+            newUidMap.getOrPut(info.uid) { HashSet() }.add(info.packageName)
         }
+        uidMap = newUidMap
     }
 
     operator fun get(uid: Int) = uidMap[uid]
     operator fun get(packageName: String) = packageMap[packageName]
 
     fun awaitLoadSync() {
-        if (::packageMap.isInitialized) {
-            return
-        }
+        if (::packageMap.isInitialized) return
+        // Ensure registration has started exactly once; the winner unlocks `loaded`
+        // after the first reload(). Losers fall through and await the mutex.
         if (!registerd.get()) {
             register()
-            return
         }
-        runBlocking {
-            loaded.withLock {
-                // just await
-            }
-        }
+        if (::packageMap.isInitialized) return
+        runBlocking { loaded.withLock { /* await first reload */ } }
     }
 
     private val labelMap = mutableMapOf<String, String>()
