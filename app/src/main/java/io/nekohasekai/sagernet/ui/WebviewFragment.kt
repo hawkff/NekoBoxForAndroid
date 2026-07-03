@@ -63,7 +63,17 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                 super.onPageFinished(view, url)
             }
         }
-        mWebView.loadUrl(DataStore.yacdURL)
+        mWebView.loadUrl(dashboardUrl())
+    }
+
+    private fun dashboardUrl(): String {
+        val base = DataStore.yacdURL
+        // Only inject the token into the local controller's own UI; never append
+        // it to a user-configured remote dashboard URL.
+        if (!base.startsWith("http://127.0.0.1:9090")) return base
+        if (base.contains("secret=")) return base
+        val sep = if (base.contains('?')) "&" else "?"
+        return base + sep + "hostname=127.0.0.1&port=9090&secret=" + DataStore.clashApiSecret
     }
 
     @SuppressLint("CheckResult")
@@ -78,7 +88,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     .setView(view)
                     .setPositiveButton(android.R.string.ok) { _, _ ->
                         DataStore.yacdURL = view.text.toString()
-                        mWebView.loadUrl(DataStore.yacdURL)
+                        mWebView.loadUrl(dashboardUrl())
                     }
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
