@@ -10,11 +10,23 @@ import io.nekohasekai.sagernet.utils.Commandline
 import kotlinx.coroutines.suspendCancellableCoroutine
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
     BoxInstance(profile) {
+
+    // close() can be reached from two paths that may overlap on cancellation: the
+    // suspendCancellableCoroutine's invokeOnCancellation and the `use { }` block's
+    // exit. BoxInstance.close() is not safe to run twice (native box.close()), so
+    // guard it to run exactly once.
+    private val closed = AtomicBoolean(false)
+
+    override fun close() {
+        if (closed.getAndSet(true)) return
+        super.close()
+    }
 
     suspend fun doTest(): Int = suspendCancellableCoroutine { c ->
         processes = GuardedProcessPool {
