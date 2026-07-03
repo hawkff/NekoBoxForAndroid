@@ -6,12 +6,12 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
-import io.nekohasekai.sagernet.ktx.tryResume
-import io.nekohasekai.sagernet.ktx.tryResumeWithException
 import io.nekohasekai.sagernet.utils.Commandline
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
     BoxInstance(profile) {
@@ -19,7 +19,7 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
     suspend fun doTest(): Int = suspendCancellableCoroutine { c ->
         processes = GuardedProcessPool {
             Logs.w(it)
-            c.tryResumeWithException(it)
+            if (c.isActive) c.resumeWithException(it)
         }
         // Close the box/sidecars if the caller cancels while the test is in flight
         // (e.g. the user pressed Stop). This prevents leaking up to
@@ -45,9 +45,10 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                         // clear error rather than a misleading connection failure.
                         awaitExternalProcessesReady(strict = true)
                     }
-                    c.tryResume(Libcore.urlTest(box, link, timeout))
+                    val result = Libcore.urlTest(box, link, timeout)
+                    if (c.isActive) c.resume(result)
                 } catch (e: Exception) {
-                    c.tryResumeWithException(e)
+                    if (c.isActive) c.resumeWithException(e)
                 }
             }
         }
