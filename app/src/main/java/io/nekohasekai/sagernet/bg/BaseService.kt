@@ -539,7 +539,10 @@ class BaseService {
 
                     Executable.killAll() // clean up old processes
                     preInit()
-                    proxy.init()
+                    // buildConfig() (via proxy.init()) does synchronous group/profile DAO reads;
+                    // run it off the main thread so it works with the main-thread-DB allowance
+                    // removed (Plan 027). init() is suspend and does not touch the UI.
+                    onDefaultDispatcher { proxy.init() }
                     DataStore.currentProfile = profile.id
 
                     proxy.processes = GuardedProcessPool {

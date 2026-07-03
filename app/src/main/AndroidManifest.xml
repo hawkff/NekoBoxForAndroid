@@ -136,6 +136,8 @@
                 <data android:scheme="hysteria" />
                 <data android:scheme="masterdns" />
                 <data android:scheme="olcrtc" />
+                <data android:scheme="tuic" />
+                <data android:scheme="juicity" />
 
             </intent-filter>
 
