@@ -202,8 +202,7 @@ data class ProxyEntity(
         ProtocolRegistry.forType(type)?.let { it.setBean(this, it.deserialize(byteArray)) }
     }
 
-    fun displayType(): String =
-        ProtocolRegistry.forType(type)?.displayType?.invoke(this) ?: "Undefined type $type"
+    fun displayType(): String = ProtocolRegistry.forType(type)?.displayType?.invoke(this) ?: "Undefined type $type"
 
     fun displayName() = requireBean().displayName()
     fun displayAddress() = requireBean().displayAddress()
@@ -471,7 +470,9 @@ data class ProxyEntity(
 
         // Additive lifetime accumulation (schema v12). Callers pass the per-session DELTA since
         // the last flush (never absolute totals) so re-entrant persist() cannot double-count.
-        @Query("UPDATE proxy_entities SET lifetimeRx = lifetimeRx + :rxDelta, lifetimeTx = lifetimeTx + :txDelta WHERE id = :proxyId")
+        @Query(
+            "UPDATE proxy_entities SET lifetimeRx = lifetimeRx + :rxDelta, lifetimeTx = lifetimeTx + :txDelta WHERE id = :proxyId",
+        )
         fun addLifetimeTraffic(proxyId: Long, rxDelta: Long, txDelta: Long): Int
 
         @Insert

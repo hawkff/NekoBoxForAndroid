@@ -957,7 +957,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.dialogStatus.set(1)
             test.notification = ConnectionTestNotification(
                 dialog.context,
-                "[${groupName}] ${getString(R.string.connection_test)}",
+                "[$groupName] ${getString(R.string.connection_test)}",
             )
             dialog.hide()
         }
@@ -1042,7 +1042,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.dialogStatus.set(1)
             test.notification = ConnectionTestNotification(
                 dialog.context,
-                "[${groupName}] ${getString(R.string.connection_test)}",
+                "[$groupName] ${getString(R.string.connection_test)}",
             )
             dialog.hide()
         }

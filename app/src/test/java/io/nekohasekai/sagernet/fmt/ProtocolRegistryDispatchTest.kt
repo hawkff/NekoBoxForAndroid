@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.fmt
 
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
@@ -19,7 +20,6 @@ import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
-import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSBean
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSBean
@@ -80,26 +80,111 @@ class ProtocolRegistryDispatchTest {
         assertArrayEquals("putByteArray dispatch differs for ${bean.javaClass.simpleName}", direct, roundTrip)
     }
 
-    private fun socks() = SOCKSBean().apply { serverAddress = "192.0.2.1"; serverPort = 1080; username = "u"; password = "p" }
-    private fun http() = HttpBean().apply { serverAddress = "192.0.2.2"; serverPort = 8080; username = "u"; password = "p" }
-    private fun ss() = ShadowsocksBean().apply { serverAddress = "192.0.2.3"; serverPort = 8388; method = "aes-128-gcm"; password = "p" }
-    private fun ssr() = ShadowsocksRBean().apply { serverAddress = "192.0.2.4"; serverPort = 8389; method = "aes-128-cfb"; password = "p"; protocol = "origin"; obfs = "plain" }
-    private fun vmess() = VMessBean().apply { serverAddress = "192.0.2.5"; serverPort = 443; uuid = "b831381d-6324-4d53-ad4f-8cda48b30811" }
-    private fun trojan() = TrojanBean().apply { serverAddress = "192.0.2.6"; serverPort = 443; password = "p" }
-    private fun trojanGo() = TrojanGoBean().apply { serverAddress = "192.0.2.7"; serverPort = 443; password = "p" }
-    private fun mieru() = MieruBean().apply { serverAddress = "192.0.2.8"; serverPort = 4443; username = "u"; password = "p" }
-    private fun naive() = NaiveBean().apply { serverAddress = "192.0.2.9"; serverPort = 443; username = "u"; password = "p" }
-    private fun hysteria() = HysteriaBean().apply { serverAddress = "192.0.2.10"; serverPorts = "443" }
-    private fun ssh() = SSHBean().apply { serverAddress = "192.0.2.11"; serverPort = 22; username = "u"; password = "p" }
-    private fun wg() = WireGuardBean().apply { serverAddress = "192.0.2.12"; serverPort = 51820 }
-    private fun awg() = AmneziaWGBean().apply { serverAddress = "192.0.2.13"; serverPort = 51820 }
-    private fun tuic() = TuicBean().apply { serverAddress = "192.0.2.14"; serverPort = 443; uuid = "00000000-0000-0000-0000-000000000000"; token = "t" }
-    private fun juicity() = JuicityBean().apply { serverAddress = "192.0.2.15"; serverPort = 443; uuid = "00000000-0000-0000-0000-000000000000"; password = "p" }
-    private fun shadowTls() = ShadowTLSBean().apply { serverAddress = "192.0.2.16"; serverPort = 443 }
-    private fun anyTls() = AnyTLSBean().apply { serverAddress = "192.0.2.17"; serverPort = 443; password = "p" }
-    private fun snell() = SnellBean().apply { serverAddress = "192.0.2.18"; serverPort = 443; psk = "k" }
-    private fun masterDnsVpn() = MasterDnsVpnBean().apply { serverAddress = "192.0.2.19"; serverPort = 443 }
-    private fun olcrtc() = OlcrtcBean().apply { serverAddress = "192.0.2.20"; serverPort = 443 }
+    private fun socks() = SOCKSBean().apply {
+        serverAddress = "192.0.2.1"
+        serverPort = 1080
+        username = "u"
+        password = "p"
+    }
+    private fun http() = HttpBean().apply {
+        serverAddress = "192.0.2.2"
+        serverPort = 8080
+        username = "u"
+        password = "p"
+    }
+    private fun ss() = ShadowsocksBean().apply {
+        serverAddress = "192.0.2.3"
+        serverPort = 8388
+        method = "aes-128-gcm"
+        password = "p"
+    }
+    private fun ssr() = ShadowsocksRBean().apply {
+        serverAddress = "192.0.2.4"
+        serverPort = 8389
+        method = "aes-128-cfb"
+        password = "p"
+        protocol = "origin"
+        obfs = "plain"
+    }
+    private fun vmess() = VMessBean().apply {
+        serverAddress = "192.0.2.5"
+        serverPort = 443
+        uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+    }
+    private fun trojan() = TrojanBean().apply {
+        serverAddress = "192.0.2.6"
+        serverPort = 443
+        password = "p"
+    }
+    private fun trojanGo() = TrojanGoBean().apply {
+        serverAddress = "192.0.2.7"
+        serverPort = 443
+        password = "p"
+    }
+    private fun mieru() = MieruBean().apply {
+        serverAddress = "192.0.2.8"
+        serverPort = 4443
+        username = "u"
+        password = "p"
+    }
+    private fun naive() = NaiveBean().apply {
+        serverAddress = "192.0.2.9"
+        serverPort = 443
+        username = "u"
+        password = "p"
+    }
+    private fun hysteria() = HysteriaBean().apply {
+        serverAddress = "192.0.2.10"
+        serverPorts = "443"
+    }
+    private fun ssh() = SSHBean().apply {
+        serverAddress = "192.0.2.11"
+        serverPort = 22
+        username = "u"
+        password = "p"
+    }
+    private fun wg() = WireGuardBean().apply {
+        serverAddress = "192.0.2.12"
+        serverPort = 51820
+    }
+    private fun awg() = AmneziaWGBean().apply {
+        serverAddress = "192.0.2.13"
+        serverPort = 51820
+    }
+    private fun tuic() = TuicBean().apply {
+        serverAddress = "192.0.2.14"
+        serverPort = 443
+        uuid = "00000000-0000-0000-0000-000000000000"
+        token = "t"
+    }
+    private fun juicity() = JuicityBean().apply {
+        serverAddress = "192.0.2.15"
+        serverPort = 443
+        uuid = "00000000-0000-0000-0000-000000000000"
+        password = "p"
+    }
+    private fun shadowTls() = ShadowTLSBean().apply {
+        serverAddress = "192.0.2.16"
+        serverPort = 443
+    }
+    private fun anyTls() = AnyTLSBean().apply {
+        serverAddress = "192.0.2.17"
+        serverPort = 443
+        password = "p"
+    }
+    private fun snell() = SnellBean().apply {
+        serverAddress = "192.0.2.18"
+        serverPort = 443
+        psk = "k"
+    }
+    private fun masterDnsVpn() = MasterDnsVpnBean().apply {
+        serverAddress = "192.0.2.19"
+        serverPort = 443
+    }
+    private fun olcrtc() = OlcrtcBean().apply {
+        serverAddress = "192.0.2.20"
+        serverPort = 443
+    }
     private fun chain() = ChainBean().apply { name = "chain" }
     private fun config() = ConfigBean().apply { name = "config" }
 
