@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.os.BundleCompat
 import androidx.core.view.isGone
@@ -784,6 +785,22 @@ class ConfigurationGroupFragment : Fragment() {
                     Formatter.formatFileSize(view.context, tx),
                     Formatter.formatFileSize(view.context, rx),
                 )
+            }
+
+            // Read-only lifetime (all-time) totals surfaced as a long-press tooltip on the traffic
+            // text (schema v12; accumulated by TrafficLooper). Zero layout change; shown only when
+            // there is accumulated history.
+            if (proxyEntity.lifetimeRx + proxyEntity.lifetimeTx > 0L) {
+                TooltipCompat.setTooltipText(
+                    trafficText,
+                    view.context.getString(
+                        R.string.lifetime_traffic,
+                        Formatter.formatFileSize(view.context, proxyEntity.lifetimeTx),
+                        Formatter.formatFileSize(view.context, proxyEntity.lifetimeRx),
+                    ),
+                )
+            } else {
+                TooltipCompat.setTooltipText(trafficText, null)
             }
 
             var address = proxyEntity.displayAddress()

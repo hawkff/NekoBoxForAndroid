@@ -62,6 +62,14 @@ data class ProxyEntity(
     var userOrder: Long = 0L,
     var tx: Long = 0L,
     var rx: Long = 0L,
+    // Lifetime (all-time) totals, accumulated across sessions. Additive columns (schema v12);
+    // tx/rx above stay the live/session value the UI already shows. Not part of the Kryo
+    // serializeToBuffer wire format (backup/export stats are out of scope), so the on-disk
+    // blob format is unchanged. A DB default of 0 is required for the additive AutoMigration.
+    @ColumnInfo(defaultValue = "0")
+    var lifetimeRx: Long = 0L,
+    @ColumnInfo(defaultValue = "0")
+    var lifetimeTx: Long = 0L,
     var status: Int = 0,
     var ping: Int = 0,
     var uuid: String = "",
@@ -460,6 +468,11 @@ data class ProxyEntity(
 
         @Query("UPDATE proxy_entities SET rx = :rx, tx = :tx WHERE id = :proxyId")
         fun updateTraffic(proxyId: Long, rx: Long, tx: Long): Int
+
+        // Additive lifetime accumulation (schema v12). Callers pass the per-session DELTA since
+        // the last flush (never absolute totals) so re-entrant persist() cannot double-count.
+        @Query("UPDATE proxy_entities SET lifetimeRx = lifetimeRx + :rxDelta, lifetimeTx = lifetimeTx + :txDelta WHERE id = :proxyId")
+        fun addLifetimeTraffic(proxyId: Long, rxDelta: Long, txDelta: Long): Int
 
         @Insert
         fun addProxy(proxy: ProxyEntity): Long

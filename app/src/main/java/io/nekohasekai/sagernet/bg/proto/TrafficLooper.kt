@@ -55,6 +55,7 @@ class TrafficLooper(
                 ent.rx = item.rx
                 ent.tx = item.tx
                 ProfileManager.updateTraffic(ent.id, ent.rx, ent.tx)
+                flushLifetimeDelta(ent.id, item)
                 traffic[ent.id] = TrafficData(
                     id = ent.id,
                     rx = ent.rx,
@@ -66,6 +67,25 @@ class TrafficLooper(
             b.cbTrafficUpdateList(ArrayList(traffic.values))
         }
         Logs.d("finally traffic post done")
+    }
+
+    /**
+     * Add this session's not-yet-persisted delta into the profile's lifetime columns and advance
+     * the flushed marker. Idempotent: a second call before more traffic flows adds nothing, so
+     * re-entrant persist() / a selector switch never double-counts. Gated by the same
+     * profileTrafficStatistics preference as the callers.
+     */
+    private fun flushLifetimeDelta(id: Long, item: TrafficUpdater.TrafficLooperData) {
+        val rxDelta = (item.rx - item.rxBase) - item.lifetimeFlushedRx
+        val txDelta = (item.tx - item.txBase) - item.lifetimeFlushedTx
+        if (rxDelta <= 0 && txDelta <= 0) return
+        val rxAdd = if (rxDelta > 0) rxDelta else 0
+        val txAdd = if (txDelta > 0) txDelta else 0
+        item.lifetimeFlushedRx += rxAdd
+        item.lifetimeFlushedTx += txAdd
+        runOnDefaultDispatcher {
+            ProfileManager.addLifetimeTraffic(id, rxAdd, txAdd)
+        }
     }
 
     fun start() {
@@ -96,6 +116,7 @@ class TrafficLooper(
                     runOnDefaultDispatcher {
                         ProfileManager.updateTraffic(it.id, it.rx, it.tx)
                     }
+                    flushLifetimeDelta(it.id, this)
                 }
             }
         }
