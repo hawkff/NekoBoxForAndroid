@@ -189,7 +189,13 @@ func installProtectedDefaults(prot *protector, dnsServer string, debug bool) {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer.DialContext(ctx, forceIPv4Network(network), addr)
 		},
-		ForceAttemptHTTP2:     true,
+		// Disable HTTP/2 for signaling. The WebSocket upgrade the XMPP client performs
+		// cannot ride an h2 connection; when a carrier negotiates h2 via ALPN (observed
+		// on framatalk.org) the upgrade request stalls with no response until the
+		// header timeout, and only a subsequent h1 attempt succeeds. Pinning h1 avoids
+		// the wasted round and connects on the first try.
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
