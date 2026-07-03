@@ -380,7 +380,7 @@ data class ProxyEntity(
         // when(bean) ladder, but declared once per protocol. An unregistered bean class errors,
         // matching the old else-branch.
         ProtocolRegistry.clearAllBeans(this)
-        val descriptor = ProtocolRegistry.forBean(bean) ?: error("Undefined type $type")
+        val descriptor = ProtocolRegistry.forBean(bean) ?: error("Unregistered bean class ${bean.javaClass.simpleName}")
         type = descriptor.type
         descriptor.setBean(this, bean)
         return this
