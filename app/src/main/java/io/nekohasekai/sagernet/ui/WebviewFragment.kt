@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
-import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.MenuItem
@@ -9,6 +8,7 @@ import android.view.View
 import android.webkit.*
 import android.widget.EditText
 import androidx.appcompat.widget.Toolbar
+import androidx.core.net.toUri
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
@@ -70,7 +70,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
     private fun dashboardUrl(): String {
         val base = DataStore.yacdURL
         val uri = try {
-            Uri.parse(base)
+            base.toUri()
         } catch (e: Exception) {
             return base
         }
