@@ -101,6 +101,12 @@ func main() {
 // instead of Android's VPN fake-IP resolver, and (2) every TCP socket dialed by
 // the default HTTP client (the j library's websocket handshakes) is protected via
 // protect_path before connect. Must run before any goroutine creates a client.
+//
+// IPv4-only: the signaling dials are forced to tcp4 and the resolver is asked for A
+// records only. On a routed/VPN path the underlying physical interface is commonly
+// v4-only; a carrier host that also publishes an AAAA (e.g. framatalk.org) would
+// otherwise have its protected socket dial the unreachable v6 address and hang
+// silently until the readiness deadline instead of connecting over v4.
 func installProtectedDefaults(prot *protector, dnsServer string) {
 	control := func(_, _ string, c syscall.RawConn) error {
 		var perr error
@@ -114,6 +120,18 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		return perr
 	}
 
+	// forceTCP4 rewrites tcp/tcp6 dial networks to tcp4 so a published AAAA never
+	// causes a silent hang on a v4-only physical path.
+	forceTCP4 := func(network string) string {
+		switch network {
+		case "tcp", "tcp6":
+			return "tcp4"
+		case "udp", "udp6":
+			return "udp4"
+		}
+		return network
+	}
+
 	if dnsServer != "" {
 		// Resolver that dials the configured DNS directly over a protected socket.
 		// dnsServer must be an IP:port literal (e.g. 9.9.9.9:53) to avoid recursion.
@@ -121,7 +139,7 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				d := net.Dialer{Timeout: 10 * time.Second, Control: control}
-				return d.DialContext(ctx, network, dnsServer)
+				return d.DialContext(ctx, forceTCP4(network), dnsServer)
 			},
 		}
 	}
@@ -133,8 +151,10 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		Resolver:  net.DefaultResolver,
 	}
 	http.DefaultTransport = &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, forceTCP4(network), addr)
+		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
