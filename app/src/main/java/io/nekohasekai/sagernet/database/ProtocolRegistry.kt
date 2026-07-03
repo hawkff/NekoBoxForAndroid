@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
+import io.nekohasekai.sagernet.fmt.hysteria.canUseSingBox
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
 import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
@@ -20,6 +21,7 @@ import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
 import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
+import io.nekohasekai.sagernet.fmt.v2ray.isTLS
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSBean
 import moe.matsuri.nb4a.proxy.config.ConfigBean
@@ -202,7 +204,7 @@ object ProtocolRegistry {
             beanClass = ChainBean::class.java,
             getBean = { it.chainBean },
             setBean = { e, b -> e.chainBean = b as ChainBean? },
-            displayType = { it.chainName },
+            displayType = { ProxyEntity.chainName },
         ),
         ProtocolDescriptor(
             type = ProxyEntity.TYPE_CONFIG,
