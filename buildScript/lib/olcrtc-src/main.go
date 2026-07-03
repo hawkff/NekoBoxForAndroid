@@ -30,6 +30,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -102,11 +103,12 @@ func main() {
 // the default HTTP client (the j library's websocket handshakes) is protected via
 // protect_path before connect. Must run before any goroutine creates a client.
 //
-// IPv4-only: the signaling dials are forced to tcp4 and the resolver is asked for A
-// records only. On a routed/VPN path the underlying physical interface is commonly
+// IPv4-only: the signaling dials are forced to tcp4, which also limits lookups to A
+// records. On a routed/VPN path the underlying physical interface is commonly
 // v4-only; a carrier host that also publishes an AAAA (e.g. framatalk.org) would
 // otherwise have its protected socket dial the unreachable v6 address and hang
-// silently until the readiness deadline instead of connecting over v4.
+// silently until the readiness deadline instead of connecting over v4. DNS queries
+// themselves are forced to udp4/tcp4 too, unless dnsServer is a v6 literal.
 func installProtectedDefaults(prot *protector, dnsServer string) {
 	control := func(_, _ string, c syscall.RawConn) error {
 		var perr error
@@ -120,9 +122,9 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		return perr
 	}
 
-	// forceTCP4 rewrites tcp/tcp6 dial networks to tcp4 so a published AAAA never
-	// causes a silent hang on a v4-only physical path.
-	forceTCP4 := func(network string) string {
+	// forceIPv4Network rewrites tcp/tcp6 -> tcp4 and udp/udp6 -> udp4 so a
+	// published AAAA never causes a silent hang on a v4-only physical path.
+	forceIPv4Network := func(network string) string {
 		switch network {
 		case "tcp", "tcp6":
 			return "tcp4"
@@ -135,11 +137,24 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 	if dnsServer != "" {
 		// Resolver that dials the configured DNS directly over a protected socket.
 		// dnsServer must be an IP:port literal (e.g. 9.9.9.9:53) to avoid recursion.
+		// Only rewrite the query transport when the server is v4: forcing udp4/tcp4
+		// toward a v6 literal (e.g. [2620:fe::fe]:53) would fail every lookup.
+		// netip.ParseAddr (unlike net.ParseIP) also handles zone-scoped literals
+		// such as fe80::1%wlan0.
+		dnsV4 := true
+		if host, _, err := net.SplitHostPort(dnsServer); err == nil {
+			if a, aerr := netip.ParseAddr(host); aerr == nil && !a.Is4() && !a.Is4In6() {
+				dnsV4 = false
+			}
+		}
 		net.DefaultResolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				if dnsV4 {
+					network = forceIPv4Network(network)
+				}
 				d := net.Dialer{Timeout: 10 * time.Second, Control: control}
-				return d.DialContext(ctx, forceTCP4(network), dnsServer)
+				return d.DialContext(ctx, network, dnsServer)
 			},
 		}
 	}
@@ -153,7 +168,7 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 	http.DefaultTransport = &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, forceTCP4(network), addr)
+			return dialer.DialContext(ctx, forceIPv4Network(network), addr)
 		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
