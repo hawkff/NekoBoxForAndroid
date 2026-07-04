@@ -128,12 +128,17 @@ func installProtectedDefaults(prot *protector, dnsServer string, debug bool) {
 			}
 			// Cap the advertised MSS on the protected signaling sockets. On a routed
 			// path the effective MTU is often below 1500 with ICMP frag-needed
-			// filtered, so path-MTU discovery never converges and a peer whose TLS
-			// certificate flight arrives in full-size segments (e.g. framatalk.org on
-			// Hetzner) is silently dropped mid-handshake -> the read blocks until the
-			// readiness deadline. A conservative MSS makes those inbound segments fit.
+			// filtered, so path-MTU discovery never converges; a large inbound flight
+			// (a TLS certificate, an HTTP body, or Jicofo's conference reply) arrives
+			// in full-size segments, one is dropped, and TCP head-of-line blocking
+			// stalls the whole stream until the readiness deadline. A conservative MSS
+			// (advertised in our SYN, so it bounds the segments the peer sends US) keeps
+			// those inbound segments small enough to pass. Must be set pre-connect,
+			// which Control guarantees.
 			if strings.HasPrefix(network, "tcp") {
-				_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG, 1200)
+				if serr := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG, 1000); serr != nil && debug {
+					log.Printf("trace: set TCP_MAXSEG failed: %v", serr)
+				}
 			}
 		}); err != nil {
 			return err
@@ -220,7 +225,11 @@ type traceTransport struct{ next http.RoundTripper }
 
 func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	trace := &httptrace.ClientTrace{
-		GetConn:           func(hp string) { log.Printf("trace: get-conn %s", hp) },
+		GetConn: func(hp string) { log.Printf("trace: get-conn %s", hp) },
+		GotConn: func(gci httptrace.GotConnInfo) {
+			log.Printf("trace: got-conn reused=%v %s", gci.Reused, gci.Conn.RemoteAddr())
+			logAdvMSS(gci.Conn)
+		},
 		DNSStart:          func(i httptrace.DNSStartInfo) { log.Printf("trace: dns-start %s", i.Host) },
 		DNSDone:           func(i httptrace.DNSDoneInfo) { log.Printf("trace: dns-done %v err=%v", i.Addrs, i.Err) },
 		ConnectStart:      func(nw, addr string) { log.Printf("trace: connect-start %s %s", nw, addr) },
@@ -235,6 +244,29 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	log.Printf("trace: round-trip %s %s", req.Method, req.URL)
 	return t.next.RoundTrip(req)
+}
+
+// logAdvMSS reports the connection's advertised/receive MSS from TCP_INFO so the trace
+// shows whether the TCP_MAXSEG clamp actually took effect on the SYN (advmss ~= clamp)
+// rather than the default (~1460). GotConn hands us the raw net.Conn (the TLS conn
+// wraps a *net.TCPConn whose SyscallConn exposes the fd).
+func logAdvMSS(conn net.Conn) {
+	type syscallConn interface {
+		SyscallConn() (syscall.RawConn, error)
+	}
+	sc, ok := conn.(syscallConn)
+	if !ok {
+		return
+	}
+	raw, err := sc.SyscallConn()
+	if err != nil {
+		return
+	}
+	_ = raw.Control(func(fd uintptr) {
+		if ti, terr := unix.GetsockoptTCPInfo(int(fd), unix.IPPROTO_TCP, unix.TCP_INFO); terr == nil {
+			log.Printf("trace: tcp-info advmss=%d rcv_mss=%d snd_mss=%d", ti.Advmss, ti.Rcv_mss, ti.Snd_mss)
+		}
+	})
 }
 
 // protector sends each new socket fd to libcore's protect_path unix-socket
