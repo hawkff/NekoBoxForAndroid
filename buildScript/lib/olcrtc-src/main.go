@@ -26,10 +26,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -115,8 +117,18 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 	}
 
 	if dnsServer != "" {
+		// dnsServer must be an IP:port literal (e.g. 9.9.9.9:53): a hostname here
+		// would be resolved through this same resolver, recursing until timeout.
+		// Fail fast on misconfiguration instead. netip.ParseAddr (unlike
+		// net.ParseIP) also accepts zone-scoped literals such as fe80::1%wlan0.
+		host, _, err := net.SplitHostPort(dnsServer)
+		if err != nil {
+			log.Fatalf("olcrtc: -dns must be an IP:port literal: %v", err)
+		}
+		if _, err := netip.ParseAddr(host); err != nil {
+			log.Fatalf("olcrtc: -dns host %q is not an IP literal", host)
+		}
 		// Resolver that dials the configured DNS directly over a protected socket.
-		// dnsServer must be an IP:port literal (e.g. 9.9.9.9:53) to avoid recursion.
 		net.DefaultResolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -133,12 +145,19 @@ func installProtectedDefaults(prot *protector, dnsServer string) {
 		Resolver:  net.DefaultResolver,
 	}
 	http.DefaultTransport = &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
+		Proxy:       http.ProxyFromEnvironment,
+		DialContext: dialer.DialContext,
+		// Disable HTTP/2 for signaling. The WebSocket upgrade the XMPP client
+		// performs cannot ride an h2 connection (RFC 7540 forbids Connection:
+		// Upgrade); when a server negotiates h2 via ALPN the upgrade request
+		// stalls with no response until the header timeout. Pinning h1 connects
+		// on the first try.
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
 }
