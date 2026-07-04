@@ -240,6 +240,12 @@
 <string name="landing_proxy">Обратный прокси</string>
 <string name="license">Лицензия</string>
 <string name="lines">%d строк</string>
+<plurals name="dns_hosts_lines">
+    <item quantity="one">%d строка</item>
+    <item quantity="few">%d строки</item>
+    <item quantity="many">%d строк</item>
+    <item quantity="other">%d строки</item>
+</plurals>
 <string name="log_level">Тип журнала</string>
 <string name="log_level_help">Удерживайте для настройки размера буфера.</string>
 <string name="logcat">Экспорт отладочной информации</string>

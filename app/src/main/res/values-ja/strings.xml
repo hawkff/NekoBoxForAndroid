@@ -277,6 +277,10 @@
     <string name="license">ライセンス</string>
     <string name="route_warn">カスタムルールを追加する前にドキュメントを必ずお読みください。さもないとインターネットに接続できなくなる場合があります。</string>
     <string name="lines">%d 行</string>
+    <plurals name="dns_hosts_lines">
+        <item quantity="other">%d 行</item>
+    </plurals>
+    <string name="not_set">未設定</string>
     <string name="night_mode">ナイトモード</string>
     <string name="language">言語</string>
     <string name="follow_system">システムに従う</string>

@@ -295,6 +295,11 @@
     <string name="route_warn">اطمینان حاصل کنید که مستندات فنی را قبل از افزودن قوانین سفارشی مطالعه کرده‌اید،
  در غیر این صورت ممکن است نتوانید به اینترنت وصل شوید.</string>
     <string name="lines">%d خط</string>
+    <plurals name="dns_hosts_lines">
+        <item quantity="one">%d خط</item>
+        <item quantity="other">%d خط</item>
+    </plurals>
+    <string name="not_set">تنظیم نشده</string>
     <string name="night_mode">حالت تاریک</string>
     <string name="follow_system">مانند سیستم</string>
     <string name="enable">فعال</string>

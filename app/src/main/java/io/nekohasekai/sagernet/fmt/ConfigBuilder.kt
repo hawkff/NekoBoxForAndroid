@@ -78,6 +78,22 @@ private fun parseHostsAddress(token: String): String? {
     return value
 }
 
+private fun parseHostsDomain(token: String): String? {
+    val domain = sanitizeDnsEntry(token).lowercase().removeSuffix(".")
+    if (domain.isEmpty() || domain.isIpAddress() || domain.length > 253) return null
+    val labels = domain.split('.')
+    if (labels.any { it.isEmpty() || it.length > 63 }) return null
+    if (labels.any { label ->
+            label.startsWith('-') ||
+                label.endsWith('-') ||
+                label.any { !(it in 'a'..'z' || it in '0'..'9' || it == '-') }
+        }
+    ) {
+        return null
+    }
+    return domain
+}
+
 // Parse the user DNS hosts rewrite list: one "domain ip [ip ...]" entry per line,
 // separated by any whitespace. Blank lines, comments (#) and malformed lines are
 // ignored instead of failing the config build. Non-IP tokens after the domain are
@@ -89,8 +105,7 @@ private fun parseDnsHosts(value: String): Map<String, List<String>> {
             .map { sanitizeDnsEntry(it) }
             .filter { it.isNotEmpty() }
         if (tokens.size < 2 || tokens.first().startsWith("#")) return@forEach
-        val domain = tokens.first().lowercase()
-        if (domain.isIpAddress()) return@forEach
+        val domain = parseHostsDomain(tokens.first()) ?: return@forEach
         val addresses = tokens.drop(1)
             .takeWhile { !it.startsWith("#") }
             .mapNotNull { parseHostsAddress(it) }

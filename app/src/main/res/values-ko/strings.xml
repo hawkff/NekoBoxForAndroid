@@ -271,6 +271,10 @@
     <string name="license">라이선스</string>
     <string name="route_warn">사용자 지정 규칙을 추가하기 전에 설명서를 반드시 읽으세요. 그렇지 않으면 인터넷에 연결하지 못할 수 있습니다.</string>
     <string name="lines">%d줄</string>
+    <plurals name="dns_hosts_lines">
+        <item quantity="other">%d줄</item>
+    </plurals>
+    <string name="not_set">설정되지 않음</string>
     <string name="night_mode">야간 모드</string>
     <string name="language">언어</string>
     <string name="follow_system">시스템 설정 따르기</string>
