@@ -139,6 +139,18 @@ func installProtectedDefaults(prot *protector, dnsServer string, debug bool) {
 				if serr := unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG, 1000); serr != nil && debug {
 					log.Printf("trace: set TCP_MAXSEG failed: %v", serr)
 				}
+				// Also clamp the receive buffer BEFORE connect. The TCP window scale is
+				// negotiated in the SYN from SO_RCVBUF, so a small buffer shrinks the
+				// advertised receive window and forces the peer to send its response in
+				// several small flights instead of one large burst. If a middlebox on the
+				// routed path mishandles window scaling or polices large bursts (the
+				// signature here: small inbound stanzas pass, large ones stall even with the
+				// MSS clamp proven on the wire), a small window lets the body trickle in.
+				// Must be set pre-connect. 32 KiB is large enough for signaling throughput
+				// yet small enough to cap any single flight.
+				if serr := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF, 32*1024); serr != nil && debug {
+					log.Printf("trace: set SO_RCVBUF failed: %v", serr)
+				}
 			}
 		}); err != nil {
 			return err
@@ -252,6 +264,13 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // SyscallConn directly; it exposes NetConn() to reach the underlying *net.TCPConn whose
 // SyscallConn does. Unwrap the TLS layer first (Go >= 1.18), otherwise the assertion
 // fails silently and no advmss is ever logged.
+//
+// It also starts a short background poll of TCP_INFO on the same fd. During a large-
+// inbound stall this shows whether ANYTHING is arriving (bytes_received / segs_in) or
+// the flight dies upstream entirely, and whether out-of-order arrivals climb (a hole at
+// the front of the stream = size-selective drop). This is the only on-device proxy for
+// an inbound packet capture, since the protected socket bypasses the tun and an
+// unrooted app cannot pcap the physical path.
 func logAdvMSS(conn net.Conn) {
 	if nc, ok := conn.(interface{ NetConn() net.Conn }); ok {
 		conn = nc.NetConn()
@@ -273,6 +292,25 @@ func logAdvMSS(conn net.Conn) {
 			log.Printf("trace: tcp-info advmss=%d rcv_mss=%d snd_mss=%d", ti.Advmss, ti.Rcv_mss, ti.Snd_mss)
 		}
 	})
+	go pollTCPInfo(raw)
+}
+
+// pollTCPInfo samples inbound TCP_INFO counters every 500ms for a window that spans a
+// typical large-inbound stall (~16s, the config.js / Jicofo reply timeout). Frozen
+// bytes_received + segs_in => the whole flight dies upstream (server/return-path, no
+// client fix). Rising segs_in with frozen bytes_received and climbing rcv_ooopack =>
+// the head (large) segment is dropped selectively while later segments arrive out of
+// order => a permanent hole at the front of the stream. Debug-only.
+func pollTCPInfo(raw syscall.RawConn) {
+	for i := 0; i < 32; i++ {
+		_ = raw.Control(func(fd uintptr) {
+			if ti, terr := unix.GetsockoptTCPInfo(int(fd), unix.IPPROTO_TCP, unix.TCP_INFO); terr == nil {
+				log.Printf("trace: tcp-info-poll t=%dms bytes_recv=%d segs_in=%d ooo=%d rcv_wnd=%d rtt=%dus",
+					i*500, ti.Bytes_received, ti.Segs_in, ti.Rcv_ooopack, ti.Rcv_wnd, ti.Rtt)
+			}
+		})
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // protector sends each new socket fd to libcore's protect_path unix-socket
