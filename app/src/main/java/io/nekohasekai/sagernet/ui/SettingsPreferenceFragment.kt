@@ -279,11 +279,13 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             editText.setHorizontallyScrolling(false)
         }
         // Concise summary: the hosts list can be long and multiline, so show a line
-        // count instead of dumping the raw value into the preference row.
+        // count instead of dumping the raw value into the preference row. Comment
+        // lines are excluded so the number reflects entries, not text lines.
         dnsHosts.summaryProvider = Preference.SummaryProvider<EditTextPreference> { preference ->
             val count = preference.text.orEmpty()
                 .lineSequence()
-                .count { it.isNotBlank() }
+                .map { it.trim() }
+                .count { it.isNotEmpty() && !it.startsWith("#") }
             if (count == 0) {
                 preference.context.getString(R.string.not_set)
             } else {
