@@ -248,14 +248,20 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // logAdvMSS reports the connection's advertised/receive MSS from TCP_INFO so the trace
 // shows whether the TCP_MAXSEG clamp actually took effect on the SYN (advmss ~= clamp)
-// rather than the default (~1460). GotConn hands us the raw net.Conn (the TLS conn
-// wraps a *net.TCPConn whose SyscallConn exposes the fd).
+// rather than the default (~1460). GotConn hands us a *tls.Conn, which does NOT expose
+// SyscallConn directly; it exposes NetConn() to reach the underlying *net.TCPConn whose
+// SyscallConn does. Unwrap the TLS layer first (Go >= 1.18), otherwise the assertion
+// fails silently and no advmss is ever logged.
 func logAdvMSS(conn net.Conn) {
+	if nc, ok := conn.(interface{ NetConn() net.Conn }); ok {
+		conn = nc.NetConn()
+	}
 	type syscallConn interface {
 		SyscallConn() (syscall.RawConn, error)
 	}
 	sc, ok := conn.(syscallConn)
 	if !ok {
+		log.Printf("trace: tcp-info no syscall.Conn (%T)", conn)
 		return
 	}
 	raw, err := sc.SyscallConn()
