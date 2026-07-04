@@ -18,10 +18,11 @@
 # parses CLI flags. We clone the pinned upstream commit and point the wrapper module at
 # it via a replace directive so the build is fully reproducible and offline-stable.
 #
-# OLCRTC_REPO/OLCRTC_COMMIT default to an upstream commit that carries the protected
-# pion net (internal/protect/pionnet.go + the jitsi SetNet hook), merged upstream in
-# openlibrecommunity/olcrtc#111. Pin to a commit at or after that merge so the media
-# path stays off the tun.
+# OLCRTC_REPO/OLCRTC_COMMIT default to the hawkff fork at a commit that carries the
+# protected pion net (internal/protect/pionnet.go + the jitsi SetNet hook, merged
+# upstream in openlibrecommunity/olcrtc#111) plus Jitsi ICE-service URL normalization.
+# Pinning at/after both keeps the media path off the tun and prevents malformed
+# service-discovery entries from failing peer-connection setup.
 #
 # Usage: ./run lib olcrtc
 set -e
@@ -34,8 +35,8 @@ if [ -z "$ANDROID_NDK_HOME" ]; then
   exit 1
 fi
 
-OLCRTC_REPO="${OLCRTC_REPO:-https://github.com/openlibrecommunity/olcrtc.git}"
-OLCRTC_COMMIT="${OLCRTC_COMMIT:-58df8899c1a12cab22282448d2e7fc25e175822b}"
+OLCRTC_REPO="${OLCRTC_REPO:-https://github.com/hawkff/olcrtc.git}"
+OLCRTC_COMMIT="${OLCRTC_COMMIT:-08a25f26da88feddc9903513039fc71f3d0449dd}"
 
 if ! command -v go >/dev/null 2>&1; then
   echo "Error: go not found on PATH (olcRTC needs Go 1.26+)." >&2
