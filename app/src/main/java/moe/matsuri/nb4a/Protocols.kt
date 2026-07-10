@@ -17,24 +17,21 @@ object Protocols {
         val type: String,
     ) {
 
-        fun hash(): String {
-            if (bean is ConfigBean) {
-                return bean.config
-            }
-            return bean.serverAddress + bean.serverPort + type
-        }
-
         override fun hashCode(): Int {
-            return hash().toByteArray().contentHashCode()
+            if (bean is ConfigBean) return bean.config.hashCode()
+            return bean.hashCode()
         }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
-            if (javaClass != other?.javaClass) return false
-
-            other as Deduplication
-
-            return hash() == other.hash()
+            if (other !is Deduplication) return false
+            if (bean is ConfigBean && other.bean is ConfigBean) {
+                return bean.config == other.bean.config
+            }
+            if (bean.javaClass != other.bean.javaClass) return false
+            // AbstractBean equality serializes without the display name. Both dedup callers run
+            // serially; they must not compare the same mutable beans concurrently.
+            return bean == other.bean
         }
     }
 
