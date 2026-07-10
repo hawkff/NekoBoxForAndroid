@@ -218,6 +218,29 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
+    fun customJsonOverlays_mergeIntoOutboundAndRoot() {
+        val profile = addProfile(
+            addGroup(),
+            SOCKSBean().apply {
+                serverAddress = "192.0.2.51"
+                serverPort = 1080
+                protocol = 2
+                name = "custom-json"
+                customOutboundJson = """{"marker":{"inner":1}}"""
+                customConfigJson = """{"route":{"final":"custom-final"},"top_level_marker":true}"""
+                initializeDefaultValues()
+            },
+        )
+
+        val root = JSONObject(build(profile).config)
+        val outbound = outbound(root, "socks")
+
+        assertEquals(1, outbound.getJSONObject("marker").getInt("inner"))
+        assertEquals("custom-final", root.getJSONObject("route").getString("final"))
+        assertTrue(root.getBoolean("top_level_marker"))
+    }
+
+    @Test
     fun blankDnsHosts_omitsHostsServer() {
         val profile = addSocks(addGroup(), "192.0.2.60", 1080, "blank-hosts")
 

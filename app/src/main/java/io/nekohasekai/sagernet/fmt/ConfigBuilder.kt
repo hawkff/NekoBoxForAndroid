@@ -699,11 +699,11 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     }
 
                     if (needGlobal && DataStore.enableTLSFragment) {
-                        val outboundMap = currentOutbound.asMap()
-                        val tlsOptions = outboundMap["tls"] as? Map<*, *>
-                        if (tlsOptions?.get("enabled") == true) {
-                            currentOutbound._hack_config_map["detour"] = TAG_FRAGMENT
-                        }
+                        val tlsEnabled = SingBoxOptions.toJsonTree(currentOutbound)
+                            .getAsJsonObject("tls")
+                            ?.get("enabled")
+                            ?.asBoolean == true
+                        if (tlsEnabled) currentOutbound._hack_config_map["detour"] = TAG_FRAGMENT
                     }
                 }
 
@@ -1327,10 +1327,10 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig
     }.let {
-        val configMap = it.asMap()
-        Util.mergeJSON(configMap, proxy.requireBean().customConfigJson)
+        val configTree = SingBoxOptions.toJsonTree(it)
+        Util.mergeJsonElement(configTree, proxy.requireBean().customConfigJson)
         ConfigBuildResult(
-            gson.toJson(configMap),
+            SingBoxOptions.treeToJson(configTree),
             externalIndexMap,
             proxy.id,
             trafficMap,
