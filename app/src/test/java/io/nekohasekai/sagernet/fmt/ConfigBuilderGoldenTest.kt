@@ -1,0 +1,248 @@
+package io.nekohasekai.sagernet.fmt
+
+import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
+import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
+import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
+import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = android.app.Application::class)
+class ConfigBuilderGoldenTest {
+
+    @Before
+    fun setUp() {
+        ConfigBuilderTestEnv.reset()
+    }
+
+    @Test
+    fun socksForTest_preservesEndpointAndHasNoInbound() {
+        val profile = addProfile(
+            addGroup(),
+            SOCKSBean().apply {
+                serverAddress = "192.0.2.10"
+                serverPort = 1080
+                username = "reader"
+                password = "alpha"
+                protocol = 2
+                name = "golden-socks"
+                initializeDefaultValues()
+            },
+        )
+
+        val result = build(profile, forTest = true)
+        val root = JSONObject(result.config)
+        val outbound = outbound(root, "socks")
+
+        assertEquals("192.0.2.10", outbound.getString("server"))
+        assertEquals(1080, outbound.getInt("server_port"))
+        assertEquals(0, root.getJSONArray("inbounds").length())
+        assertResultMaps(result, profile)
+    }
+
+    @Test
+    fun vmessForTest_preservesUuidAndSecurity() {
+        val profile = addProfile(
+            addGroup(),
+            VMessBean().apply {
+                serverAddress = "192.0.2.11"
+                serverPort = 443
+                uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+                alterId = 0
+                encryption = "auto"
+                name = "golden-vmess"
+                initializeDefaultValues()
+            },
+        )
+
+        val result = build(profile, forTest = true)
+        val outbound = outbound(JSONObject(result.config), "vmess")
+
+        assertEquals("b831381d-6324-4d53-ad4f-8cda48b30811", outbound.getString("uuid"))
+        assertEquals("auto", outbound.getString("security"))
+        assertResultMaps(result, profile)
+    }
+
+    @Test
+    fun shadowsocksForTest_preservesMethodAndPassword() {
+        val profile = addProfile(
+            addGroup(),
+            ShadowsocksBean().apply {
+                serverAddress = "192.0.2.12"
+                serverPort = 8388
+                method = "aes-256-gcm"
+                password = "bravo"
+                name = "golden-ss"
+                initializeDefaultValues()
+            },
+        )
+
+        val result = build(profile, forTest = true)
+        val outbound = outbound(JSONObject(result.config), "shadowsocks")
+
+        assertEquals("aes-256-gcm", outbound.getString("method"))
+        assertEquals("bravo", outbound.getString("password"))
+        assertResultMaps(result, profile)
+    }
+
+    @Test
+    fun chainForTest_preservesBothHopsAndDetour() {
+        val group = addGroup()
+        val first = addSocks(group, "192.0.2.21", 1081, "chain-first")
+        val second = addSocks(group, "192.0.2.22", 1082, "chain-second")
+        val chain = addProfile(
+            group,
+            ChainBean().apply {
+                name = "golden-chain"
+                proxies = listOf(first.id, second.id)
+                initializeDefaultValues()
+            },
+        )
+
+        val result = build(chain, forTest = true)
+        val socks = objects(JSONObject(result.config).getJSONArray("outbounds"))
+            .filter { it.optString("type") == "socks" }
+
+        assertEquals(2, socks.size)
+        assertEquals(
+            setOf("192.0.2.21" to 1081, "192.0.2.22" to 1082),
+            socks.map { it.getString("server") to it.getInt("server_port") }.toSet(),
+        )
+        val tags = socks.map { it.getString("tag") }.toSet()
+        assertTrue(socks.any { it.optString("detour") in tags })
+        assertResultMaps(result, chain)
+    }
+
+    @Test
+    fun hysteria2ForTest_usesNativeOutbound() {
+        val profile = addProfile(
+            addGroup(),
+            HysteriaBean().apply {
+                protocolVersion = 2
+                serverAddress = "192.0.2.30"
+                serverPorts = "8443"
+                authPayload = "charlie"
+                authPayloadType = HysteriaBean.TYPE_STRING
+                name = "golden-hy2"
+                initializeDefaultValues()
+            },
+        )
+
+        val result = build(profile, forTest = true)
+        val outbound = outbound(JSONObject(result.config), "hysteria2")
+
+        assertEquals("192.0.2.30", outbound.getString("server"))
+        assertEquals(8443, outbound.getInt("server_port"))
+        assertEquals("charlie", outbound.getString("password"))
+        assertResultMaps(result, profile)
+    }
+
+    @Test
+    fun selectorGroup_containsEveryMember() {
+        val group = addGroup(isSelector = true)
+        val first = addSocks(group, "192.0.2.41", 1081, "selector-first")
+        val second = addSocks(group, "192.0.2.42", 1082, "selector-second")
+
+        val result = build(first)
+        val selector = outbound(JSONObject(result.config), "selector")
+
+        assertEquals(
+            setOf(result.profileTagMap.getValue(first.id), result.profileTagMap.getValue(second.id)),
+            strings(selector.getJSONArray("outbounds")).toSet(),
+        )
+        assertEquals(group, result.selectorGroupId)
+        assertResultMaps(result, first)
+    }
+
+    @Test
+    fun forExport_omitsClashApiSecret() {
+        DataStore.enableClashAPI = true
+        assertEquals("export-secret", DataStore.clashApiSecret)
+        val profile = addSocks(addGroup(), "192.0.2.50", 1080, "export-socks")
+
+        val root = JSONObject(build(profile, forExport = true).config)
+        val clashApi = root.getJSONObject("experimental").getJSONObject("clash_api")
+
+        assertEquals("127.0.0.1:9090", clashApi.getString("external_controller"))
+        assertFalse(clashApi.has("secret"))
+    }
+
+    @Test
+    fun blankDnsHosts_omitsHostsServer() {
+        val profile = addSocks(addGroup(), "192.0.2.60", 1080, "blank-hosts")
+
+        val servers = objects(JSONObject(build(profile).config).getJSONObject("dns").getJSONArray("servers"))
+
+        assertFalse(servers.any { it.optString("tag") == TAG_DNS_HOSTS })
+    }
+
+    @Test
+    fun populatedDnsHosts_addsPredefinedServerAndScopedRule() {
+        DataStore.dnsHosts = "node.example 192.0.2.70 2001:db8::70"
+        val profile = addSocks(addGroup(), "192.0.2.71", 1080, "mapped-hosts")
+
+        val dns = JSONObject(build(profile).config).getJSONObject("dns")
+        val hostsServer = objects(dns.getJSONArray("servers"))
+            .single { it.optString("tag") == TAG_DNS_HOSTS }
+        val predefined = hostsServer.getJSONObject("predefined").getJSONArray("node.example")
+        val rules = objects(dns.getJSONArray("rules"))
+        val hostsRule = rules.single { it.optString("server") == TAG_DNS_HOSTS }
+
+        assertEquals("hosts", hostsServer.getString("type"))
+        assertEquals(listOf("192.0.2.70", "2001:db8::70"), strings(predefined))
+        assertEquals(listOf("A", "AAAA"), strings(hostsRule.getJSONArray("query_type")))
+        assertTrue(strings(hostsRule.getJSONArray("domain")).contains("node.example"))
+        assertTrue(rules.indexOf(hostsRule) > rules.indexOfFirst { it.optString("server") == "dns-direct" })
+    }
+
+    private fun addGroup(isSelector: Boolean = false) = ConfigBuilderTestEnv.io {
+        SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true, isSelector = isSelector))
+    }
+
+    private fun addSocks(groupId: Long, address: String, port: Int, name: String) = addProfile(
+        groupId,
+        SOCKSBean().apply {
+            serverAddress = address
+            serverPort = port
+            protocol = 2
+            this.name = name
+            initializeDefaultValues()
+        },
+    )
+
+    private fun addProfile(groupId: Long, bean: AbstractBean) = ConfigBuilderTestEnv.io {
+        ProxyEntity(groupId = groupId).apply {
+            putBean(bean)
+            id = SagerDatabase.proxyDao.addProxy(this)
+        }
+    }
+
+    private fun build(profile: ProxyEntity, forTest: Boolean = false, forExport: Boolean = false) =
+        ConfigBuilderTestEnv.io { buildConfig(profile, forTest = forTest, forExport = forExport) }
+
+    private fun assertResultMaps(result: ConfigBuildResult, profile: ProxyEntity) {
+        assertTrue(result.profileTagMap.containsKey(profile.id))
+        assertTrue(result.trafficMap.values.flatten().any { it.id == profile.id })
+    }
+
+    private fun outbound(root: JSONObject, type: String) =
+        objects(root.getJSONArray("outbounds")).single { it.optString("type") == type }
+
+    private fun objects(array: JSONArray) = (0 until array.length()).map(array::getJSONObject)
+
+    private fun strings(array: JSONArray) = (0 until array.length()).map(array::getString)
+}
