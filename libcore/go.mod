@@ -15,7 +15,7 @@ require (
 	github.com/sagernet/sing-tun v0.8.10
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/mobile v0.0.0-20240520174638-fa72addaaa1b
-	golang.org/x/sys v0.41.0
+	golang.org/x/sys v0.44.0
 )
 
 require (
