@@ -169,6 +169,42 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
+    fun selectorGroup_appliesSharedFrontAndLandingToEveryMemberChain() {
+        val supportGroup = addGroup()
+        val front = addSocks(supportGroup, "192.0.2.43", 1083, "selector-front")
+        val landing = addSocks(supportGroup, "192.0.2.44", 1084, "selector-landing")
+        val selectorGroup = addGroup(isSelector = true)
+        val first = addSocks(selectorGroup, "192.0.2.45", 1085, "selector-member-one")
+        val second = addSocks(selectorGroup, "192.0.2.46", 1086, "selector-member-two")
+        ConfigBuilderTestEnv.io {
+            SagerDatabase.groupDao.getById(selectorGroup)!!.also {
+                it.frontProxy = front.id
+                it.landingProxy = landing.id
+                SagerDatabase.groupDao.updateGroup(it)
+            }
+        }
+
+        val result = build(first)
+        val socks = objects(JSONObject(result.config).getJSONArray("outbounds"))
+            .filter { it.optString("type") == "socks" }
+        val frontOutbound = socks.single { it.getString("server") == "192.0.2.43" }
+        val memberOutbounds = socks.filter {
+            it.getString("server") in setOf("192.0.2.45", "192.0.2.46")
+        }
+        val landingOutbounds = socks.filter { it.getString("server") == "192.0.2.44" }
+
+        assertEquals(2, memberOutbounds.size)
+        assertTrue(memberOutbounds.all { it.getString("detour") == frontOutbound.getString("tag") })
+        assertEquals(2, landingOutbounds.size)
+        assertEquals(
+            memberOutbounds.map { it.getString("tag") }.toSet(),
+            landingOutbounds.map { it.getString("detour") }.toSet(),
+        )
+        assertTrue(result.trafficMap.values.all { chain -> front in chain && landing in chain })
+        assertTrue(result.profileTagMap.keys.containsAll(listOf(first.id, second.id)))
+    }
+
+    @Test
     fun forExport_omitsClashApiSecret() {
         DataStore.enableClashAPI = true
         assertEquals("export-secret", DataStore.clashApiSecret)
