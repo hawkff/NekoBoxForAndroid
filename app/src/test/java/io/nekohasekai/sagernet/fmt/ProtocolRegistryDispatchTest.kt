@@ -12,7 +12,6 @@ import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
-import io.nekohasekai.sagernet.fmt.olcrtc.toUri as toOlcrtcUri
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.toUri
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
@@ -37,14 +36,18 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import io.nekohasekai.sagernet.fmt.olcrtc.toUri as toOlcrtcUri
 
 /**
  * Wire-format safety net for the protocol descriptor registry (Plan 029, Option C).
  *
  * The registry may change *how* type dispatch is expressed (putByteArray / requireBean /
  * putBean) but must NEVER change the on-disk Kryo wire format or the persisted TYPE_* ids -
- * existing device profiles deserialize by exactly these bytes + ids. Because local builds are
- * forbidden here, this pure-JVM test (run on Depot's unit-tests workflow) is the golden net:
+ * existing device profiles deserialize by exactly these bytes + ids. This Robolectric test runs
+ * on the Namespace unit-test job and provides the golden net:
  * for every persistable bean type it asserts
  *   1. serialize -> deserialize -> serialize is byte-stable (write/read paths are symmetric), and
  *   2. the ProxyEntity type-dispatch round-trips: putBean(bean) sets the expected TYPE_* id and
@@ -54,6 +57,8 @@ import org.junit.Test
  * If the registry ever maps a type id to the wrong (de)serializer or drops a field, one of these
  * assertions fails - catching the "profiles become undeserializable / mis-typed" data hazard.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = android.app.Application::class)
 class ProtocolRegistryDispatchTest {
 
     private fun <T : AbstractBean> byteStable(bean: T) {
@@ -240,7 +245,10 @@ class ProtocolRegistryDispatchTest {
         val shadowsocks = ss().apply { initializeDefaultValues() }
         assertEquals(shadowsocks.toUri(), ProxyEntity().putBean(shadowsocks).toStdLink())
         val vmess = vmess().apply { initializeDefaultValues() }
-        assertEquals(vmess.toUriVMessVLESSTrojan(false), ProxyEntity().putBean(vmess).toStdLink())
+        assertEquals(
+            vmess.toUriVMessVLESSTrojan(false),
+            ProxyEntity().putBean(vmess).toStdLink(),
+        )
         val hysteria = hysteria().apply { initializeDefaultValues() }
         assertEquals(hysteria.toUri(), ProxyEntity().putBean(hysteria).toStdLink())
         val olcrtc = olcrtc().apply { initializeDefaultValues() }

@@ -5,23 +5,35 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import kotlinx.coroutines.test.runTest
-import libcore.Libcore
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.annotation.Implementation
-import org.robolectric.annotation.Implements
 import java.util.Base64
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class, shadows = [ShadowParserLibcore::class])
+@Config(sdk = [35], application = android.app.Application::class)
 class RawUpdaterParseTest {
+
+    private lateinit var originalParserLogger: (String?, Throwable?) -> Unit
+
+    @Before
+    fun setUp() {
+        originalParserLogger = RawUpdater.parserLogger
+        RawUpdater.parserLogger = { _, _ -> }
+    }
+
+    @After
+    fun tearDown() {
+        RawUpdater.parserLogger = originalParserLogger
+    }
 
     @Test
     fun clashBasic_parsesShadowsocksAndVmess() = runTest {
@@ -120,13 +132,4 @@ class RawUpdaterParseTest {
 
     private fun fixture(name: String) =
         requireNotNull(javaClass.getResource("/subscriptions/$name")).readText()
-}
-
-@Implements(value = Libcore::class, isInAndroidSdk = false)
-class ShadowParserLibcore {
-    companion object {
-        @JvmStatic
-        @Implementation
-        fun nekoLogPrintln(message: String) = Unit
-    }
 }

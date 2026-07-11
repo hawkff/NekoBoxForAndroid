@@ -275,6 +275,14 @@ object RawUpdater : GroupUpdater() {
         )
     }
 
+    internal var parserLogger: (String?, Throwable?) -> Unit = { message, error ->
+        when {
+            message != null && error != null -> Logs.w(message, error)
+            message != null -> Logs.w(message)
+            error != null -> Logs.w(error)
+        }
+    }
+
     @Suppress("UNCHECKED_CAST")
     suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? {
         val proxies = mutableListOf<AbstractBean>()
@@ -324,8 +332,9 @@ object RawUpdater : GroupUpdater() {
                     // safely; any remaining unchecked cast inside a branch is contained by the
                     // per-proxy try/catch, so the bad node is skipped and the rest still import.
                     val proxy = rawProxy as? Map<String, Any?> ?: run {
-                        Logs.w(
+                        parserLogger(
                             "skipping malformed Clash node: expected mapping, got ${rawProxy?.javaClass?.simpleName}",
+                            null,
                         )
                         continue
                     }
@@ -988,7 +997,7 @@ object RawUpdater : GroupUpdater() {
                     } catch (e: Exception) {
                         // Malformed node (e.g. a type-confused field): skip it and keep the
                         // rest of the subscription instead of failing the whole update.
-                        Logs.w("skipping malformed Clash node: ${e.readableMessage}", e)
+                        parserLogger("skipping malformed Clash node: ${e.readableMessage}", e)
                     }
                 }
 
@@ -1009,13 +1018,13 @@ object RawUpdater : GroupUpdater() {
                 }
                 return proxies
             } catch (e: YAMLException) {
-                Logs.w(e)
+                parserLogger(null, e)
             } catch (e: Exception) {
                 // Defensive: a type-confused field could still produce a
                 // ClassCastException/NumberFormatException outside the per-entry guards
                 // above. Keep whatever was parsed rather than discarding it and falling
                 // through to the JSON/base64/plain-text branches.
-                Logs.w(e)
+                parserLogger(null, e)
                 if (proxies.isNotEmpty()) return proxies
             }
         } else if (text.contains("[Interface]")) {
@@ -1034,7 +1043,7 @@ object RawUpdater : GroupUpdater() {
                 )
                 return proxies
             } catch (e: Exception) {
-                Logs.w(e)
+                parserLogger(null, e)
             }
         }
 
@@ -1048,7 +1057,7 @@ object RawUpdater : GroupUpdater() {
             return parseProxies(text.decodeBase64UrlSafe()).takeIf { it.isNotEmpty() }
                 ?: error("Not found")
         } catch (e: Exception) {
-            Logs.w(e)
+            parserLogger(null, e)
         }
 
         try {
