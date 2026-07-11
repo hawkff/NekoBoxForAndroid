@@ -123,7 +123,14 @@ class ConfigBuilderGoldenTest {
             socks.map { it.getString("server") to it.getInt("server_port") }.toSet(),
         )
         val tags = socks.map { it.getString("tag") }.toSet()
-        assertTrue(socks.any { it.optString("detour") in tags })
+        val detours = socks.mapNotNull { outbound ->
+            outbound.optString("detour").takeIf { it.isNotEmpty() }?.let { detour ->
+                outbound.getString("tag") to detour
+            }
+        }
+        assertEquals(1, detours.size)
+        assertTrue(detours.single().first != detours.single().second)
+        assertTrue(detours.single().second in tags)
         assertResultMaps(result, chain)
     }
 
@@ -265,7 +272,9 @@ class ConfigBuilderGoldenTest {
         assertEquals(listOf("192.0.2.70", "2001:db8::70"), strings(predefined))
         assertEquals(listOf("A", "AAAA"), strings(hostsRule.getJSONArray("query_type")))
         assertTrue(strings(hostsRule.getJSONArray("domain")).contains("node.example"))
-        assertTrue(rules.indexOf(hostsRule) > rules.indexOfFirst { it.optString("server") == "dns-direct" })
+        val directRuleIndex = rules.indexOfFirst { it.optString("server") == "dns-direct" }
+        assertTrue(directRuleIndex >= 0)
+        assertTrue(rules.indexOf(hostsRule) > directRuleIndex)
     }
 
     private fun addGroup(isSelector: Boolean = false) = ConfigBuilderTestEnv.io {
