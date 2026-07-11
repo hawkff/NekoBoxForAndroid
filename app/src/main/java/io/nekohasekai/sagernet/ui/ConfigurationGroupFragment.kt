@@ -392,12 +392,20 @@ class ConfigurationGroupFragment : Fragment() {
         private var diffJob: Job? = null
         private var filterQuery = ""
         private var filterPending = false
+        private var masterUpdatePending = false
         private var displayPending = false
         private var dragInProgress = false
         private var disposed = false
         private val filterRunnable = Runnable {
             if (!disposed) {
                 filterPending = false
+                submitMasterList()
+            }
+        }
+        private val masterUpdateRunnable = Runnable {
+            if (!disposed) {
+                masterUpdatePending = false
+                sortMasterProfiles()
                 submitMasterList()
             }
         }
@@ -521,9 +529,19 @@ class ConfigurationGroupFragment : Fragment() {
             masterIds.addAll(sorted.map { it.id })
         }
 
+        private fun scheduleMasterUpdate() {
+            ++displayGeneration
+            diffJob?.cancel()
+            displayPending = false
+            masterUpdatePending = true
+            hostView.removeCallbacks(masterUpdateRunnable)
+            hostView.postDelayed(masterUpdateRunnable, 50L)
+        }
+
         fun canDrag() = !disposed &&
             filterQuery.isEmpty() &&
             !filterPending &&
+            !masterUpdatePending &&
             !displayPending &&
             configurationIdList == masterIds
 
@@ -531,7 +549,9 @@ class ConfigurationGroupFragment : Fragment() {
             if (!canDrag()) return
             reloadGeneration.incrementAndGet()
             hostView.removeCallbacks(filterRunnable)
+            hostView.removeCallbacks(masterUpdateRunnable)
             filterPending = false
+            masterUpdatePending = false
             displayPending = false
             dragInProgress = true
             ++displayGeneration
@@ -545,8 +565,10 @@ class ConfigurationGroupFragment : Fragment() {
             ++displayGeneration
             diffJob?.cancel()
             filterPending = false
+            masterUpdatePending = false
             displayPending = false
             hostView.removeCallbacks(filterRunnable)
+            hostView.removeCallbacks(masterUpdateRunnable)
         }
 
         private fun getItem(profileId: Long): ProxyEntity = configurationList[profileId]!!
@@ -768,8 +790,7 @@ class ConfigurationGroupFragment : Fragment() {
                     profile,
                     selectedItem?.id ?: DataStore.selectedProxy,
                 )
-                sortMasterProfiles()
-                submitMasterList()
+                scheduleMasterUpdate()
             }
         }
 
@@ -789,8 +810,7 @@ class ConfigurationGroupFragment : Fragment() {
                     profile,
                     selectedItem?.id ?: DataStore.selectedProxy,
                 )
-                sortMasterProfiles()
-                submitMasterList()
+                scheduleMasterUpdate()
             }
         }
 
@@ -890,6 +910,8 @@ class ConfigurationGroupFragment : Fragment() {
             }
             onMainDispatcher {
                 if (disposed || generation != reloadGeneration.get()) return@onMainDispatcher
+                hostView.removeCallbacks(masterUpdateRunnable)
+                masterUpdatePending = false
                 masterIds.clear()
                 masterIds.addAll(newProfileIds.filterNot(pendingRemovalIds::contains))
                 masterProfiles.clear()
