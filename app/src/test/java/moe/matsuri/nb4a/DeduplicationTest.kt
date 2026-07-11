@@ -109,6 +109,5 @@ class DeduplicationTest {
         initializeDefaultValues()
     }
 
-    private fun wrap(bean: io.nekohasekai.sagernet.fmt.AbstractBean) =
-        Protocols.Deduplication(bean)
+    private fun wrap(bean: io.nekohasekai.sagernet.fmt.AbstractBean) = Protocols.Deduplication(bean)
 }
