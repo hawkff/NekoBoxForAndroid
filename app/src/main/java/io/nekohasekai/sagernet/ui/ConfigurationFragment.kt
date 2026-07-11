@@ -391,9 +391,22 @@ class ConfigurationFragment @JvmOverloads constructor(
         runOnDefaultDispatcher {
             try {
                 ProfileManager.deleteProfiles(profiles)
+                val groupEmptied = SagerDatabase.proxyDao.countByGroup(groupId) == 0L &&
+                    SagerDatabase.groupDao.getById(groupId)?.ungrouped == true
+                val fallbackGroupId = if (groupEmptied) {
+                    SagerDatabase.groupDao.allGroups().firstOrNull { it.id != groupId }?.id
+                } else {
+                    null
+                }
                 onMainDispatcher {
                     if (view != null && ::adapter.isInitialized) {
                         adapter.groupFragments[groupId]?.adapter?.removeProfiles(profileIds)
+                        if (groupEmptied) {
+                            if (fallbackGroupId != null && DataStore.selectedGroup == groupId) {
+                                DataStore.selectedGroup = fallbackGroupId
+                            }
+                            adapter.reload()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -1079,7 +1092,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     newGroupList = ArrayList(SagerDatabase.groupDao.allGroups())
                 }
                 newGroupList.find { it.ungrouped }?.let {
-                    if (SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
+                    if (newGroupList.size > 1 && SagerDatabase.proxyDao.countByGroup(it.id) == 0L) {
                         newGroupList.remove(it)
                     }
                 }
@@ -1087,13 +1100,19 @@ class ConfigurationFragment @JvmOverloads constructor(
                 var selectedGroup = selectedItem?.groupId ?: DataStore.currentGroupId()
                 var set = false
                 if (selectedGroup > 0L) {
-                    selectedGroupIndex = newGroupList.indexOfFirst { it.id == selectedGroup }
-                    set = true
-                } else if (groupList.size == 1) {
-                    selectedGroup = groupList[0].id
+                    val index = newGroupList.indexOfFirst { it.id == selectedGroup }
+                    if (index >= 0) {
+                        selectedGroupIndex = index
+                        set = true
+                    }
+                }
+                if (!set && newGroupList.isNotEmpty()) {
+                    selectedGroupIndex = 0
+                    selectedGroup = newGroupList[0].id
                     if (DataStore.selectedGroup != selectedGroup) {
                         DataStore.selectedGroup = selectedGroup
                     }
+                    set = true
                 }
 
                 val runFunc = if (now) activity?.let { it::runOnUiThread } else groupPager::post

@@ -17,7 +17,7 @@ object Protocols {
         // Callers build these wrappers after parsing and do not mutate their beans while the
         // wrappers are in a set. Cache the serialization-backed hash so HashSet probes do not
         // serialize the same bean repeatedly.
-        private val comparisonHash = if (bean is ConfigBean) bean.config.hashCode() else bean.hashCode()
+        private val comparisonHash = if (bean is ConfigBean) bean.config?.hashCode() ?: 0 else bean.hashCode()
 
         override fun hashCode() = 31 * bean.javaClass.hashCode() + comparisonHash
 
