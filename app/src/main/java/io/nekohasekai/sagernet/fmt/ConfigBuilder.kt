@@ -699,10 +699,11 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     }
 
                     if (needGlobal && DataStore.enableTLSFragment) {
-                        val tlsEnabled = SingBoxOptions.toJsonTree(currentOutbound)
-                            .getAsJsonObject("tls")
-                            ?.get("enabled")
-                            ?.asBoolean == true
+                        val tls = SingBoxOptions.toJsonTree(currentOutbound).get("tls")
+                        val enabled = tls?.takeIf { it.isJsonObject }?.asJsonObject?.get("enabled")
+                        val tlsEnabled = enabled?.isJsonPrimitive == true &&
+                            enabled.asJsonPrimitive.isBoolean &&
+                            enabled.asBoolean
                         if (tlsEnabled) currentOutbound._hack_config_map["detour"] = TAG_FRAGMENT
                     }
                 }

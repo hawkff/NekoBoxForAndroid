@@ -366,7 +366,7 @@ data class ProxyEntity(
 
     fun settingIntent(ctx: Context, isSubscription: Boolean): Intent {
         val activityClass = ProtocolRegistry.forType(type)?.settingsActivityClass
-            ?: throw IllegalArgumentException()
+            ?: throw IllegalArgumentException("No settings activity for type $type")
         return Intent(ctx, activityClass).apply {
             putExtra(ProfileSettingsActivity.EXTRA_PROFILE_ID, id)
             putExtra(ProfileSettingsActivity.EXTRA_IS_SUBSCRIPTION, isSubscription)
