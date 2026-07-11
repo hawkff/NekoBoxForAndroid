@@ -220,35 +220,13 @@ data class ProxyEntity(
     }
 
     fun haveStandardLink(): Boolean {
-        return when (requireBean()) {
-            is SSHBean -> false
-            is WireGuardBean -> false
-            is AmneziaWGBean -> false
-            is ShadowTLSBean -> false
-            is ConfigBean -> false
-            else -> true
-        }
+        requireBean()
+        return ProtocolRegistry.forType(type)!!.hasStandardLink
     }
 
-    fun toStdLink(compact: Boolean = false): String = with(requireBean()) {
-        when (this) {
-            is SOCKSBean -> toUri()
-            is HttpBean -> toUri()
-            is ShadowsocksBean -> toUri()
-            is ShadowsocksRBean -> toUri()
-            is VMessBean -> toUriVMessVLESSTrojan(false)
-            is TrojanBean -> toUriVMessVLESSTrojan(true)
-            is TrojanGoBean -> toUri()
-            is NaiveBean -> toUri()
-            is HysteriaBean -> toUri()
-            is TuicBean -> toUri()
-            is JuicityBean -> toUri()
-            is AnyTLSBean -> toUri()
-            is SnellBean -> toUri()
-            is MasterDnsVpnBean -> toMasterDnsVpnUri()
-            is OlcrtcBean -> toOlcrtcUri()
-            else -> toUniversalLink()
-        }
+    fun toStdLink(compact: Boolean = false): String {
+        val bean = requireBean()
+        return ProtocolRegistry.forType(type)!!.toStandardLink?.invoke(bean) ?: bean.toUniversalLink()
     }
 
     fun exportConfig(): Pair<String, String> {
@@ -387,34 +365,9 @@ data class ProxyEntity(
     }
 
     fun settingIntent(ctx: Context, isSubscription: Boolean): Intent {
-        return Intent(
-            ctx,
-            when (type) {
-                TYPE_SOCKS -> SocksSettingsActivity::class.java
-                TYPE_HTTP -> HttpSettingsActivity::class.java
-                TYPE_SS -> ShadowsocksSettingsActivity::class.java
-                TYPE_SSR -> ShadowsocksRSettingsActivity::class.java
-                TYPE_VMESS -> VMessSettingsActivity::class.java
-                TYPE_TROJAN -> TrojanSettingsActivity::class.java
-                TYPE_TROJAN_GO -> TrojanGoSettingsActivity::class.java
-                TYPE_MIERU -> MieruSettingsActivity::class.java
-                TYPE_NAIVE -> NaiveSettingsActivity::class.java
-                TYPE_HYSTERIA -> HysteriaSettingsActivity::class.java
-                TYPE_SSH -> SSHSettingsActivity::class.java
-                TYPE_WG -> WireGuardSettingsActivity::class.java
-                TYPE_AWG -> AmneziaWGSettingsActivity::class.java
-                TYPE_TUIC -> TuicSettingsActivity::class.java
-                TYPE_JUICITY -> JuicitySettingsActivity::class.java
-                TYPE_SHADOWTLS -> ShadowTLSSettingsActivity::class.java
-                TYPE_ANYTLS -> AnyTLSSettingsActivity::class.java
-                TYPE_CHAIN -> ChainSettingsActivity::class.java
-                TYPE_CONFIG -> ConfigSettingActivity::class.java
-                TYPE_SNELL -> SnellSettingsActivity::class.java
-                TYPE_MASTERDNSVPN -> MasterDnsVpnSettingsActivity::class.java
-                TYPE_OLCRTC -> OlcrtcSettingsActivity::class.java
-                else -> throw IllegalArgumentException()
-            },
-        ).apply {
+        val activityClass = ProtocolRegistry.forType(type)?.settingsActivityClass
+            ?: throw IllegalArgumentException()
+        return Intent(ctx, activityClass).apply {
             putExtra(ProfileSettingsActivity.EXTRA_PROFILE_ID, id)
             putExtra(ProfileSettingsActivity.EXTRA_IS_SUBSCRIPTION, isSubscription)
         }
