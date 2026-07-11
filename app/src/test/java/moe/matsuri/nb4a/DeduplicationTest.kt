@@ -110,5 +110,5 @@ class DeduplicationTest {
     }
 
     private fun wrap(bean: io.nekohasekai.sagernet.fmt.AbstractBean) =
-        Protocols.Deduplication(bean, bean.javaClass.toString())
+        Protocols.Deduplication(bean)
 }

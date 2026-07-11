@@ -49,11 +49,12 @@ fi
 # from silently depending on whichever revisions happen to be checked out beside this repo.
 # Deliberate experiments can opt out with ALLOW_UNPINNED_SIBLINGS=1.
 check_sibling_pin() {
-  dir="$1"
-  expected="$2"
-  label="$3"
+  local dir="$1"
+  local expected="$2"
+  local label="$3"
   [ -z "$dir" ] && return
-  actual="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo unknown)"
+  local actual
+  actual="$(git -C "$dir" rev-parse HEAD 2>/dev/null)" || actual=unknown
   if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
     echo "ERROR: $label checkout is at $actual but CI pins $expected" >&2
     echo "       checkout the pinned revision or set ALLOW_UNPINNED_SIBLINGS=1." >&2

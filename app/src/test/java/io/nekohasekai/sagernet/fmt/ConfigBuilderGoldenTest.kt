@@ -78,6 +78,35 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
+    fun tlsFragment_detoursTlsOutbound() {
+        val previousTlsFragment = DataStore.enableTLSFragment
+        try {
+            DataStore.enableTLSFragment = true
+            val profile = addProfile(
+                addGroup(),
+                VMessBean().apply {
+                    serverAddress = "192.0.2.13"
+                    serverPort = 443
+                    uuid = "d342d11e-d424-4583-b36e-524ab1f0afa4"
+                    alterId = 0
+                    encryption = "auto"
+                    security = "tls"
+                    sni = "node.example"
+                    name = "fragment-vmess"
+                    initializeDefaultValues()
+                },
+            )
+
+            val outbound = outbound(JSONObject(build(profile).config), "vmess")
+
+            assertTrue(outbound.getJSONObject("tls").getBoolean("enabled"))
+            assertEquals(TAG_FRAGMENT, outbound.getString("detour"))
+        } finally {
+            DataStore.enableTLSFragment = previousTlsFragment
+        }
+    }
+
+    @Test
     fun shadowsocksForTest_preservesMethodAndPassword() {
         val profile = addProfile(
             addGroup(),

@@ -643,7 +643,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                     val toClear = mutableListOf<ProxyEntity>()
                     val uniqueProxies = LinkedHashSet<Protocols.Deduplication>()
                     for (pf in profiles) {
-                        val proxy = Protocols.Deduplication(pf.requireBean(), pf.displayType())
+                        val proxy = Protocols.Deduplication(pf.requireBean())
                         if (!uniqueProxies.add(proxy)) {
                             toClear += pf
                         }

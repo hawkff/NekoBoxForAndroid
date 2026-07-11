@@ -784,7 +784,6 @@ class ConfigurationGroupFragment : Fragment() {
             onMainDispatcher {
                 if (disposed) return@onMainDispatcher
                 reloadGeneration.incrementAndGet()
-                undoManager?.flush()
                 masterProfiles[profile.id] = profile
                 masterStamps[profile.id] = selectedStamp(
                     profile,
@@ -797,9 +796,8 @@ class ConfigurationGroupFragment : Fragment() {
         override suspend fun onUpdated(profile: ProxyEntity, noTraffic: Boolean) {
             if (profile.groupId != proxyGroup.id) return
             onMainDispatcher {
-                if (disposed) return@onMainDispatcher
+                if (disposed || profile.id in pendingRemovalIds) return@onMainDispatcher
                 reloadGeneration.incrementAndGet()
-                undoManager?.flush()
                 val oldProfile = masterProfiles[profile.id] ?: configurationList[profile.id]
                 if (noTraffic && oldProfile != null) {
                     profile.rx = oldProfile.rx

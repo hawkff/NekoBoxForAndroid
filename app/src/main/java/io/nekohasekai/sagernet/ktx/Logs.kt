@@ -6,6 +6,7 @@ import java.io.OutputStream
 
 object Logs {
 
+    @Volatile
     internal var sink: (String) -> Unit = { Libcore.nekoLogPrintln(it) }
 
     private fun mkTag(): String {

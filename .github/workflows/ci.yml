@@ -55,6 +55,7 @@ jobs:
   instrumented:
     name: Instrumented (Room migrations)
     runs-on: namespace-profile-nekoyay
+    timeout-minutes: 20
     needs:
       - libcore
     steps:
