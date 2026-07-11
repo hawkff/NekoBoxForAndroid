@@ -74,11 +74,11 @@ jobs:
       - name: KVM check
         id: kvm
         run: |
-          if [ -e /dev/kvm ]; then
+          if [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
             echo "kvm=true" >> "$GITHUB_OUTPUT"
           else
             echo "kvm=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::no /dev/kvm on this runner; emulator test skipped"
+            echo "::warning::KVM is unavailable or inaccessible; emulator test skipped"
           fi
       - name: Run migration test on emulator
         if: steps.kvm.outputs.kvm == 'true'
