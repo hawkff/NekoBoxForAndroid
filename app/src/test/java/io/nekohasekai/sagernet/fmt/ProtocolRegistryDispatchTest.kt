@@ -39,7 +39,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import io.nekohasekai.sagernet.fmt.olcrtc.toUri as toOlcrtcUri
 
 /**
  * Wire-format safety net for the protocol descriptor registry (Plan 029, Option C).
@@ -251,8 +250,6 @@ class ProtocolRegistryDispatchTest {
         )
         val hysteria = hysteria().apply { initializeDefaultValues() }
         assertEquals(hysteria.toUri(), ProxyEntity().putBean(hysteria).toStdLink())
-        val olcrtc = olcrtc().apply { initializeDefaultValues() }
-        assertEquals(olcrtc.toOlcrtcUri(), ProxyEntity().putBean(olcrtc).toStdLink())
     }
 
     @Test

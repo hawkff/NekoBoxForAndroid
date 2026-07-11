@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.test.runTest
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import org.json.JSONObject
@@ -22,17 +23,17 @@ import java.util.Base64
 @Config(sdk = [35], application = android.app.Application::class)
 class RawUpdaterParseTest {
 
-    private lateinit var originalParserLogger: (String?, Throwable?) -> Unit
+    private lateinit var originalLogSink: (String) -> Unit
 
     @Before
     fun setUp() {
-        originalParserLogger = RawUpdater.parserLogger
-        RawUpdater.parserLogger = { _, _ -> }
+        originalLogSink = Logs.sink
+        Logs.sink = {}
     }
 
     @After
     fun tearDown() {
-        RawUpdater.parserLogger = originalParserLogger
+        Logs.sink = originalLogSink
     }
 
     @Test
@@ -130,6 +131,5 @@ class RawUpdaterParseTest {
         assertNull(RawUpdater.parseRaw(""))
     }
 
-    private fun fixture(name: String) =
-        requireNotNull(javaClass.getResource("/subscriptions/$name")).readText()
+    private fun fixture(name: String) = requireNotNull(javaClass.getResource("/subscriptions/$name")).readText()
 }
