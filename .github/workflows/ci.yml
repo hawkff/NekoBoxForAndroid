@@ -7,7 +7,7 @@ env:
   MDVPN_COMMIT: d481d72d4b86783a87d536c214d2c68cc4e9320e
   NAIVE_VERSION: v149.0.7827.114-1
   OLCRTC_REPO: https://github.com/openlibrecommunity/olcrtc.git
-  OLCRTC_COMMIT: 1255cf8248ee4a52cb355ceb8cf72281a5f1affd
+  OLCRTC_COMMIT: 42ae4e0c6a1af3e01c52cf0149502cc13c326a3f
 permissions:
   contents: read
 jobs:

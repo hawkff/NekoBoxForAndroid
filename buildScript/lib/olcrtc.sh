@@ -20,10 +20,10 @@
 #
 # OLCRTC_REPO/OLCRTC_COMMIT default to the upstream project at a commit that carries
 # the protected pion net (internal/protect/pionnet.go + the jitsi SetNet hook, merged
-# in openlibrecommunity/olcrtc#111) plus Jitsi ICE-service URL normalization
-# (openlibrecommunity/olcrtc#121). Pinning at/after both keeps the media path off
-# the tun and prevents malformed service-discovery entries from failing peer-
-# connection setup.
+# in openlibrecommunity/olcrtc#111), Jitsi ICE-service URL normalization
+# (openlibrecommunity/olcrtc#121), and VP8 peer-restart corroboration
+# (openlibrecommunity/olcrtc#132). The pin keeps the media path off the tun,
+# rejects malformed service-discovery entries, and avoids false peer restarts.
 #
 # Usage: ./run lib olcrtc
 set -e
@@ -37,7 +37,7 @@ if [ -z "$ANDROID_NDK_HOME" ]; then
 fi
 
 OLCRTC_REPO="${OLCRTC_REPO:-https://github.com/openlibrecommunity/olcrtc.git}"
-OLCRTC_COMMIT="${OLCRTC_COMMIT:-1255cf8248ee4a52cb355ceb8cf72281a5f1affd}"
+OLCRTC_COMMIT="${OLCRTC_COMMIT:-42ae4e0c6a1af3e01c52cf0149502cc13c326a3f}"
 
 if ! command -v go >/dev/null 2>&1; then
   echo "Error: go not found on PATH (olcRTC needs Go 1.26+)." >&2
