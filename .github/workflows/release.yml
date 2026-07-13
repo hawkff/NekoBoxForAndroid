@@ -191,8 +191,10 @@ jobs:
           REF="${GITHUB_REF_NAME//\//-}"
           DEST_DIR="nekobox-release/${REF}/${GITHUB_RUN_ID}"
           DEST="$DEST_DIR/$(basename "$APK_FILE")"
+          ARM64_SUMS=$(mktemp)
+          (cd "$APK" && sha256sum "./$(basename "$APK_FILE")") > "$ARM64_SUMS"
           nsc artifact upload "$APK_FILE" "$DEST"
-          nsc artifact upload "$APK/SHA256SUMS" "$DEST_DIR/SHA256SUMS"
+          nsc artifact upload "$ARM64_SUMS" "$DEST_DIR/SHA256SUMS"
           echo "Uploaded to Namespace workspace store: $DEST"
           echo "Uploaded checksums to Namespace workspace store: $DEST_DIR/SHA256SUMS"
   publish:
@@ -212,6 +214,7 @@ jobs:
           path: artifacts
       - name: Release
         run: |
+          set -euo pipefail
           wget -O ghr.tar.gz https://github.com/tcnksm/ghr/releases/download/v0.13.0/ghr_v0.13.0_linux_amd64.tar.gz
           tar -xvf ghr.tar.gz
           mv ghr*linux_amd64/ghr .
@@ -223,7 +226,12 @@ jobs:
           fi
           CHECKSUM_DIR=$(dirname "${CHECKSUM_FILES[0]}")
           (cd "$CHECKSUM_DIR" && sha256sum --check SHA256SUMS)
+          APK_FILES=(artifacts/**/*.apk)
+          if [ "${#APK_FILES[@]}" -eq 0 ]; then
+            echo "Error: no release APKs found in artifacts" >&2
+            exit 1
+          fi
           mkdir apks
-          RELEASE_FILES=(artifacts/**/*.apk artifacts/**/SHA256SUMS)
+          RELEASE_FILES=("${APK_FILES[@]}" "${CHECKSUM_FILES[@]}")
           cp "${RELEASE_FILES[@]}" apks/
           ./ghr -delete -t "${{ github.token }}" -n "${{ github.event.inputs.tag }}" "${{ github.event.inputs.tag }}" apks
