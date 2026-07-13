@@ -130,7 +130,7 @@ private fun ByteBuffer.readBytes(length: Int, field: String): ByteBuffer {
     return value
 }
 
-private fun singBoxHysteria2ECHConfig(config: String) = listOf(
+private fun singBoxHysteria2ECHConfig(config: String?) = listOf(
     ECH_CONFIGS_BEGIN,
     canonicalHysteria2ECHConfig(config),
     ECH_CONFIGS_END,
