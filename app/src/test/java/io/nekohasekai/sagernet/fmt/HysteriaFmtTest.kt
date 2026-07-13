@@ -207,6 +207,14 @@ class HysteriaFmtTest {
             buildSingBoxOutboundHysteriaBean(missing)
         }
 
+        val missingFromUninitializedJavaBean = hysteria2Bean().apply {
+            enableECH = true
+            echConfig = null
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            buildSingBoxOutboundHysteriaBean(missingFromUninitializedJavaBean)
+        }
+
         val malformedStructure = hysteria2Bean().apply {
             enableECH = true
             echConfig = "AQIDBA=="

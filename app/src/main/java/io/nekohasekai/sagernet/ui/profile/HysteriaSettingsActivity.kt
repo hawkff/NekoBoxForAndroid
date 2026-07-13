@@ -48,14 +48,14 @@ class HysteriaSettingsActivity : ProfileSettingsActivity<HysteriaBean>() {
 
     override suspend fun saveAndExit() {
         if (DataStore.protocolVersion == 2 && DataStore.serverHy2EchEnabled) {
-            val isValid = runCatching {
+            val failure = runCatching {
                 canonicalHysteria2ECHConfig(DataStore.serverHy2EchConfig)
-            }.isSuccess
-            if (!isValid) {
+            }.exceptionOrNull()
+            if (failure != null) {
                 onMainDispatcher {
                     Toast.makeText(
                         this@HysteriaSettingsActivity,
-                        R.string.hysteria2_ech_config_invalid,
+                        failure.message ?: getString(R.string.hysteria2_ech_config_invalid),
                         Toast.LENGTH_LONG,
                     ).show()
                 }

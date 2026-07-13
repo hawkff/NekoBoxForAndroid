@@ -24,8 +24,10 @@ private const val MAX_ECH_CONFIG_BASE64_LENGTH = 87_384
  * Hysteria shares the public config as raw base64, while sing-box requires an
  * ECH CONFIGS PEM block. Manual profiles may paste either representation.
  */
-internal fun canonicalHysteria2ECHConfig(config: String): String {
-    val trimmed = config.trim()
+internal fun canonicalHysteria2ECHConfig(config: String?): String {
+    val trimmed = requireNotNull(config) {
+        "Hysteria 2 ECH config is required when ECH is enabled"
+    }.trim()
     require(trimmed.isNotEmpty()) { "Hysteria 2 ECH config is required when ECH is enabled" }
 
     val payload = if (trimmed.startsWith(ECH_CONFIGS_BEGIN)) {
