@@ -46,6 +46,7 @@ abstract class BoxInstance(
     val externalInstances = hashMapOf<Int, AbstractInstance>()
     open lateinit var processes: GuardedProcessPool
     protected open val enableOlcrtcRecovery = true
+    private val olcrtcReadyMarkers = hashMapOf<Int, File>()
     private var cacheFiles = ArrayList<File>()
 
     private fun olcrtcReadyTimeoutMillis() = maxOf(
@@ -124,6 +125,8 @@ abstract class BoxInstance(
                         val creds = config.localProxyCredentials[port]
                             ?: error("olcRTC: missing loopback SOCKS credentials for port $port")
                         val readyTimeoutMs = olcrtcReadyTimeoutMillis()
+                        val readyMarker = File(app.noBackupFilesDir, "olcrtc_ready_$port")
+                        olcrtcReadyMarkers[port] = readyMarker
                         val args = bean.buildOlcrtcArgs(
                             port,
                             File(app.noBackupFilesDir, "protect_path").absolutePath,
@@ -132,7 +135,7 @@ abstract class BoxInstance(
                             DataStore.logLevel >= 3,
                             "9.9.9.9:53",
                             readyTimeoutMs,
-                        )
+                        ) + listOf("-ready-marker", readyMarker.absolutePath)
                         pluginConfigs[port] = profile.type to args.joinToString("\u0000")
                     }
                 }
@@ -301,10 +304,13 @@ abstract class BoxInstance(
                         // signal-based preemption can fault during the first protected dial
                         // in the VpnService process context.
                         val env = mutableMapOf("GODEBUG" to "asyncpreemptoff=1")
+                        val readyMarker = olcrtcReadyMarkers.getValue(port)
+                        clearOlcrtcReadyMarker(readyMarker)
                         if (enableOlcrtcRecovery) {
                             processes.start(
                                 commands,
                                 env,
+                                onRestartPrepare = { clearOlcrtcReadyMarker(readyMarker) },
                                 onRestartCallback = {
                                     awaitExternalPortReady(
                                         port,
@@ -324,6 +330,12 @@ abstract class BoxInstance(
         box.start()
     }
 
+    private fun clearOlcrtcReadyMarker(marker: File) {
+        if (marker.exists() && !marker.delete() && marker.exists()) {
+            throw IOException("olcRTC: could not reset readiness marker")
+        }
+    }
+
     private suspend fun pendingExternalPorts(ports: Collection<Int>, timeoutMillis: Long) =
         withContext(Dispatchers.IO) {
             val deadline = SystemClock.elapsedRealtime() + timeoutMillis
@@ -333,6 +345,8 @@ abstract class BoxInstance(
                 val iterator = pending.iterator()
                 while (iterator.hasNext()) {
                     val port = iterator.next()
+                    val readyMarker = olcrtcReadyMarkers[port]
+                    if (!readinessMarkerSatisfied(readyMarker != null, readyMarker?.isFile == true)) continue
                     try {
                         Socket().use {
                             it.connect(InetSocketAddress(LOCALHOST, port), 100)
@@ -359,9 +373,9 @@ abstract class BoxInstance(
      * connection test) doesn't race a sidecar that hasn't bound its port yet.
      *
      * Most sidecars open their listener immediately, so the short connection-test timeout
-     * is sufficient. MasterDnsVPN is the exception: it only starts listening after DNS
-     * MTU probing and session setup, which can take tens of seconds (with retries) on
-     * lossy or restricted links, so it gets a longer readiness window.
+     * is sufficient. MasterDnsVPN and olcRTC are exceptions: they only start listening
+     * after carrier setup, which can take tens of seconds (with retries) on lossy or
+     * restricted links, so they get a longer readiness window.
      *
      * @param strict when true (URL test), a sidecar that never binds is a hard failure with
      * a clear message, instead of the live-service behavior of logging and continuing
@@ -411,14 +425,22 @@ abstract class BoxInstance(
                 )
                 return
             }
-            // MasterDnsVPN must have its listener up before the first dial (it crashed
-            // otherwise), so a timeout there is fatal. Other sidecars (Mieru/Naïve/
+            // MasterDnsVPN and olcRTC must have their listeners up before the first dial,
+            // so a timeout on either is fatal. Other sidecars (Mieru/Naïve/
             // TrojanGo/Hysteria) were historically fire-and-forget: the first sing-box
             // dial retries, so a slow bind shouldn't hard-fail VPN start - log and continue.
             // For a URL test (strict), there is no retry window, so a listener that never
             // binds is reported as a clear error instead of a flaky "connection refused".
             val message = "sidecar listener not ready on port(s): ${pending.joinToString()}"
-            if (hasMasterDnsVpn || hasOlcrtc || strict) {
+            val requiredPorts = config.externalIndex.flatMap { idx ->
+                idx.chain.mapNotNull { (port, profile) ->
+                    when (profile.requireBean()) {
+                        is MasterDnsVpnBean, is OlcrtcBean -> port
+                        else -> null
+                    }
+                }
+            }.toSet()
+            if (shouldFailSidecarReadiness(pending, requiredPorts, strict)) {
                 throw IOException(message)
             } else {
                 Logs.w("$message; continuing (sing-box will retry the connection)")
@@ -440,6 +462,7 @@ abstract class BoxInstance(
         }
 
         if (::processes.isInitialized) processes.close(GlobalScope + Dispatchers.IO)
+        olcrtcReadyMarkers.values.forEach { it.delete() }
 
         if (::box.isInitialized) {
             box.close()

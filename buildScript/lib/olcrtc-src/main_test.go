@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,37 @@ func TestWaitAfterReadyStopsOnFirstUnhealthyTick(t *testing.T) {
 
 	if waitAfterReady(make(chan os.Signal), ticks, func() bool { return false }) {
 		t.Fatal("stopped runtime was reported as graceful shutdown")
+	}
+}
+
+func TestPublishReadyMarkerReplacesStaleMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ready")
+	if err := os.WriteFile(path, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := publishReadyMarker(path); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "ready\n" {
+		t.Fatalf("marker content = %q, want ready", content)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("marker mode = %o, want 600", mode)
+	}
+}
+
+func TestPublishReadyMarkerAllowsDisabledMarker(t *testing.T) {
+	if err := publishReadyMarker(""); err != nil {
+		t.Fatal(err)
 	}
 }
 
