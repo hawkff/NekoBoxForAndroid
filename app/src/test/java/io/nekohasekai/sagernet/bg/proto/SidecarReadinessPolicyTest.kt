@@ -25,6 +25,17 @@ class SidecarReadinessPolicyTest {
     }
 
     @Test
+    fun strictModeWithNoPendingPortIsNotFatal() {
+        assertFalse(
+            shouldFailSidecarReadiness(
+                pendingPorts = emptySet(),
+                requiredPorts = emptySet(),
+                strict = true,
+            ),
+        )
+    }
+
+    @Test
     fun requiredOrStrictPendingPortIsFatal() {
         assertTrue(
             shouldFailSidecarReadiness(
