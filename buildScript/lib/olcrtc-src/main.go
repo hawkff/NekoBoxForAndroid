@@ -94,8 +94,30 @@ func main() {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	defer signal.Stop(sig)
+
+	if !waitAfterReady(sig, ticker.C, mobile.IsRunning) {
+		mobile.Stop()
+		log.Fatal("olcrtc runtime stopped after readiness")
+	}
 	mobile.Stop()
+}
+
+// waitAfterReady returns true for a requested signal shutdown and false when the
+// already-ready mobile runtime reaches its terminal stopped state.
+func waitAfterReady(signals <-chan os.Signal, ticks <-chan time.Time, isRunning func() bool) bool {
+	for {
+		select {
+		case <-signals:
+			return true
+		case <-ticks:
+			if !isRunning() {
+				return false
+			}
+		}
+	}
 }
 
 // installProtectedDefaults replaces net.DefaultResolver and http.DefaultTransport

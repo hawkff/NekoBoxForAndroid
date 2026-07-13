@@ -4,6 +4,7 @@ import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.AbstractInstance
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
+import io.nekohasekai.sagernet.bg.GuardedProcessRestartPolicy
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.ConfigBuildResult
@@ -44,7 +45,14 @@ abstract class BoxInstance(
     val pluginConfigs = hashMapOf<Int, Pair<Int, String>>()
     val externalInstances = hashMapOf<Int, AbstractInstance>()
     open lateinit var processes: GuardedProcessPool
+    protected open val enableOlcrtcRecovery = true
     private var cacheFiles = ArrayList<File>()
+
+    private fun olcrtcReadyTimeoutMillis() = maxOf(
+        60_000L,
+        DataStore.connectionTestTimeout.toLong(),
+    )
+
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -115,7 +123,7 @@ abstract class BoxInstance(
                         // rather than start an unauthenticated listener if they are missing.
                         val creds = config.localProxyCredentials[port]
                             ?: error("olcRTC: missing loopback SOCKS credentials for port $port")
-                        val readyTimeoutMs = maxOf(60_000L, DataStore.connectionTestTimeout.toLong())
+                        val readyTimeoutMs = olcrtcReadyTimeoutMillis()
                         val args = bean.buildOlcrtcArgs(
                             port,
                             File(app.noBackupFilesDir, "protect_path").absolutePath,
@@ -293,13 +301,56 @@ abstract class BoxInstance(
                         // signal-based preemption can fault during the first protected dial
                         // in the VpnService process context.
                         val env = mutableMapOf("GODEBUG" to "asyncpreemptoff=1")
-                        processes.start(commands, env)
+                        if (enableOlcrtcRecovery) {
+                            processes.start(
+                                commands,
+                                env,
+                                onRestartCallback = {
+                                    awaitExternalPortReady(
+                                        port,
+                                        olcrtcReadyTimeoutMillis() + 5_000L,
+                                    )
+                                },
+                                restartPolicy = GuardedProcessRestartPolicy(),
+                            )
+                        } else {
+                            processes.start(commands, env)
+                        }
                     }
                 }
             }
         }
 
         box.start()
+    }
+
+    private suspend fun pendingExternalPorts(ports: Collection<Int>, timeoutMillis: Long) =
+        withContext(Dispatchers.IO) {
+            val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+            val pending = ports.toMutableSet()
+            while (pending.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
+                ensureActive()
+                val iterator = pending.iterator()
+                while (iterator.hasNext()) {
+                    val port = iterator.next()
+                    try {
+                        Socket().use {
+                            it.connect(InetSocketAddress(LOCALHOST, port), 100)
+                        }
+                        iterator.remove()
+                    } catch (_: IOException) {
+                        // not ready yet
+                    }
+                }
+                if (pending.isNotEmpty()) delay(50)
+            }
+            pending
+        }
+
+    private suspend fun awaitExternalPortReady(port: Int, timeoutMillis: Long) {
+        if (pendingExternalPorts(listOf(port), timeoutMillis).isNotEmpty()) {
+            throw IOException("sidecar listener not ready on port: $port")
+        }
     }
 
     /**
@@ -348,52 +399,29 @@ abstract class BoxInstance(
             maxOf(1_000L, DataStore.connectionTestTimeout.toLong())
         }
 
-        withContext(Dispatchers.IO) {
-            val deadline = SystemClock.elapsedRealtime() + readinessTimeoutMs
-            val pending = ports.toMutableSet()
-            while (pending.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
-                // Honor cancellation promptly: if this start was superseded (reload/profile
-                // switch), the connect job is cancelled and the sidecars are torn down. Exiting
-                // here stops us from polling a now-dead port for the full (60s for MasterDnsVPN)
-                // window and then throwing a false "sidecar listener not ready".
-                ensureActive()
-                val iterator = pending.iterator()
-                while (iterator.hasNext()) {
-                    val port = iterator.next()
-                    try {
-                        Socket().use {
-                            it.connect(InetSocketAddress(LOCALHOST, port), 100)
-                        }
-                        iterator.remove()
-                    } catch (_: IOException) {
-                        // not ready yet
-                    }
-                }
-                if (pending.isNotEmpty()) delay(50)
+        val pending = pendingExternalPorts(ports, readinessTimeoutMs)
+        if (pending.isNotEmpty()) {
+            // If the process pool is no longer active, its sidecars were torn down (e.g. a
+            // superseded start during reload). A port that never bound on a dead pool is an
+            // orphan, not a real failure - drop it instead of throwing.
+            if (!processes.isActive) {
+                Logs.w(
+                    "sidecar listener not ready on port(s): ${pending.joinToString()}; " +
+                        "process pool already stopped (superseded start), ignoring",
+                )
+                return
             }
-            if (pending.isNotEmpty()) {
-                // If the process pool is no longer active, its sidecars were torn down (e.g. a
-                // superseded start during reload). A port that never bound on a dead pool is an
-                // orphan, not a real failure - drop it instead of throwing.
-                if (!processes.isActive) {
-                    Logs.w(
-                        "sidecar listener not ready on port(s): ${pending.joinToString()}; " +
-                            "process pool already stopped (superseded start), ignoring",
-                    )
-                    return@withContext
-                }
-                // MasterDnsVPN must have its listener up before the first dial (it crashed
-                // otherwise), so a timeout there is fatal. Other sidecars (Mieru/Naïve/
-                // TrojanGo/Hysteria) were historically fire-and-forget: the first sing-box
-                // dial retries, so a slow bind shouldn't hard-fail VPN start - log and continue.
-                // For a URL test (strict), there is no retry window, so a listener that never
-                // binds is reported as a clear error instead of a flaky "connection refused".
-                val message = "sidecar listener not ready on port(s): ${pending.joinToString()}"
-                if (hasMasterDnsVpn || hasOlcrtc || strict) {
-                    throw IOException(message)
-                } else {
-                    Logs.w("$message; continuing (sing-box will retry the connection)")
-                }
+            // MasterDnsVPN must have its listener up before the first dial (it crashed
+            // otherwise), so a timeout there is fatal. Other sidecars (Mieru/Naïve/
+            // TrojanGo/Hysteria) were historically fire-and-forget: the first sing-box
+            // dial retries, so a slow bind shouldn't hard-fail VPN start - log and continue.
+            // For a URL test (strict), there is no retry window, so a listener that never
+            // binds is reported as a clear error instead of a flaky "connection refused".
+            val message = "sidecar listener not ready on port(s): ${pending.joinToString()}"
+            if (hasMasterDnsVpn || hasOlcrtc || strict) {
+                throw IOException(message)
+            } else {
+                Logs.w("$message; continuing (sing-box will retry the connection)")
             }
         }
     }
