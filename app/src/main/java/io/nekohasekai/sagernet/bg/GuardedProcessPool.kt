@@ -139,7 +139,11 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
         }
 
         @DelicateCoroutinesApi
-        suspend fun looper(onRestartCallback: (suspend () -> Unit)?, restartPolicy: GuardedProcessRestartPolicy?) {
+        suspend fun looper(
+            onRestartPrepare: (() -> Unit)?,
+            onRestartCallback: (suspend () -> Unit)?,
+            restartPolicy: GuardedProcessRestartPolicy?,
+        ) {
             var running = true
             var restarted = false
             var currentExitChannel: Channel<Int>? = null
@@ -176,6 +180,7 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
                         (exitTime - it).coerceAtLeast(0L)
                     }
                     val restartDelayMillis = backoff?.delayAfterExit(readyDurationMillis)
+                    onRestartPrepare?.invoke()
                     if (restartDelayMillis != null) {
                         Logs.i(
                             "restart process after ${restartDelayMillis}ms: " +
@@ -215,13 +220,14 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
     fun start(
         cmd: List<String>,
         env: MutableMap<String, String> = mutableMapOf(),
+        onRestartPrepare: (() -> Unit)? = null,
         onRestartCallback: (suspend () -> Unit)? = null,
         restartPolicy: GuardedProcessRestartPolicy? = null,
     ) {
         Logs.i("start process: ${Commandline.toRedactedString(cmd)}")
         Guard(cmd, env).apply {
             start() // if start fails, IOException will be thrown directly
-            launch { looper(onRestartCallback, restartPolicy) }
+            launch { looper(onRestartPrepare, onRestartCallback, restartPolicy) }
         }
         processCount += 1
     }
