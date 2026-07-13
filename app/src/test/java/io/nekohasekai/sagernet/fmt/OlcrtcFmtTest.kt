@@ -100,6 +100,15 @@ class OlcrtcFmtTest {
     }
 
     @Test
+    fun parse_rejectsClientIdReservedDelimiter() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            parseOlcrtc("olcrtc://jitsi?vp8channel<cid=device=7>@review-4821#$key")
+        }
+
+        assertFalse(error.message.orEmpty().contains("device=7"))
+    }
+
+    @Test
     fun parse_enforcesCarrierTransportMatrix() {
         val accepted = listOf(
             "jitsi" to "vp8channel",
@@ -137,6 +146,19 @@ class OlcrtcFmtTest {
         val defaults = parseOlcrtc("olcrtc://jitsi?vp8channel@review-4821#$key")
         assertEquals(30, defaults.vp8Fps)
         assertEquals(8, defaults.vp8BatchSize)
+    }
+
+    @Test
+    fun datachannel_ignoresUnusedVp8Values() {
+        val bean = validBean(transport = "datachannel").apply {
+            vp8Fps = null
+            vp8BatchSize = 999
+        }
+
+        assertFalse(bean.toUri().contains("vp8-"))
+        val args = buildArgs(bean)
+        assertEquals("30", args[args.indexOf("-vp8-fps") + 1])
+        assertEquals("8", args[args.indexOf("-vp8-batch") + 1])
     }
 
     @Test
@@ -272,6 +294,7 @@ class OlcrtcFmtTest {
             "https://meet.example.org/room" to "meet.example.org",
             "https://meet.example.org:8443/room" to "meet.example.org",
             "meet.example.org/room" to "meet.example.org",
+            "https://meet_private.example/room" to "meet_private.example",
             "https://[2001:db8::1]/room" to "2001:db8::1",
             "https://[2001:db8::1]:8443/room" to "2001:db8::1",
             "[2001:db8::1]/room" to "2001:db8::1",

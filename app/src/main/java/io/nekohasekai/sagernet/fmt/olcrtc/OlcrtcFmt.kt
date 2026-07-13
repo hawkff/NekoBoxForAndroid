@@ -8,8 +8,6 @@
 
 package io.nekohasekai.sagernet.fmt.olcrtc
 
-import java.net.URI
-
 /**
  * Parser/emitter for the `olcrtc://` client URI.
  *
@@ -32,6 +30,8 @@ import java.net.URI
 private const val SCHEME = "olcrtc://"
 private const val TRANSPORT_VP8 = "vp8channel"
 private const val TRANSPORT_DATA = "datachannel"
+private const val DEFAULT_VP8_FPS = 30
+private const val DEFAULT_VP8_BATCH = 8
 private val SUPPORTED_TRANSPORTS_BY_CARRIER = mapOf(
     "jitsi" to setOf(TRANSPORT_VP8, TRANSPORT_DATA),
     "telemost" to setOf(TRANSPORT_VP8),
@@ -65,8 +65,10 @@ fun OlcrtcBean.validateOlcrtcProfile(requireClientId: Boolean = false) {
     require(hex.length == 64 && hex.all { it.isHexDigit() }) {
         "olcRTC: encryption key must be 64 hex characters"
     }
-    require(fps in VP8_FPS_RANGE) { "olcRTC: VP8 FPS must be between 1 and 120" }
-    require(batchSize in VP8_BATCH_RANGE) { "olcRTC: VP8 batch size must be between 1 and 64" }
+    if (transportName == TRANSPORT_VP8) {
+        require(fps in VP8_FPS_RANGE) { "olcRTC: VP8 FPS must be between 1 and 120" }
+        require(batchSize in VP8_BATCH_RANGE) { "olcRTC: VP8 batch size must be between 1 and 64" }
+    }
     require(resolver.isBlank() || resolver.isIpPortLiteral()) {
         "olcRTC: DNS resolver must be an IP literal with a valid port"
     }
@@ -144,7 +146,12 @@ fun parseOlcrtc(url: String): OlcrtcBean {
                     ?: throw IllegalArgumentException("olcRTC: VP8 batch size must be an integer")
 
                 // Our non-standard pairing-token carrier.
-                "cid", "client-id", "clientid" -> clientId = value
+                "cid", "client-id", "clientid" -> {
+                    require(value.none { it in DELIMITERS }) {
+                        "olcRTC: client id contains a reserved delimiter"
+                    }
+                    clientId = value
+                }
             }
         }
 
@@ -160,8 +167,8 @@ fun OlcrtcBean.toUri(): String {
     val room = roomId.orEmpty()
     val shareClientId = clientId.orEmpty()
     val hex = keyHex.orEmpty()
-    val fps = vp8Fps ?: 0
-    val batchSize = vp8BatchSize ?: 0
+    val fps = vp8Fps ?: DEFAULT_VP8_FPS
+    val batchSize = vp8BatchSize ?: DEFAULT_VP8_BATCH
     val profileName = name.orEmpty()
 
     // The URI uses bare delimiters with no escaping convention; refuse to emit a link that
@@ -216,8 +223,16 @@ fun OlcrtcBean.buildOlcrtcArgs(
     val room = roomId.orEmpty()
     val identity = clientId.orEmpty()
     val hex = keyHex.orEmpty()
-    val fps = vp8Fps ?: 0
-    val batchSize = vp8BatchSize ?: 0
+    val fps = if (transportName == TRANSPORT_VP8) {
+        vp8Fps ?: DEFAULT_VP8_FPS
+    } else {
+        DEFAULT_VP8_FPS
+    }
+    val batchSize = if (transportName == TRANSPORT_VP8) {
+        vp8BatchSize ?: DEFAULT_VP8_BATCH
+    } else {
+        DEFAULT_VP8_BATCH
+    }
     val resolver = dnsServer.orEmpty().ifBlank { dnsFallback }
     require(resolver.isIpPortLiteral()) {
         "olcRTC: DNS resolver must be an IP literal with a valid port"
@@ -251,15 +266,20 @@ fun OlcrtcBean.buildOlcrtcArgs(
  * resolver. ICE candidates are typically raw IPs, so signaling is the common blocker.
  */
 fun OlcrtcBean.carrierHost(): String? = when (carrier.orEmpty()) {
-    "jitsi" -> runCatching {
-        val room = roomId.orEmpty()
-        if (room.isBlank()) return@runCatching null
-        // Prefix a scheme for the accepted bare host/room form, then let URI parse the authority.
-        val value = if (room.contains("://")) room else "https://${room.trimStart('/')}"
-        URI(value).host
-            ?.removeSurrounding("[", "]")
-            ?.ifBlank { null }
-    }.getOrNull()
+    "jitsi" -> {
+        // Mirror upstream's permissive host/room split, but keep bracketed IPv6 intact.
+        val room = roomId.orEmpty().trim()
+        val authority = room.substringAfter("://", room).trimStart('/').substringBefore('/').trim()
+        when {
+            authority.isBlank() -> null
+            authority.startsWith('[') -> {
+                val closingBracket = authority.indexOf(']')
+                if (closingBracket <= 1) null else authority.substring(1, closingBracket)
+            }
+            authority.count { it == ':' } == 1 -> authority.substringBefore(':').ifBlank { null }
+            else -> authority
+        }
+    }
     "telemost" -> "telemost.yandex.ru"
     "wbstream" -> "stream.wb.ru"
     else -> null
