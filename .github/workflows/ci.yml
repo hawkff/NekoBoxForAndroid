@@ -180,6 +180,7 @@ jobs:
             buildScript/lib/naive.sh \
             buildScript/lib/olcrtc.sh \
             buildScript/lib/olcrtc-src/main.go \
+            buildScript/lib/olcrtc-src/main_test.go \
             buildScript/lib/olcrtc-src/go.mod \
             buildScript/init/env.sh \
             buildScript/init/env_ndk.sh \

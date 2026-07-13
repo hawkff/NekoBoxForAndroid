@@ -81,8 +81,9 @@ fi
 BUILD="$(pwd)/.olcrtc-wrapper"
 rm -rf "$BUILD"
 mkdir -p "$BUILD"
-cp "$SRC/main.go" "$SRC/go.mod" "$BUILD/"
+cp "$SRC/main.go" "$SRC/main_test.go" "$SRC/go.mod" "$BUILD/"
 ( cd "$BUILD" && go mod edit -replace "github.com/openlibrecommunity/olcrtc=$WORK" && go mod tidy )
+( cd "$BUILD" && go test . )
 
 build_abi() {
   local abi="$1" goarch="$2" cc="$3" goarm="$4"
