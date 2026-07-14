@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.bg.proto
 
-internal fun olcrtcReadyMarkerFileName(port: Int, ownerToken: String) =
-    "olcrtc_ready_${port}_$ownerToken"
+internal fun olcrtcReadyMarkerFileName(port: Int, ownerToken: String) = "olcrtc_ready_${port}_$ownerToken"
 
 internal fun readinessMarkerSatisfied(markerRequired: Boolean, markerPresent: Boolean) =
     !markerRequired || markerPresent
