@@ -51,9 +51,9 @@ abstract class BoxInstance(
     private val olcrtcReadyMarkerOwner = UUID.randomUUID().toString()
     private var cacheFiles = ArrayList<File>()
 
-    private fun olcrtcReadyTimeoutMillis() = maxOf(
-        60_000L,
-        DataStore.connectionTestTimeout.toLong(),
+    private fun olcrtcReadyTimeoutMillis() = olcrtcSidecarReadyTimeoutMillis(
+        configuredTimeoutMillis = DataStore.connectionTestTimeout.toLong(),
+        recoveryEnabled = enableOlcrtcRecovery,
     )
 
     fun isInitialized(): Boolean {
@@ -345,8 +345,13 @@ abstract class BoxInstance(
         withContext(Dispatchers.IO) {
             val deadline = SystemClock.elapsedRealtime() + timeoutMillis
             val pending = ports.toMutableSet()
-            while (pending.isNotEmpty() && SystemClock.elapsedRealtime() < deadline) {
+            while (
+                pending.isNotEmpty() &&
+                SystemClock.elapsedRealtime() < deadline &&
+                processes.isActive
+            ) {
                 ensureActive()
+                if (!processes.isActive) break
                 val iterator = pending.iterator()
                 while (iterator.hasNext()) {
                     val port = iterator.next()
@@ -361,7 +366,10 @@ abstract class BoxInstance(
                         // not ready yet
                     }
                 }
-                if (pending.isNotEmpty()) delay(50)
+                if (pending.isNotEmpty()) {
+                    if (!processes.isActive) break
+                    delay(50)
+                }
             }
             pending
         }

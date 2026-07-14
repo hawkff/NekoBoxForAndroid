@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.bg.proto
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -12,6 +13,31 @@ class SidecarReadinessPolicyTest {
         assertNotEquals(
             olcrtcReadyMarkerFileName(1080, "owner-a"),
             olcrtcReadyMarkerFileName(1080, "owner-b"),
+        )
+    }
+
+    @Test
+    fun olcrtcReadyTimeoutMatchesExecutionMode() {
+        assertEquals(
+            60_000L,
+            olcrtcSidecarReadyTimeoutMillis(
+                configuredTimeoutMillis = 3_000L,
+                recoveryEnabled = true,
+            ),
+        )
+        assertEquals(
+            15_000L,
+            olcrtcSidecarReadyTimeoutMillis(
+                configuredTimeoutMillis = 3_000L,
+                recoveryEnabled = false,
+            ),
+        )
+        assertEquals(
+            90_000L,
+            olcrtcSidecarReadyTimeoutMillis(
+                configuredTimeoutMillis = 90_000L,
+                recoveryEnabled = false,
+            ),
         )
     }
 
