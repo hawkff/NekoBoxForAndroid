@@ -1,10 +1,19 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SidecarReadinessPolicyTest {
+
+    @Test
+    fun markerNamesAreOwnedByOneBoxGeneration() {
+        assertNotEquals(
+            olcrtcReadyMarkerFileName(1080, "owner-a"),
+            olcrtcReadyMarkerFileName(1080, "owner-b"),
+        )
+    }
 
     @Test
     fun markerIsRequiredOnlyForMarkedSidecars() {

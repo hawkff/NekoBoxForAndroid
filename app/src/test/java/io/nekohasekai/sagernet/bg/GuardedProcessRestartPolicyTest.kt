@@ -1,8 +1,10 @@
 package io.nekohasekai.sagernet.bg
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GuardedProcessRestartPolicyTest {
@@ -58,5 +60,41 @@ class GuardedProcessRestartPolicyTest {
         val policy: GuardedProcessRestartPolicy? = null
 
         assertNull(policy.createBackoff())
+    }
+
+    @Test
+    fun disabledRestartFailsOnEveryExit() {
+        assertTrue(
+            shouldFailAfterProcessExit(
+                restartOnExit = false,
+                restartPolicy = null,
+                processUptimeMillis = 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun legacyAndPolicyRestartDecisionsRemainUnchanged() {
+        assertTrue(
+            shouldFailAfterProcessExit(
+                restartOnExit = true,
+                restartPolicy = null,
+                processUptimeMillis = 999L,
+            ),
+        )
+        assertFalse(
+            shouldFailAfterProcessExit(
+                restartOnExit = true,
+                restartPolicy = null,
+                processUptimeMillis = 1_000L,
+            ),
+        )
+        assertFalse(
+            shouldFailAfterProcessExit(
+                restartOnExit = true,
+                restartPolicy = GuardedProcessRestartPolicy(),
+                processUptimeMillis = 0L,
+            ),
+        )
     }
 }

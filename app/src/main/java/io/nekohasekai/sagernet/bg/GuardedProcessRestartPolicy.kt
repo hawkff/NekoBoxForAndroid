@@ -34,3 +34,9 @@ internal class GuardedProcessRestartBackoff(
 }
 
 internal fun GuardedProcessRestartPolicy?.createBackoff() = this?.let(::GuardedProcessRestartBackoff)
+
+internal fun shouldFailAfterProcessExit(
+    restartOnExit: Boolean,
+    restartPolicy: GuardedProcessRestartPolicy?,
+    processUptimeMillis: Long,
+) = !restartOnExit || (restartPolicy == null && processUptimeMillis < 1_000L)

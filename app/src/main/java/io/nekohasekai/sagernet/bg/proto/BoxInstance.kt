@@ -33,6 +33,7 @@ import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.UUID
 
 abstract class BoxInstance(
     val profile: ProxyEntity,
@@ -47,6 +48,7 @@ abstract class BoxInstance(
     open lateinit var processes: GuardedProcessPool
     protected open val enableOlcrtcRecovery = true
     private val olcrtcReadyMarkers = hashMapOf<Int, File>()
+    private val olcrtcReadyMarkerOwner = UUID.randomUUID().toString()
     private var cacheFiles = ArrayList<File>()
 
     private fun olcrtcReadyTimeoutMillis() = maxOf(
@@ -125,7 +127,10 @@ abstract class BoxInstance(
                         val creds = config.localProxyCredentials[port]
                             ?: error("olcRTC: missing loopback SOCKS credentials for port $port")
                         val readyTimeoutMs = olcrtcReadyTimeoutMillis()
-                        val readyMarker = File(app.noBackupFilesDir, "olcrtc_ready_$port")
+                        val readyMarker = File(
+                            app.noBackupFilesDir,
+                            olcrtcReadyMarkerFileName(port, olcrtcReadyMarkerOwner),
+                        )
                         olcrtcReadyMarkers[port] = readyMarker
                         val args = bean.buildOlcrtcArgs(
                             port,
@@ -320,7 +325,7 @@ abstract class BoxInstance(
                                 restartPolicy = GuardedProcessRestartPolicy(),
                             )
                         } else {
-                            processes.start(commands, env)
+                            processes.start(commands, env, restartOnExit = false)
                         }
                     }
                 }

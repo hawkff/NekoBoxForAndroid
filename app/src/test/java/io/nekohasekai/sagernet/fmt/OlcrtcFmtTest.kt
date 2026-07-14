@@ -257,6 +257,13 @@ class OlcrtcFmtTest {
     }
 
     @Test
+    fun toUri_rejectsRoomPayloadDelimiter() {
+        assertThrows(IllegalArgumentException::class.java) {
+            validBean(roomId = "review<4821").toUri()
+        }
+    }
+
+    @Test
     fun toUri_rejectsUnsupportedCarrierTransportCombination() {
         assertThrows(IllegalArgumentException::class.java) {
             validBean(carrier = "telemost", transport = "datachannel").toUri()

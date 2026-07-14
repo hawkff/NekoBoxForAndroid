@@ -96,6 +96,7 @@ func main() {
 	}
 	if err := publishReadyMarker(*readyMarker); err != nil {
 		mobile.Stop()
+		removeReadyMarker(*readyMarker)
 		log.Fatalf("olcrtc ready marker: %v", err)
 	}
 	defer removeReadyMarker(*readyMarker)
@@ -108,6 +109,7 @@ func main() {
 
 	if !waitAfterReady(sig, ticker.C, mobile.IsRunning) {
 		mobile.Stop()
+		removeReadyMarker(*readyMarker)
 		log.Fatal("olcrtc runtime stopped after readiness")
 	}
 	mobile.Stop()

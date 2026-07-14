@@ -118,22 +118,28 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
             }
         }
 
+        private fun signalProcess(signal: Int) {
+            try {
+                Os.kill(pid.get(process) as Int, signal)
+            } catch (e: ErrnoException) {
+                if (e.errno != OsConstants.ESRCH) Logs.w(e)
+            } catch (e: ReflectiveOperationException) {
+                Logs.w(e)
+            }
+        }
+
         private suspend fun terminateProcess(exitChannel: Channel<Int>): Int? = withContext(NonCancellable) {
             exitChannel.tryReceive().getOrNull()?.let { return@withContext it }
             if (Build.VERSION.SDK_INT < 24) {
-                try {
-                    Os.kill(pid.get(process) as Int, OsConstants.SIGTERM)
-                } catch (e: ErrnoException) {
-                    if (e.errno != OsConstants.ESRCH) Logs.w(e)
-                } catch (e: ReflectiveOperationException) {
-                    Logs.w(e)
-                }
+                signalProcess(OsConstants.SIGTERM)
                 withTimeoutOrNull(500) { exitChannel.receive() }?.let { return@withContext it }
             }
             process.destroy()
+            withTimeoutOrNull(1000) { exitChannel.receive() }?.let { return@withContext it }
             if (Build.VERSION.SDK_INT >= 26) {
-                withTimeoutOrNull(1000) { exitChannel.receive() }?.let { return@withContext it }
                 process.destroyForcibly()
+            } else {
+                signalProcess(OsConstants.SIGKILL)
             }
             withTimeoutOrNull(1000) { exitChannel.receive() }
         }
@@ -143,6 +149,7 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
             onRestartPrepare: (() -> Unit)?,
             onRestartCallback: (suspend () -> Unit)?,
             restartPolicy: GuardedProcessRestartPolicy?,
+            restartOnExit: Boolean,
         ) {
             var running = true
             var restarted = false
@@ -166,8 +173,8 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
 
                     val exitTime = SystemClock.elapsedRealtime()
                     val processUptimeMillis = exitTime - startTime
-                    if (restartPolicy == null && processUptimeMillis < 1000L) {
-                        throw IOException("$cmdName exits too fast (exit code: ${generation.exitCode})")
+                    if (shouldFailAfterProcessExit(restartOnExit, restartPolicy, processUptimeMillis)) {
+                        throw IOException("$cmdName exited (exit code: ${generation.exitCode})")
                     }
                     when (generation.exitCode) {
                         128 + OsConstants.SIGKILL -> Logs.w("$cmdName was killed")
@@ -180,7 +187,17 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
                         (exitTime - it).coerceAtLeast(0L)
                     }
                     val restartDelayMillis = backoff?.delayAfterExit(readyDurationMillis)
-                    onRestartPrepare?.invoke()
+                    try {
+                        onRestartPrepare?.invoke()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        throw if (e is IOException) {
+                            e
+                        } else {
+                            IOException("$cmdName restart preparation failed", e)
+                        }
+                    }
                     if (restartDelayMillis != null) {
                         Logs.i(
                             "restart process after ${restartDelayMillis}ms: " +
@@ -223,11 +240,12 @@ class GuardedProcessPool(private val onFatal: suspend (IOException) -> Unit) : C
         onRestartPrepare: (() -> Unit)? = null,
         onRestartCallback: (suspend () -> Unit)? = null,
         restartPolicy: GuardedProcessRestartPolicy? = null,
+        restartOnExit: Boolean = true,
     ) {
         Logs.i("start process: ${Commandline.toRedactedString(cmd)}")
         Guard(cmd, env).apply {
             start() // if start fails, IOException will be thrown directly
-            launch { looper(onRestartPrepare, onRestartCallback, restartPolicy) }
+            launch { looper(onRestartPrepare, onRestartCallback, restartPolicy, restartOnExit) }
         }
         processCount += 1
     }

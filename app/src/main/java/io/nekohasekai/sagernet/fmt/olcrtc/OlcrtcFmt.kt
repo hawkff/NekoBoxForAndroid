@@ -176,9 +176,11 @@ fun OlcrtcBean.toUri(): String {
     require(shareClientId.none { it in DELIMITERS }) {
         "olcRTC: client id contains a reserved delimiter"
     }
-    // roomId is emitted raw before '#'; a '$' in it would be mis-parsed as the comment
-    // delimiter on re-import. Refuse rather than emit a link that won't round-trip.
-    require(room.none { it == '$' }) { "olcRTC: room id must not contain '\$'" }
+    // roomId is emitted raw before '#'. A '$' would be mis-parsed as the comment delimiter,
+    // while '<' would be mistaken for the transport payload opener on re-import.
+    require(room.none { it == '$' || it == '<' }) {
+        "olcRTC: room id contains a reserved delimiter"
+    }
     require(profileName.none { it == '$' }) { "olcRTC: profile name must not contain '\$'" }
 
     val payloadParts = mutableListOf<String>()
