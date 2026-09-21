@@ -107,13 +107,4 @@ replace github.com/sagernet/sing-vmess => github.com/hawkff/sing-vmess v0.2.8-mo
 // in libcore stays dyhkwong. v0.1.4 targets quic-go v0.59 / sing v0.8 / sing-quic v0.6.1.
 replace github.com/dyhkwong/sing-juicity => github.com/exclavenetwork/sing-juicity v0.1.4
 
-// replace github.com/sagernet/sing-quic => github.com/matsuridayo/sing-quic v0.0.0-20241009042333-b49ce60d9b36
-// replace github.com/sagernet/sing-quic => ../../sing-quic
-
-// replace github.com/sagernet/sing => ../../sing
-
-// replace github.com/sagernet/sing-dns => ../../sing-dns
-
-// replace berty.tech/go-libtor => github.com/berty/go-libtor v0.0.0-20220627102132-9189eb6e3982
-
 replace github.com/sagernet/sing-quic => github.com/hawkff/sing-quic v0.6.2-0.20260630192917-42e8810bc4b8

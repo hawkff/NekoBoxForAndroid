@@ -11,6 +11,7 @@ __MACOSX/
 .agents/
 .pi-subagents/
 AGENTS.md
+/info_for_agents/
 
 # Gradle / Kotlin build state
 .gradle/
@@ -29,6 +30,9 @@ jniLibs/
 /libcore/.build/
 /libcore/version_gen.go
 /.masterdnsvpn-build/
+/.mieru-build/
+/.naive-build/
+/app/executableSo/
 /.olcrtc-build/
 /.olcrtc-gomobile/
 /.olcrtc-wrapper/

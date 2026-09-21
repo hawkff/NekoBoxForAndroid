@@ -68,7 +68,7 @@ class ProtocolDescriptor(
     /** Persisted type id. NEVER change an existing value - it is stored in every profile row. */
     val type: Int,
     /** Deserialize the Kryo blob into this protocol's bean (same converter as the old ladder). */
-    val deserialize: (ByteArray) -> AbstractBean,
+    val deserialize: (ByteArray) -> AbstractBean?,
     /** The bean subtype this protocol stores (for putBean dispatch by instance). */
     val beanClass: Class<out AbstractBean>,
     /** Read the typed bean field off the entity (for requireBean). */

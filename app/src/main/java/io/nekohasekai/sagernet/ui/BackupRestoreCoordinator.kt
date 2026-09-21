@@ -2,12 +2,12 @@ package io.nekohasekai.sagernet.ui
 
 import android.os.Parcel
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.ParcelizeBridge
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
+import kotlinx.parcelize.parcelableCreator
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,7 +78,7 @@ internal suspend fun restoreBackup(
     val rules = if (rule && content.has("rules")) {
         when (version) {
             BackupFormatV2.VERSION -> BackupFormatV2.decodeRules(content.getJSONArray("rules"))
-            else -> decodeArray(content.getJSONArray("rules")) { ParcelizeBridge.createRule(it) }
+            else -> decodeArray(content.getJSONArray("rules")) { parcelableCreator<RuleEntity>().createFromParcel(it) }
         }
     } else {
         null
@@ -88,6 +88,7 @@ internal suspend fun restoreBackup(
         BackupFormatV2.sanitizeSettings(
             when (version) {
                 BackupFormatV2.VERSION -> BackupFormatV2.decodeSettings(content.getJSONArray("settings"))
+
                 else -> decodeArray(content.getJSONArray("settings")) {
                     KeyValuePair.CREATOR.createFromParcel(it)
                 }

@@ -233,6 +233,15 @@ class ProtocolRegistryDispatchTest {
     }
 
     @Test
+    fun emptyBlob_clearsTheTypedBeanForEveryProtocol() {
+        for ((bean, type) in allBeans) {
+            val entity = ProxyEntity().putBean(bean)
+            entity.putByteArray(byteArrayOf())
+            org.junit.Assert.assertNull(ProtocolRegistry.forType(type)!!.getBean(entity))
+        }
+    }
+
+    @Test
     fun everyBean_proxyEntityDispatchParity() {
         for ((bean, type) in allBeans) dispatchParity(bean, type)
     }

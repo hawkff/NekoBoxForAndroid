@@ -12,7 +12,6 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.fmt.KryoConverters
-import io.nekohasekai.sagernet.fmt.gson.GsonConverters
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
@@ -31,7 +30,7 @@ import io.nekohasekai.sagernet.fmt.gson.GsonConverters
         AutoMigration(from = 11, to = 12),
     ],
 )
-@TypeConverters(value = [KryoConverters::class, GsonConverters::class])
+@TypeConverters(KryoConverters::class)
 abstract class SagerDatabase : RoomDatabase() {
 
     @DeleteColumn(tableName = "proxy_entities", columnName = "nekoBean")

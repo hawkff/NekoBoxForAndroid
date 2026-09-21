@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -110,6 +110,7 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
     }
 
     /** Assembles the full item list. [pluginItems] is computed off the main thread by the caller. */
+    @SuppressLint("BatteryLife") // Persistent connections need the user-controlled battery exemption.
     private fun buildItems(pluginItems: List<AboutItem>): List<AboutItem> {
         val items = mutableListOf<AboutItem>()
 
@@ -139,36 +140,31 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
 
         items += pluginItems
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-            val ignoring = pm.isIgnoringBatteryOptimizations(app.packageName)
-            items += AboutItem(
-                icon = R.drawable.ic_baseline_running_with_errors_24,
-                text = getString(R.string.ignore_battery_optimizations),
-                subText = getString(
-                    if (ignoring) {
-                        R.string.battery_optimization_enabled
-                    } else {
-                        R.string.battery_optimization_disabled
-                    },
-                ),
-                onClick = {
-                    // The ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog only appears while
-                    // the app is still optimized; once exempt it is a no-op. So when already
-                    // exempt, send the user to the battery settings screen where they can toggle
-                    // it back off.
-                    val intent = if (ignoring) {
-                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    } else {
-                        Intent(
-                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                            "package:${app.packageName}".toUri(),
-                        )
-                    }
-                    requestIgnoreBatteryOptimizations.launch(intent)
+        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val ignoring = pm.isIgnoringBatteryOptimizations(app.packageName)
+        items += AboutItem(
+            icon = R.drawable.ic_baseline_running_with_errors_24,
+            text = getString(R.string.ignore_battery_optimizations),
+            subText = getString(
+                if (ignoring) {
+                    R.string.battery_optimization_enabled
+                } else {
+                    R.string.battery_optimization_disabled
                 },
-            )
-        }
+            ),
+            onClick = {
+                // Exempt apps must open settings to revoke the exemption.
+                val intent = if (ignoring) {
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                } else {
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        "package:${app.packageName}".toUri(),
+                    )
+                }
+                requestIgnoreBatteryOptimizations.launch(intent)
+            },
+        )
 
         return items
     }
@@ -260,22 +256,19 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
             private val DIFF = object : DiffUtil.ItemCallback<AboutItem>() {
                 override fun areItemsTheSame(oldItem: AboutItem, newItem: AboutItem) = oldItem.text == newItem.text
 
-                override fun areContentsTheSame(oldItem: AboutItem, newItem: AboutItem) =
-                    oldItem.icon == newItem.icon &&
-                        oldItem.text == newItem.text &&
-                        oldItem.subText == newItem.subText
+                override fun areContentsTheSame(oldItem: AboutItem, newItem: AboutItem) = oldItem.icon == newItem.icon &&
+                    oldItem.text == newItem.text &&
+                    oldItem.subText == newItem.subText
             }
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AboutViewHolder {
-            return AboutViewHolder(
-                LayoutAboutItemBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                ),
-            )
-        }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AboutViewHolder = AboutViewHolder(
+            LayoutAboutItemBinding.inflate(
+                LayoutInflater.from(parent.context),
+                parent,
+                false,
+            ),
+        )
 
         override fun onBindViewHolder(holder: AboutViewHolder, position: Int) {
             holder.bind(getItem(position))
