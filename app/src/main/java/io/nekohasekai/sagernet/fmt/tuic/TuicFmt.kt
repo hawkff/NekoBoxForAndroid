@@ -54,16 +54,16 @@ fun parseTuic(url: String): TuicBean {
 }
 
 fun TuicBean.toUri(): String {
-    val builder = linkBuilder().username(uuid).password(token).host(serverAddress).port(serverPort)
+    val builder = linkBuilder().username(uuid!!).password(token!!).host(serverAddress!!).port(serverPort!!)
 
     builder.addQueryParameter("congestion_control", congestionController)
     builder.addQueryParameter("udp_relay_mode", udpRelayMode)
 
-    if (sni.isNotBlank()) builder.addQueryParameter("sni", sni)
-    if (alpn.isNotBlank()) builder.addQueryParameter("alpn", alpn)
-    if (allowInsecure) builder.addQueryParameter("allow_insecure", "1")
-    if (disableSNI) builder.addQueryParameter("disable_sni", "1")
-    if (name.isNotBlank()) builder.encodedFragment(name.urlSafe())
+    if (sni!!.isNotBlank()) builder.addQueryParameter("sni", sni)
+    if (alpn!!.isNotBlank()) builder.addQueryParameter("alpn", alpn)
+    if (allowInsecure!!) builder.addQueryParameter("allow_insecure", "1")
+    if (disableSNI!!) builder.addQueryParameter("disable_sni", "1")
+    if (name!!.isNotBlank()) builder.encodedFragment(name!!.urlSafe())
 
     return builder.toLink("tuic")
 }
@@ -82,17 +82,17 @@ fun buildSingBoxOutboundTuicBean(bean: TuicBean): SingBoxOptions.Outbound_TUICOp
         }
         zero_rtt_handshake = bean.reduceRTT
         tls = SingBoxOptions.OutboundTLSOptions().apply {
-            if (bean.sni.isNotBlank()) {
+            if (bean.sni!!.isNotBlank()) {
                 server_name = bean.sni
             }
-            if (bean.alpn.isNotBlank()) {
-                alpn = bean.alpn.listByLineOrComma()
+            if (bean.alpn!!.isNotBlank()) {
+                alpn = bean.alpn!!.listByLineOrComma()
             }
-            if (bean.caText.isNotBlank()) {
+            if (bean.caText!!.isNotBlank()) {
                 certificate = bean.caText
             }
             disable_sni = bean.disableSNI
-            insecure = bean.allowInsecure || DataStore.globalAllowInsecure
+            insecure = bean.allowInsecure!! || DataStore.globalAllowInsecure
             enabled = true
         }
     }

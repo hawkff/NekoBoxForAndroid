@@ -17,11 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/**
- * Tests for the Hysteria 2 JSON config import (Plan 022). Uses Robolectric because org.json
- * is an Android-framework class (stubbed on the bare JVM). Pinned to the app's targetSdk,
- * which Robolectric 4.16 bundles (4.16 supports SDK 36 / Baklava).
- */
+/** Uses Robolectric for Android's JSON implementation at the app's target SDK. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class HysteriaFmtTest {
@@ -38,8 +34,7 @@ class HysteriaFmtTest {
         initializeDefaultValues()
     }
 
-    private fun buildHysteria2(bean: HysteriaBean) =
-        buildSingBoxOutboundHysteriaBean(bean) as SingBoxOptions.Outbound_Hysteria2Options
+    private fun buildHysteria2(bean: HysteriaBean) = buildSingBoxOutboundHysteriaBean(bean) as SingBoxOptions.Outbound_Hysteria2Options
 
     @Test
     fun parseHysteria2Json_mapsCoreFields() {
@@ -152,7 +147,7 @@ class HysteriaFmtTest {
         }
 
         assertFalse(bean.toUri().contains("ech="))
-        assertNull(buildHysteria2(bean).tls.ech)
+        assertNull(checkNotNull(buildHysteria2(bean).tls).ech)
     }
 
     @Test
@@ -162,7 +157,7 @@ class HysteriaFmtTest {
             echConfig = this@HysteriaFmtTest.echConfig
         }
 
-        val ech = buildHysteria2(bean).tls.ech
+        val ech = checkNotNull(checkNotNull(buildHysteria2(bean).tls).ech)
         assertEquals(true, ech.enabled)
         assertEquals(
             listOf(
@@ -186,7 +181,7 @@ class HysteriaFmtTest {
             """.trimIndent()
         }
 
-        val ech = buildHysteria2(bean).tls.ech
+        val ech = checkNotNull(checkNotNull(buildHysteria2(bean).tls).ech)
         assertEquals(
             listOf(
                 "-----BEGIN ECH CONFIGS-----",
@@ -233,6 +228,19 @@ class HysteriaFmtTest {
     }
 
     @Test
+    fun hysteria1_preservesBothReceiveWindows() {
+        ConfigBuilderTestEnv.reset()
+        val bean = hysteria2Bean().apply {
+            protocolVersion = 1
+            streamReceiveWindow = 65_536
+            connectionReceiveWindow = 262_144
+        }
+        val outbound = buildSingBoxOutboundHysteriaBean(bean) as SingBoxOptions.Outbound_HysteriaOptions
+        assertEquals(65_536L, outbound.recv_window_conn)
+        assertEquals(262_144L, outbound.recv_window)
+    }
+
+    @Test
     fun hysteria1_ignoresEchFields() {
         val bean = hysteria2Bean().apply {
             protocolVersion = 1
@@ -242,6 +250,6 @@ class HysteriaFmtTest {
         }
 
         val outbound = buildSingBoxOutboundHysteriaBean(bean) as SingBoxOptions.Outbound_HysteriaOptions
-        assertNull(outbound.tls.ech)
+        assertNull(checkNotNull(outbound.tls).ech)
     }
 }

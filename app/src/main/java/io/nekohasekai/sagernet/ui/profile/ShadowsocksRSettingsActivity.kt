@@ -14,15 +14,15 @@ class ShadowsocksRSettingsActivity : ProfileSettingsActivity<ShadowsocksRBean>()
     override fun createEntity() = ShadowsocksRBean()
 
     override fun ShadowsocksRBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverMethod = method
-        DataStore.serverPassword = password
-        DataStore.serverProtocol = protocol
-        DataStore.serverObfs = obfs
-        DataStore.serverProtocolParam = protocolParam
-        DataStore.serverObfsParam = obfsParam
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverMethod = method!!
+        DataStore.serverPassword = password!!
+        DataStore.serverProtocol = protocol!!
+        DataStore.serverObfs = obfs!!
+        DataStore.serverProtocolParam = protocolParam!!
+        DataStore.serverObfsParam = obfsParam!!
     }
 
     override fun ShadowsocksRBean.serialize() {

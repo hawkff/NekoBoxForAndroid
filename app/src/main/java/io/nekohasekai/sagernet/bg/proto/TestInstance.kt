@@ -13,10 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
-    BoxInstance(profile) {
-
-    protected override val enableOlcrtcRecovery = false
+class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) : BoxInstance(profile) {
 
     // close() can be reached from two paths that may overlap on cancellation: the
     // suspendCancellableCoroutine's invokeOnCancellation and the `use { }` block's

@@ -9,8 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.runBlocking
 
-class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = null) :
-    BoxInstance(profile) {
+class ProxyInstance(profile: ProxyEntity, var service: BaseService.Interface? = null) : BoxInstance(profile) {
 
     var notTmp = true
 

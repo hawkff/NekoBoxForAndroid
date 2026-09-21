@@ -14,13 +14,13 @@ class SocksSettingsActivity : ProfileSettingsActivity<SOCKSBean>() {
     override fun createEntity() = SOCKSBean()
 
     override fun SOCKSBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
 
-        DataStore.serverProtocolInt = protocol
-        DataStore.serverUsername = username
-        DataStore.serverPassword = password
+        DataStore.serverProtocolInt = protocol!!
+        DataStore.serverUsername = username!!
+        DataStore.serverPassword = password!!
 
         DataStore.profileCacheStore.putBoolean("sUoT", sUoT)
     }

@@ -36,9 +36,7 @@ object Protocols {
 
     // Display
 
-    fun Context.getProtocolColor(type: Int): Int {
-        return getColorAttr(R.attr.protocolColor)
-    }
+    fun Context.getProtocolColor(type: Int): Int = getColorAttr(R.attr.protocolColor)
 
     // Test
 

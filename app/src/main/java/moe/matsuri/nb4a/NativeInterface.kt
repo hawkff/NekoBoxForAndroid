@@ -18,7 +18,9 @@ import libcore.Libcore
 import libcore.NB4AInterface
 import java.net.InetSocketAddress
 
-class NativeInterface : BoxPlatformInterface, NB4AInterface {
+class NativeInterface :
+    BoxPlatformInterface,
+    NB4AInterface {
 
     //  libbox interface
 
@@ -33,18 +35,14 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
         return DataStore.vpnService!!.startVpn(singTunOptionsJson, tunPlatformOptionsJson).toLong()
     }
 
-    override fun useProcFS(): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-    }
+    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    override fun findConnectionOwner(ipProto: Int, srcIp: String, srcPort: Int, destIp: String, destPort: Int): Int {
-        return SagerNet.connectivity.getConnectionOwnerUid(
-            ipProto,
-            InetSocketAddress(srcIp, srcPort),
-            InetSocketAddress(destIp, destPort),
-        )
-    }
+    override fun findConnectionOwner(ipProto: Int, srcIp: String, srcPort: Int, destIp: String, destPort: Int): Int = SagerNet.connectivity.getConnectionOwnerUid(
+        ipProto,
+        InetSocketAddress(srcIp, srcPort),
+        InetSocketAddress(destIp, destPort),
+    )
 
     override fun packageNameByUid(uid: Int): String {
         PackageCache.awaitLoadSync()
@@ -78,9 +76,7 @@ class NativeInterface : BoxPlatformInterface, NB4AInterface {
 
     // nb4a interface
 
-    override fun useOfficialAssets(): Boolean {
-        return DataStore.rulesProvider == 0
-    }
+    override fun useOfficialAssets(): Boolean = DataStore.rulesProvider == 0
 
     override fun selector_OnProxySelected(selectorTag: String, tag: String) {
         if (selectorTag != "proxy") {

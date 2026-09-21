@@ -56,7 +56,7 @@ abstract class GroupUpdater {
                         is NaiveBean -> continue
                     }
 
-                    if (profile.serverAddress.isIpAddress()) continue
+                    if (profile.serverAddress!!.isIpAddress()) continue
 
                     launch(lookupPool) {
                         try {
@@ -99,21 +99,25 @@ abstract class GroupUpdater {
         with(bean) {
             when (this) {
                 is HttpBean -> {
-                    if (isTLS() && sni.isBlank()) sni = bean.serverAddress
+                    if (isTLS() && sni!!.isBlank()) sni = bean.serverAddress
                 }
+
                 is StandardV2RayBean -> {
                     when (security) {
-                        "tls" -> if (sni.isBlank()) sni = bean.serverAddress
+                        "tls" -> if (sni!!.isBlank()) sni = bean.serverAddress
                     }
                 }
+
                 is TrojanBean -> {
-                    if (sni.isBlank()) sni = bean.serverAddress
+                    if (sni!!.isBlank()) sni = bean.serverAddress
                 }
+
                 is TrojanGoBean -> {
-                    if (sni.isBlank()) sni = bean.serverAddress
+                    if (sni!!.isBlank()) sni = bean.serverAddress
                 }
+
                 is HysteriaBean -> {
-                    if (sni.isBlank()) sni = bean.serverAddress
+                    if (sni!!.isBlank()) sni = bean.serverAddress
                 }
             }
 
@@ -147,7 +151,7 @@ abstract class GroupUpdater {
                 if (byUser && (
                         subscription.link?.startsWith(
                             "http://",
-                        ) == true || subscription.updateWhenConnectedOnly
+                        ) == true || subscription.updateWhenConnectedOnly!!
                         ) && !connected
                 ) {
                     if (userInterface == null || !userInterface.confirm(

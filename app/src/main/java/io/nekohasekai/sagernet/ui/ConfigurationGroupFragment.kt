@@ -76,9 +76,7 @@ class ConfigurationGroupFragment : Fragment() {
     lateinit var proxyGroup: ProxyGroup
     var selected = false
 
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        return LayoutProfileListBinding.inflate(inflater).root
-    }
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View = LayoutProfileListBinding.inflate(inflater).root
 
     var undoManager: UndoSnackbarManager<ProxyEntity>? = null
     var adapter: ConfigurationAdapter? = null
@@ -125,20 +123,16 @@ class ConfigurationGroupFragment : Fragment() {
                 return makeMovementFlags(dragFlags, 0) // No swipe flags
             }
 
-            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
-                return 0
-            }
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int = 0
 
-            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
-                return if (isEnabled && adapter?.canDrag() == true) {
-                    if (DataStore.groupLayoutMode == 1) {
-                        ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
-                    } else {
-                        ItemTouchHelper.UP or ItemTouchHelper.DOWN
-                    }
+            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int = if (isEnabled && adapter?.canDrag() == true) {
+                if (DataStore.groupLayoutMode == 1) {
+                    ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
                 } else {
-                    0
+                    ItemTouchHelper.UP or ItemTouchHelper.DOWN
                 }
+            } else {
+                0
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
@@ -529,9 +523,11 @@ class ConfigurationGroupFragment : Fragment() {
         private fun sortMasterProfiles() {
             val sorted = when (proxyGroup.order) {
                 GroupOrder.BY_NAME -> masterProfiles.values.sortedBy { it.displayName() }
+
                 GroupOrder.BY_DELAY -> masterProfiles.values.sortedBy {
                     if (it.status == 1) it.ping else 114514
                 }
+
                 else -> masterProfiles.values.sortedBy { it.userOrder }
             }
             masterIds.clear()
@@ -587,7 +583,7 @@ class ConfigurationGroupFragment : Fragment() {
         private fun hasMiddleRow(profile: ProxyEntity): Boolean {
             val showTraffic = profile.rx + profile.tx != 0L
             val address = if (
-                profile.requireBean().name.isNotBlank() &&
+                profile.requireBean().name!!.isNotBlank() &&
                 (parentFragment as? ConfigurationFragment)?.alwaysShowAddress == true
             ) {
                 profile.displayAddress()
@@ -611,19 +607,15 @@ class ConfigurationGroupFragment : Fragment() {
             }
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ConfigurationHolder {
-            return ConfigurationHolder(
-                LayoutProfileBinding.inflate(
-                    LayoutInflater.from(parent.context),
-                    parent,
-                    false,
-                ),
-            )
-        }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ConfigurationHolder = ConfigurationHolder(
+            LayoutProfileBinding.inflate(
+                LayoutInflater.from(parent.context),
+                parent,
+                false,
+            ),
+        )
 
-        override fun getItemId(position: Int): Long {
-            return configurationIdList[position]
-        }
+        override fun getItemId(position: Int): Long = configurationIdList[position]
 
         override fun onBindViewHolder(holder: ConfigurationHolder, position: Int) {
             try {
@@ -634,9 +626,7 @@ class ConfigurationGroupFragment : Fragment() {
             }
         }
 
-        override fun getItemCount(): Int {
-            return configurationIdList.size
-        }
+        override fun getItemCount(): Int = configurationIdList.size
 
         fun refreshProfileState(profileIds: Set<Long>) {
             if (disposed) return
@@ -949,9 +939,11 @@ class ConfigurationGroupFragment : Fragment() {
                 var profiles = SagerDatabase.proxyDao.getByGroup(groupId)
                 profiles = when (order) {
                     GroupOrder.BY_NAME -> profiles.sortedBy { it.displayName() }
+
                     GroupOrder.BY_DELAY -> profiles.sortedBy {
                         if (it.status == 1) it.ping else 114514
                     }
+
                     else -> profiles
                 }
                 Triple(
@@ -994,8 +986,7 @@ class ConfigurationGroupFragment : Fragment() {
     val profileAccess = Mutex()
     val reloadAccess = Mutex()
 
-    inner class ConfigurationHolder(val binding: LayoutProfileBinding) :
-        RecyclerView.ViewHolder(binding.root) {
+    inner class ConfigurationHolder(val binding: LayoutProfileBinding) : RecyclerView.ViewHolder(binding.root) {
 
         val view: View get() = binding.root
 
@@ -1020,6 +1011,10 @@ class ConfigurationGroupFragment : Fragment() {
                 }
             }
 
+            if (!profile.canBuild()) {
+                popup.menu.removeItem(R.id.action_config_export_clipboard)
+                popup.menu.removeItem(R.id.action_config_export_file)
+            }
             popup.setOnMenuItemClickListener { handleShareMenu(it, profileId) }
             popup.show()
         }
@@ -1064,12 +1059,8 @@ class ConfigurationGroupFragment : Fragment() {
             val host = parentFragment as? ConfigurationFragment ?: return
             if (host.isRunningProfile(profileId)) return
             val profile = adapter?.profileById(profileId) ?: return
-            anchor.context.startActivity(
-                profile.settingIntent(
-                    anchor.context,
-                    proxyGroup.type == GroupType.SUBSCRIPTION,
-                ),
-            )
+            val intent = profile.settingIntent(anchor.context, proxyGroup.type == GroupType.SUBSCRIPTION) ?: return
+            anchor.context.startActivity(intent)
         }
 
         private fun performRemove(profileId: Long) {
@@ -1100,6 +1091,7 @@ class ConfigurationGroupFragment : Fragment() {
             popup.menuInflater.inflate(R.menu.double_column_item_menu, popup.menu)
             if (select) popup.menu.removeItem(R.id.action_delete)
             val running = host.isRunningProfile(profileId)
+            popup.menu.findItem(R.id.action_edit)?.isVisible = adapter?.profileById(profileId)?.haveSettings() == true
             popup.menu.findItem(R.id.action_edit)?.isEnabled = !running
             popup.menu.findItem(R.id.action_delete)?.isEnabled = !running
             popup.setOnMenuItemClickListener { menuItem ->
@@ -1108,14 +1100,17 @@ class ConfigurationGroupFragment : Fragment() {
                         openSettings(anchor, profileId)
                         true
                     }
+
                     R.id.action_share -> {
                         showShareMenu(anchor, profileId)
                         true
                     }
+
                     R.id.action_delete -> {
                         requestRemove(profileId)
                         true
                     }
+
                     else -> false
                 }
             }
@@ -1218,7 +1213,7 @@ class ConfigurationGroupFragment : Fragment() {
                 address = address.substring(0, 27) + "..."
             }
 
-            if (proxyEntity.requireBean().name.isBlank() || !pf.alwaysShowAddress) {
+            if (proxyEntity.requireBean().name!!.isBlank() || !pf.alwaysShowAddress) {
                 address = ""
             }
 
@@ -1265,7 +1260,7 @@ class ConfigurationGroupFragment : Fragment() {
                 doubleColumnMenuButton.isVisible = true
             } else {
                 shareLayout.isGone = selectOrChain
-                editButton.isGone = select
+                editButton.isGone = select || !proxyEntity.haveSettings()
                 removeButton.isGone = select
                 doubleColumnMenuButton.isGone = true
             }
@@ -1301,13 +1296,17 @@ class ConfigurationGroupFragment : Fragment() {
                 val name = profile.displayName().orEmpty()
                 when (item.itemId) {
                     R.id.action_standard_qr -> showCode(profile.toStdLink(), name)
+
                     R.id.action_standard_clipboard -> export(profile.toStdLink())
+
                     R.id.action_universal_qr -> showCode(profile.requireBean().toUniversalLink(), name)
+
                     R.id.action_universal_clipboard -> export(
                         profile.requireBean().toUniversalLink(),
                     )
 
                     R.id.action_config_export_clipboard -> export(profile.exportConfig().first)
+
                     R.id.action_config_export_file -> {
                         val config = profile.exportConfig()
                         DataStore.serverConfig = config.first

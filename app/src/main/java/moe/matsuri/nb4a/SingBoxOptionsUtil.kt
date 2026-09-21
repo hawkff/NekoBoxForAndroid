@@ -9,9 +9,7 @@ import kotlin.Exception
 object SingBoxOptionsUtil {
 
     fun domainStrategy(tag: String): String {
-        fun auto2(key: String, newS: String): String {
-            return (DataStore.configurationStore.getString(key) ?: "").replace("auto", newS)
-        }
+        fun auto2(key: String, newS: String): String = (DataStore.configurationStore.getString(key) ?: "").replace("auto", newS)
         return when (tag) {
             "dns-remote" -> {
                 auto2("domain_strategy_for_remote", "")
@@ -30,36 +28,26 @@ object SingBoxOptionsUtil {
 }
 
 fun SingBoxOptions.DNSRule_DefaultOptions.makeSingBoxRule(list: List<String>) {
-    rule_set = mutableListOf<String>()
-    domain = mutableListOf<String>()
-    domain_suffix = mutableListOf<String>()
-    domain_regex = mutableListOf<String>()
-    domain_keyword = mutableListOf<String>()
+    val ruleSets = mutableListOf<String>()
+    val domains = mutableListOf<String>()
+    val suffixes = mutableListOf<String>()
+    val regexes = mutableListOf<String>()
+    val keywords = mutableListOf<String>()
     list.forEach {
-        if (it.startsWith("geosite:")) {
-            rule_set.plusAssign(it)
-        } else if (it.startsWith("full:")) {
-            domain.plusAssign(it.removePrefix("full:").lowercase())
-        } else if (it.startsWith("domain:")) {
-            domain_suffix.plusAssign(it.removePrefix("domain:").lowercase())
-        } else if (it.startsWith("regexp:")) {
-            domain_regex.plusAssign(it.removePrefix("regexp:").lowercase())
-        } else if (it.startsWith("keyword:")) {
-            domain_keyword.plusAssign(it.removePrefix("keyword:").lowercase())
-        } else {
-            domain_suffix.plusAssign(it.lowercase())
+        when {
+            it.startsWith("geosite:") -> ruleSets.add(it)
+            it.startsWith("full:") -> domains.add(it.removePrefix("full:").lowercase())
+            it.startsWith("domain:") -> suffixes.add(it.removePrefix("domain:").lowercase())
+            it.startsWith("regexp:") -> regexes.add(it.removePrefix("regexp:").lowercase())
+            it.startsWith("keyword:") -> keywords.add(it.removePrefix("keyword:").lowercase())
+            else -> suffixes.add(it.lowercase())
         }
     }
-    rule_set?.removeIf { it.isNullOrBlank() }
-    domain?.removeIf { it.isNullOrBlank() }
-    domain_suffix?.removeIf { it.isNullOrBlank() }
-    domain_regex?.removeIf { it.isNullOrBlank() }
-    domain_keyword?.removeIf { it.isNullOrBlank() }
-    if (rule_set?.isEmpty() == true) rule_set = null
-    if (domain?.isEmpty() == true) domain = null
-    if (domain_suffix?.isEmpty() == true) domain_suffix = null
-    if (domain_regex?.isEmpty() == true) domain_regex = null
-    if (domain_keyword?.isEmpty() == true) domain_keyword = null
+    rule_set = ruleSets.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+    domain = domains.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+    domain_suffix = suffixes.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+    domain_regex = regexes.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+    domain_keyword = keywords.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
 }
 
 fun SingBoxOptions.DNSRule_DefaultOptions.checkEmpty(): Boolean {
@@ -74,82 +62,47 @@ fun SingBoxOptions.DNSRule_DefaultOptions.checkEmpty(): Boolean {
 
 fun generateRuleSet(ruleSetString: List<String>, ruleSet: MutableList<RuleSet>) {
     ruleSetString.forEach {
-        when {
-            it.startsWith("geoip:") -> {
-                ruleSet.add(
-                    RuleSet().apply {
-                        type = "local"
-                        tag = it
-                        format = "binary"
-                        path = it
-                    },
-                )
-            }
-
-            it.startsWith("geosite:") -> {
-                ruleSet.add(
-                    RuleSet().apply {
-                        type = "local"
-                        tag = it
-                        format = "binary"
-                        path = it
-                    },
-                )
-            }
+        if (it.startsWith("geoip:") || it.startsWith("geosite:")) {
+            ruleSet.add(
+                RuleSet().apply {
+                    type = "local"
+                    tag = it
+                    format = "binary"
+                    path = it
+                },
+            )
         }
     }
 }
 
 fun SingBoxOptions.Rule_DefaultOptions.makeSingBoxRule(list: List<String>, isIP: Boolean) {
+    val existingRuleSets = rule_set.orEmpty()
     if (isIP) {
-        ip_cidr = mutableListOf<String>()
-        rule_set = mutableListOf<String>()
-    } else {
-        rule_set = mutableListOf<String>()
-        domain = mutableListOf<String>()
-        domain_suffix = mutableListOf<String>()
-        domain_regex = mutableListOf<String>()
-        domain_keyword = mutableListOf<String>()
-    }
-    list.forEach {
-        if (isIP) {
-            if (it.startsWith("geoip:")) {
-                if (it == "geoip:private") {
-                    ip_is_private = true
-                } else {
-                    rule_set.plusAssign(it)
-                }
-            } else {
-                ip_cidr.plusAssign(it)
+        val ruleSets = mutableListOf<String>()
+        val addresses = mutableListOf<String>()
+        list.forEach {
+            when {
+                it == "geoip:private" -> ip_is_private = true
+                it.startsWith("geoip:") -> ruleSets.add(it)
+                else -> addresses.add(it)
             }
-            return@forEach
         }
-        if (it.startsWith("geosite:")) {
-            rule_set.plusAssign(it)
-        } else if (it.startsWith("full:")) {
-            domain.plusAssign(it.removePrefix("full:").lowercase())
-        } else if (it.startsWith("domain:")) {
-            domain_suffix.plusAssign(it.removePrefix("domain:").lowercase())
-        } else if (it.startsWith("regexp:")) {
-            domain_regex.plusAssign(it.removePrefix("regexp:").lowercase())
-        } else if (it.startsWith("keyword:")) {
-            domain_keyword.plusAssign(it.removePrefix("keyword:").lowercase())
-        } else {
-            domain_suffix.plusAssign(it.lowercase())
-        }
+        rule_set = ruleSets
+        ip_cidr = addresses
+    } else {
+        val parsed = SingBoxOptions.DNSRule_DefaultOptions().apply { makeSingBoxRule(list) }
+        rule_set = parsed.rule_set
+        domain = parsed.domain
+        domain_suffix = parsed.domain_suffix
+        domain_regex = parsed.domain_regex
+        domain_keyword = parsed.domain_keyword
     }
-    ip_cidr?.removeIf { it.isNullOrBlank() }
-    rule_set?.removeIf { it.isNullOrBlank() }
-    domain?.removeIf { it.isNullOrBlank() }
-    domain_suffix?.removeIf { it.isNullOrBlank() }
-    domain_regex?.removeIf { it.isNullOrBlank() }
-    domain_keyword?.removeIf { it.isNullOrBlank() }
-    if (ip_cidr?.isEmpty() == true) ip_cidr = null
-    if (rule_set?.isEmpty() == true) rule_set = null
-    if (domain?.isEmpty() == true) domain = null
-    if (domain_suffix?.isEmpty() == true) domain_suffix = null
-    if (domain_regex?.isEmpty() == true) domain_regex = null
-    if (domain_keyword?.isEmpty() == true) domain_keyword = null
+    ip_cidr = ip_cidr?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
+    rule_set = (existingRuleSets + rule_set.orEmpty()).filter { it.isNotBlank() }.distinct().takeIf { it.isNotEmpty() }
+    domain = domain?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
+    domain_suffix = domain_suffix?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
+    domain_regex = domain_regex?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
+    domain_keyword = domain_keyword?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
 }
 
 fun SingBoxOptions.Rule_DefaultOptions.checkEmpty(): Boolean {
@@ -170,19 +123,19 @@ fun SingBoxOptions.Rule_DefaultOptions.checkEmpty(): Boolean {
     return true
 }
 
-fun processRulesetUrl(origUrl: String): Pair<String, Boolean> {
-    return when {
-        origUrl.startsWith("rsip:") -> {
-            // IP-type ruleset
-            Pair(origUrl.substring(5), true)
-        }
-        origUrl.startsWith("rssite:") -> {
-            // domain-type ruleset
-            Pair(origUrl.substring(7), false)
-        }
-        else -> {
-            throw kotlin.Exception(SagerNet.application.getString(R.string.ruleset_prefix_error))
-        }
+fun processRulesetUrl(origUrl: String): Pair<String, Boolean> = when {
+    origUrl.startsWith("rsip:") -> {
+        // IP-type ruleset
+        Pair(origUrl.substring(5), true)
+    }
+
+    origUrl.startsWith("rssite:") -> {
+        // domain-type ruleset
+        Pair(origUrl.substring(7), false)
+    }
+
+    else -> {
+        throw kotlin.Exception(SagerNet.application.getString(R.string.ruleset_prefix_error))
     }
 }
 

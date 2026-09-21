@@ -18,7 +18,9 @@ import moe.matsuri.nb4a.utils.WebViewUtil
 
 // Fragment must have a no-argument public constructor, otherwise it will crash during data restoration
 
-class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenuItemClickListener {
+class WebviewFragment :
+    ToolbarFragment(R.layout.layout_webview),
+    Toolbar.OnMenuItemClickListener {
 
     lateinit var mWebView: WebView
 
@@ -106,6 +108,7 @@ class WebviewFragment : ToolbarFragment(R.layout.layout_webview), Toolbar.OnMenu
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
             }
+
             R.id.close -> {
                 mWebView.onPause()
                 mWebView.removeAllViews()

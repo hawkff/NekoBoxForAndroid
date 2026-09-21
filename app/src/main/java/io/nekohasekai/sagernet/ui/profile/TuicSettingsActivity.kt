@@ -15,19 +15,19 @@ class TuicSettingsActivity : ProfileSettingsActivity<TuicBean>() {
     override fun createEntity() = TuicBean().applyDefaultValues()
 
     override fun TuicBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverUsername = uuid
-        DataStore.serverPassword = token
-        DataStore.serverALPN = alpn
-        DataStore.serverCertificates = caText
-        DataStore.serverUDPRelayMode = udpRelayMode
-        DataStore.serverCongestionController = congestionController
-        DataStore.serverDisableSNI = disableSNI
-        DataStore.serverSNI = sni
-        DataStore.serverReduceRTT = reduceRTT
-        DataStore.serverAllowInsecure = allowInsecure
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverUsername = uuid!!
+        DataStore.serverPassword = token!!
+        DataStore.serverALPN = alpn!!
+        DataStore.serverCertificates = caText!!
+        DataStore.serverUDPRelayMode = udpRelayMode!!
+        DataStore.serverCongestionController = congestionController!!
+        DataStore.serverDisableSNI = disableSNI!!
+        DataStore.serverSNI = sni!!
+        DataStore.serverReduceRTT = reduceRTT!!
+        DataStore.serverAllowInsecure = allowInsecure!!
     }
 
     override fun TuicBean.serialize() {

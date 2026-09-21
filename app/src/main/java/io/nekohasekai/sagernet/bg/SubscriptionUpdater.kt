@@ -57,7 +57,7 @@ object SubscriptionUpdater {
 
         val subscriptions = SagerDatabase.groupDao.subscriptions()
             .mapNotNull { group -> group.subscription?.let { group to it } }
-            .filter { (_, sub) -> sub.autoUpdate }
+            .filter { (_, sub) -> sub.autoUpdate!! }
         if (subscriptions.isEmpty()) return
 
         val schedule = computeSubscriptionWorkSchedule(
@@ -101,10 +101,10 @@ object SubscriptionUpdater {
             var subscriptions =
                 SagerDatabase.groupDao.subscriptions()
                     .mapNotNull { group -> group.subscription?.let { group to it } }
-                    .filter { (_, sub) -> sub.autoUpdate }
+                    .filter { (_, sub) -> sub.autoUpdate!! }
             if (!DataStore.serviceState.connected) {
                 Logs.d("work: not connected")
-                subscriptions = subscriptions.filter { (_, sub) -> !sub.updateWhenConnectedOnly }
+                subscriptions = subscriptions.filter { (_, sub) -> !sub.updateWhenConnectedOnly!! }
             }
 
             var attempted = false

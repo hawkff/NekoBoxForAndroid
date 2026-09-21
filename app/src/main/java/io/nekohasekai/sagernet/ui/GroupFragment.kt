@@ -185,21 +185,15 @@ class GroupFragment :
             }
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GroupHolder {
-            return GroupHolder(LayoutGroupItemBinding.inflate(layoutInflater, parent, false))
-        }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): GroupHolder = GroupHolder(LayoutGroupItemBinding.inflate(layoutInflater, parent, false))
 
         override fun onBindViewHolder(holder: GroupHolder, position: Int) {
             holder.bind(groupList[position])
         }
 
-        override fun getItemCount(): Int {
-            return groupList.size
-        }
+        override fun getItemCount(): Int = groupList.size
 
-        override fun getItemId(position: Int): Long {
-            return groupList[position].id
-        }
+        override fun getItemId(position: Int): Long = groupList[position].id
 
         private val updated = HashSet<ProxyGroup>()
 
@@ -463,18 +457,18 @@ class GroupFragment :
             }
 
             val subscription = proxyGroup.subscription
-            if (subscription != null && subscription.bytesUsed > 0L) { // SIP008 & Open Online Config
+            if (subscription != null && subscription.bytesUsed!! > 0L) { // SIP008 & Open Online Config
                 groupTraffic.isVisible = true
-                groupTraffic.text = if (subscription.bytesRemaining > 0L) {
+                groupTraffic.text = if (subscription.bytesRemaining!! > 0L) {
                     app.getString(
                         R.string.subscription_traffic,
                         Formatter.formatFileSize(
                             app,
-                            subscription.bytesUsed,
+                            subscription.bytesUsed!!,
                         ),
                         Formatter.formatFileSize(
                             app,
-                            subscription.bytesRemaining,
+                            subscription.bytesRemaining!!,
                         ),
                     )
                 } else {
@@ -482,7 +476,7 @@ class GroupFragment :
                         R.string.subscription_used,
                         Formatter.formatFileSize(
                             app,
-                            subscription.bytesUsed,
+                            subscription.bytesUsed!!,
                         ),
                     )
                 }
@@ -490,11 +484,9 @@ class GroupFragment :
             } else if (subscription != null && !subscription.subscriptionUserinfo.isNullOrBlank()) { // Raw
                 var text = ""
 
-                fun get(regex: String): String? {
-                    return regex.toRegex().findAll(subscription.subscriptionUserinfo).mapNotNull {
-                        if (it.groupValues.size > 1) it.groupValues[1] else null
-                    }.firstOrNull()
-                }
+                fun get(regex: String): String? = regex.toRegex().findAll(subscription.subscriptionUserinfo!!).mapNotNull {
+                    if (it.groupValues.size > 1) it.groupValues[1] else null
+                }.firstOrNull()
 
                 try {
                     var used: Long = 0
@@ -557,7 +549,7 @@ class GroupFragment :
                             groupStatus.text = if (size == 0L) {
                                 getString(R.string.group_status_empty_subscription)
                             } else {
-                                val date = Date(group.subscription!!.lastUpdated * 1000L)
+                                val date = Date(group.subscription!!.lastUpdated!! * 1000L)
                                 getString(
                                     R.string.group_status_proxies_subscription,
                                     size,

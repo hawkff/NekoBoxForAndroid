@@ -172,61 +172,62 @@ class ThemePickerPreference
         ringColor: Int? = null,
         icon: Int? = null,
         onClick: () -> Unit,
-    ): View {
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isClickable = true
-            isFocusable = true
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            // Selectable item background for ripple feedback.
-            val outValue = android.util.TypedValue()
-            context.theme.resolveAttribute(
-                android.R.attr.selectableItemBackground,
-                outValue,
-                true,
-            )
-            setBackgroundResource(outValue.resourceId)
-            // Announce the theme name to screen readers when the row is focused.
-            contentDescription = name
+    ): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        isClickable = true
+        isFocusable = true
+        setPadding(dp(16), dp(14), dp(16), dp(14))
+        // Selectable item background for ripple feedback.
+        val outValue = android.util.TypedValue()
+        context.theme.resolveAttribute(
+            android.R.attr.selectableItemBackground,
+            outValue,
+            true,
+        )
+        setBackgroundResource(outValue.resourceId)
+        // Announce the theme name to screen readers when the row is focused.
+        contentDescription = name
 
-            val leading = when {
-                swatchColor != null && ringColor != null ->
-                    ringedSwatchView(swatchColor, ringColor, 28)
-                swatchColor != null -> nekoImageView(swatchColor, 28, 0)
-                icon != null -> ImageView(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(dp(28), dp(28))
-                    setImageDrawable(
-                        ResourcesCompat.getDrawable(resources, icon, context.theme)?.also {
-                            DrawableCompat.setTint(
-                                it.mutate(),
-                                context.getColorAttr(android.R.attr.textColorPrimary),
-                            )
-                        },
-                    )
-                }
-                else -> View(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(dp(28), dp(28))
-                }
+        val leading = when {
+            swatchColor != null && ringColor != null ->
+                ringedSwatchView(swatchColor, ringColor, 28)
+
+            swatchColor != null -> nekoImageView(swatchColor, 28, 0)
+
+            icon != null -> ImageView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(dp(28), dp(28))
+                setImageDrawable(
+                    ResourcesCompat.getDrawable(resources, icon, context.theme)?.also {
+                        DrawableCompat.setTint(
+                            it.mutate(),
+                            context.getColorAttr(android.R.attr.textColorPrimary),
+                        )
+                    },
+                )
             }
-            addView(leading)
 
-            addView(
-                TextView(context).apply {
-                    text = name
-                    setPadding(dp(16), 0, 0, 0)
-                    textSize = 16f
-                    setTextColor(context.getColorAttr(android.R.attr.textColorPrimary))
-                    layoutParams = LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        1f,
-                    )
-                },
-            )
-
-            setOnClickListener { onClick() }
+            else -> View(context).apply {
+                layoutParams = ViewGroup.LayoutParams(dp(28), dp(28))
+            }
         }
+        addView(leading)
+
+        addView(
+            TextView(context).apply {
+                text = name
+                setPadding(dp(16), 0, 0, 0)
+                textSize = 16f
+                setTextColor(context.getColorAttr(android.R.attr.textColorPrimary))
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f,
+                )
+            },
+        )
+
+        setOnClickListener { onClick() }
     }
 
     /** Legacy single-accent color grid (the original swatch-grid UX). */

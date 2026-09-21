@@ -6,13 +6,6 @@ on:
       - main
     paths:
       - 'nb4a.properties'
-env:
-  MIERU_VERSION: v3.34.1
-  MDVPN_REF: android-vpnservice-protect-hook
-  MDVPN_COMMIT: d481d72d4b86783a87d536c214d2c68cc4e9320e
-  NAIVE_VERSION: v149.0.7827.114-1
-  OLCRTC_REPO: https://github.com/hawkff/olcrtc.git
-  OLCRTC_COMMIT: ad5cc1e3d60b657b15ccd26f8db91395bf9630d0
 permissions:
   contents: read
 jobs:
@@ -37,7 +30,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version-file: libcore/go.mod
       - name: Native Build
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./run lib core
@@ -60,14 +53,10 @@ jobs:
         run: |
           git ls-files -s -- \
             buildScript/lib/mieru.sh \
-            buildScript/lib/masterdnsvpn.sh \
             buildScript/lib/naive.sh \
-            buildScript/lib/olcrtc.sh \
-            buildScript/lib/olcrtc-src/main.go \
-            buildScript/lib/olcrtc-src/main_test.go \
-            buildScript/lib/olcrtc-src/go.mod \
             buildScript/init/env.sh \
             buildScript/init/env_ndk.sh \
+            libcore/go.mod \
             | sha1sum > sidecars_status
       - name: Sidecars Cache
         id: cache
@@ -75,24 +64,18 @@ jobs:
         with:
           path: |
             app/executableSo
-          key: ${{ hashFiles('.github/workflows/*', 'sidecars_status') }}-${{ env.MIERU_VERSION }}-${{ env.MDVPN_COMMIT }}-${{ env.NAIVE_VERSION }}-${{ env.OLCRTC_COMMIT }}-sidecars
+          key: ${{ hashFiles('.github/workflows/*', 'sidecars_status') }}-sidecars
       - name: Install Golang
         if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: '1.26.4'
+          go-version-file: libcore/go.mod
       - name: Mieru Build
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./run lib mieru
-      - name: MasterDnsVPN Build
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: ./run lib masterdnsvpn
       - name: Naive Download
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./run lib naive
-      - name: olcRTC Build
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: ./run lib olcrtc
       - name: Upload Sidecars
         uses: namespace-actions/upload-artifact@f6ccaacc655aec41b93af180d1d7eef21af862d2 # v1
         with:
@@ -122,7 +105,7 @@ jobs:
       - name: Verify Sidecar Artifacts
         run: |
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            for so in libmieru.so libmasterdnsvpn.so libnaive.so libolcrtc.so; do
+            for so in libmieru.so libnaive.so; do
               if [ ! -f "app/executableSo/$abi/$so" ]; then
                 echo "Error: missing app/executableSo/$abi/$so (sidecar artifact missing)" >&2
                 exit 1
@@ -139,7 +122,6 @@ jobs:
           BUILD_PLUGIN: none
         run: |
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
-          echo "ndk.dir=${ANDROID_HOME}/ndk/25.0.8775105" >> local.properties
           export LOCAL_PROPERTIES="${{ secrets.LOCAL_PROPERTIES }}"
           ./run init action gradle
           # release.keystore is not committed; decode it from the KEYSTORE_B64 secret.

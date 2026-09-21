@@ -34,6 +34,9 @@ import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSBean
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSSettingsActivity
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -262,6 +265,30 @@ class ProtocolRegistryDispatchTest {
     }
 
     @Test
+    fun dataOnlyEntriesKeepTheirBytesWithoutAnExecutionPath() {
+        ConfigBuilderTestEnv.reset()
+        for ((bean, type) in allBeans.filter { ProtocolRegistry.forType(it.second)!!.settingsActivityClass == null }) {
+            bean.initializeDefaultValues()
+            val profile = ProxyEntity().putBean(bean)
+            val bytes = KryoConverters.serialize(profile)
+            val restored = KryoConverters.deserialize(ProxyEntity(), bytes)
+            assertEquals(type, restored.type)
+            assertArrayEquals(bytes, KryoConverters.serialize(restored))
+            assertFalse(restored.needExternal())
+            assertFalse(ProtocolRegistry.forType(type)!!.canBuild)
+            assertFalse(restored.haveSettings())
+            assertThrows(IllegalArgumentException::class.java) {
+                io.nekohasekai.sagernet.group.RawUpdater.requireUpdatableProfiles(listOf(restored))
+            }
+            assertNull(restored.settingIntent(org.robolectric.RuntimeEnvironment.getApplication(), false))
+            assertArrayEquals(KryoConverters.serialize(bean), KryoConverters.serialize(parseUniversal(bean.toUniversalLink())))
+            assertThrows(IllegalArgumentException::class.java) {
+                ConfigBuilderTestEnv.io { buildConfig(restored, forTest = true) }
+            }
+        }
+    }
+
+    @Test
     fun registryMetadata_matchesEveryPersistableType() {
         val settingsActivities = mapOf(
             ProxyEntity.TYPE_SOCKS to SocksSettingsActivity::class.java,
@@ -284,8 +311,8 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_CHAIN to ChainSettingsActivity::class.java,
             ProxyEntity.TYPE_CONFIG to ConfigSettingActivity::class.java,
             ProxyEntity.TYPE_SNELL to SnellSettingsActivity::class.java,
-            ProxyEntity.TYPE_MASTERDNSVPN to MasterDnsVpnSettingsActivity::class.java,
-            ProxyEntity.TYPE_OLCRTC to OlcrtcSettingsActivity::class.java,
+            ProxyEntity.TYPE_MASTERDNSVPN to null,
+            ProxyEntity.TYPE_OLCRTC to null,
         )
         val nonStandardLinkTypes = setOf(
             ProxyEntity.TYPE_SSH,
@@ -293,6 +320,8 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_AWG,
             ProxyEntity.TYPE_SHADOWTLS,
             ProxyEntity.TYPE_CONFIG,
+            ProxyEntity.TYPE_MASTERDNSVPN,
+            ProxyEntity.TYPE_OLCRTC,
         )
         val dedicatedStandardLinkTypes = setOf(
             ProxyEntity.TYPE_SOCKS,
@@ -308,8 +337,6 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_JUICITY,
             ProxyEntity.TYPE_ANYTLS,
             ProxyEntity.TYPE_SNELL,
-            ProxyEntity.TYPE_MASTERDNSVPN,
-            ProxyEntity.TYPE_OLCRTC,
         )
 
         assertEquals(22, allBeans.size)

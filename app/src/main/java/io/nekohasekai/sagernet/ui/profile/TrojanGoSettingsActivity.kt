@@ -17,21 +17,21 @@ class TrojanGoSettingsActivity : ProfileSettingsActivity<TrojanGoBean>() {
     override fun createEntity() = TrojanGoBean()
 
     override fun TrojanGoBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverPassword = password
-        DataStore.serverSNI = sni
-        DataStore.serverAllowInsecure = allowInsecure
-        DataStore.serverNetwork = type
-        DataStore.serverHost = host
-        DataStore.serverPath = path
-        if (encryption.startsWith("ss;")) {
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverPassword = password!!
+        DataStore.serverSNI = sni!!
+        DataStore.serverAllowInsecure = allowInsecure!!
+        DataStore.serverNetwork = type!!
+        DataStore.serverHost = host!!
+        DataStore.serverPath = path!!
+        if (encryption!!.startsWith("ss;")) {
             DataStore.serverEncryption = "ss"
-            DataStore.serverMethod = encryption.substringAfter(";").substringBefore(":")
-            DataStore.serverPassword1 = encryption.substringAfter(":")
+            DataStore.serverMethod = encryption!!.substringAfter(";").substringBefore(":")
+            DataStore.serverPassword1 = encryption!!.substringAfter(":")
         } else {
-            DataStore.serverEncryption = encryption
+            DataStore.serverEncryption = encryption!!
         }
     }
 
@@ -49,6 +49,7 @@ class TrojanGoSettingsActivity : ProfileSettingsActivity<TrojanGoBean>() {
             "ss" -> {
                 "ss;" + DataStore.serverMethod + ":" + DataStore.serverPassword1
             }
+
             else -> {
                 security
             }
@@ -103,6 +104,7 @@ class TrojanGoSettingsActivity : ProfileSettingsActivity<TrojanGoBean>() {
             "ws" -> {
                 wsCategory.isVisible = true
             }
+
             else -> {
                 wsCategory.isVisible = false
             }
@@ -118,6 +120,7 @@ class TrojanGoSettingsActivity : ProfileSettingsActivity<TrojanGoBean>() {
                     method.value = trojanGoMethods[0]
                 }
             }
+
             else -> {
                 ssCategory.isVisible = false
             }

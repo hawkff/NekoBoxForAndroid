@@ -1,4 +1,4 @@
-/******************************************************************************
+/*
  *                                                                            *
  * Copyright (C) 2021 by nekohasekai <contact-sagernet@sekai.icu>             *
  *                                                                            *
@@ -35,13 +35,13 @@ class MieruSettingsActivity : ProfileSettingsActivity<MieruBean>() {
     override fun createEntity() = MieruBean().applyDefaultValues()
 
     override fun MieruBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverProtocol = protocol
-        DataStore.serverUsername = username
-        DataStore.serverPassword = password
-        DataStore.serverMTU = mtu
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverProtocol = protocol!!
+        DataStore.serverUsername = username!!
+        DataStore.serverPassword = password!!
+        DataStore.serverMTU = mtu!!
     }
 
     override fun MieruBean.serialize() {
