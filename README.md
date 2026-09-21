@@ -4,7 +4,7 @@
 
 **One app, every modern proxy. Built on sing-box.**
 
-[![API](https://img.shields.io/badge/Android-5.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](https://android-arsenal.com/api?level=21)
+[![API](https://img.shields.io/badge/Android-6.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](https://android-arsenal.com/api?level=23)
 [![License](https://img.shields.io/badge/License-GPL--3.0-0A7BBB?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 
 </div>
@@ -41,7 +41,7 @@ XHTTP / Reality config examples are below.
 
 `TUIC` · `Juicity` · `Hysteria 2`
 
-The Hysteria 2 client supports the new Gecko (experimental) obfuscation.
+The Hysteria 2 client supports Salamander and Gecko obfuscation.
 
 ### 🛡️ WireGuard family
 

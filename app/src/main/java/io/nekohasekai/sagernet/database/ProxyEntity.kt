@@ -106,9 +106,7 @@ data class ProxyEntity(
         const val TYPE_SNELL = 24
         const val TYPE_MASTERDNSVPN = 25
 
-        // 25 is reserved for the MasterDnsVPN sidecar type on the
-        // feature/masterdnsvpn-sidecar branch (PR #18); do not reuse it here so
-        // persisted type IDs stay stable when both branches merge.
+        // Preserve these IDs for stored profiles.
         const val TYPE_AWG = 26
         const val TYPE_OLCRTC = 27
 
@@ -125,13 +123,9 @@ data class ProxyEntity(
         @JvmField
         val CREATOR = object : CREATOR<ProxyEntity>() {
 
-            override fun newInstance(): ProxyEntity {
-                return ProxyEntity()
-            }
+            override fun newInstance(): ProxyEntity = ProxyEntity()
 
-            override fun newArray(size: Int): Array<ProxyEntity?> {
-                return arrayOfNulls(size)
-            }
+            override fun newArray(size: Int): Array<ProxyEntity?> = arrayOfNulls(size)
         }
     }
 
@@ -198,11 +192,9 @@ data class ProxyEntity(
         return descriptor.getBean(this) ?: error("Null ${displayType()} profile")
     }
 
-    fun haveLink(): Boolean {
-        return when (type) {
-            TYPE_CHAIN -> false
-            else -> true
-        }
+    fun haveLink(): Boolean = when (type) {
+        TYPE_CHAIN -> false
+        else -> true
     }
 
     fun haveStandardLink(): Boolean {
@@ -256,86 +248,82 @@ data class ProxyEntity(
         } to name
     }
 
-    fun needExternal(): Boolean {
-        return ProtocolRegistry.forType(type)?.needExternal?.invoke(this) ?: false
-    }
+    fun needExternal(): Boolean = ProtocolRegistry.forType(type)?.needExternal?.invoke(this) ?: false
 
-    fun singMux(): MultiplexOptions? {
-        return when (type) {
-            TYPE_VMESS -> MultiplexOptions().apply {
-                enabled = vmessBean!!.enableMux
-                padding = vmessBean!!.muxPadding
-                protocol = when (vmessBean!!.muxType) {
-                    1 -> "smux"
-                    2 -> "yamux"
-                    else -> "h2mux"
-                }
-                // muxMode 0: max_streams mode, 1: connections mode
-                if (vmessBean!!.muxMode == 1) {
-                    max_connections = vmessBean!!.muxMaxConnections
-                    min_streams = vmessBean!!.muxMinStreams
-                } else {
-                    max_streams = vmessBean!!.muxConcurrency
-                }
-                if (vmessBean!!.muxBrutal == true) {
-                    brutal = BrutalOptions().apply {
-                        enabled = true
-                        up_mbps = vmessBean!!.muxBrutalUpMbps
-                        down_mbps = vmessBean!!.muxBrutalDownMbps
-                    }
+    fun singMux(): MultiplexOptions? = when (type) {
+        TYPE_VMESS -> MultiplexOptions().apply {
+            enabled = vmessBean!!.enableMux
+            padding = vmessBean!!.muxPadding
+            protocol = when (vmessBean!!.muxType) {
+                1 -> "smux"
+                2 -> "yamux"
+                else -> "h2mux"
+            }
+            // muxMode 0: max_streams mode, 1: connections mode
+            if (vmessBean!!.muxMode == 1) {
+                max_connections = vmessBean!!.muxMaxConnections
+                min_streams = vmessBean!!.muxMinStreams
+            } else {
+                max_streams = vmessBean!!.muxConcurrency
+            }
+            if (vmessBean!!.muxBrutal == true) {
+                brutal = BrutalOptions().apply {
+                    enabled = true
+                    up_mbps = vmessBean!!.muxBrutalUpMbps
+                    down_mbps = vmessBean!!.muxBrutalDownMbps
                 }
             }
-
-            TYPE_TROJAN -> MultiplexOptions().apply {
-                enabled = trojanBean!!.enableMux
-                padding = trojanBean!!.muxPadding
-                protocol = when (trojanBean!!.muxType) {
-                    1 -> "smux"
-                    2 -> "yamux"
-                    else -> "h2mux"
-                }
-                // muxMode 0: max_streams mode, 1: connections mode
-                if (trojanBean!!.muxMode == 1) {
-                    max_connections = trojanBean!!.muxMaxConnections
-                    min_streams = trojanBean!!.muxMinStreams
-                } else {
-                    max_streams = trojanBean!!.muxConcurrency
-                }
-                if (trojanBean!!.muxBrutal == true) {
-                    brutal = BrutalOptions().apply {
-                        enabled = true
-                        up_mbps = trojanBean!!.muxBrutalUpMbps
-                        down_mbps = trojanBean!!.muxBrutalDownMbps
-                    }
-                }
-            }
-
-            TYPE_SS -> MultiplexOptions().apply {
-                enabled = ssBean!!.enableMux
-                padding = ssBean!!.muxPadding
-                protocol = when (ssBean!!.muxType) {
-                    1 -> "smux"
-                    2 -> "yamux"
-                    else -> "h2mux"
-                }
-                // muxMode 0: max_streams mode, 1: connections mode
-                if (ssBean!!.muxMode == 1) {
-                    max_connections = ssBean!!.muxMaxConnections
-                    min_streams = ssBean!!.muxMinStreams
-                } else {
-                    max_streams = ssBean!!.muxConcurrency
-                }
-                if (ssBean!!.muxBrutal == true) {
-                    brutal = BrutalOptions().apply {
-                        enabled = true
-                        up_mbps = ssBean!!.muxBrutalUpMbps
-                        down_mbps = ssBean!!.muxBrutalDownMbps
-                    }
-                }
-            }
-
-            else -> null
         }
+
+        TYPE_TROJAN -> MultiplexOptions().apply {
+            enabled = trojanBean!!.enableMux
+            padding = trojanBean!!.muxPadding
+            protocol = when (trojanBean!!.muxType) {
+                1 -> "smux"
+                2 -> "yamux"
+                else -> "h2mux"
+            }
+            // muxMode 0: max_streams mode, 1: connections mode
+            if (trojanBean!!.muxMode == 1) {
+                max_connections = trojanBean!!.muxMaxConnections
+                min_streams = trojanBean!!.muxMinStreams
+            } else {
+                max_streams = trojanBean!!.muxConcurrency
+            }
+            if (trojanBean!!.muxBrutal == true) {
+                brutal = BrutalOptions().apply {
+                    enabled = true
+                    up_mbps = trojanBean!!.muxBrutalUpMbps
+                    down_mbps = trojanBean!!.muxBrutalDownMbps
+                }
+            }
+        }
+
+        TYPE_SS -> MultiplexOptions().apply {
+            enabled = ssBean!!.enableMux
+            padding = ssBean!!.muxPadding
+            protocol = when (ssBean!!.muxType) {
+                1 -> "smux"
+                2 -> "yamux"
+                else -> "h2mux"
+            }
+            // muxMode 0: max_streams mode, 1: connections mode
+            if (ssBean!!.muxMode == 1) {
+                max_connections = ssBean!!.muxMaxConnections
+                min_streams = ssBean!!.muxMinStreams
+            } else {
+                max_streams = ssBean!!.muxConcurrency
+            }
+            if (ssBean!!.muxBrutal == true) {
+                brutal = BrutalOptions().apply {
+                    enabled = true
+                    up_mbps = ssBean!!.muxBrutalUpMbps
+                    down_mbps = ssBean!!.muxBrutalDownMbps
+                }
+            }
+        }
+
+        else -> null
     }
 
     fun putBean(bean: AbstractBean): ProxyEntity {
@@ -430,7 +418,5 @@ data class ProxyEntity(
         fun reset()
     }
 
-    override fun describeContents(): Int {
-        return 0
-    }
+    override fun describeContents(): Int = 0
 }

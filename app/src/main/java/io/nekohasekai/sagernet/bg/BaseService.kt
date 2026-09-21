@@ -57,16 +57,18 @@ class BaseService {
         val receiver = broadcastReceiverWithSelf { self, ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats(self)
+
                 Action.RELOAD -> service.reload(
                     intent.getLongExtra(Action.EXTRA_PROFILE_ID, -1L),
                 )
+
                 // Action.SWITCH_WAKE_LOCK -> runOnDefaultDispatcher { service.switchWakeLock() }
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     // Only act once fully Connected: the close receiver is now registered during
                     // Connecting (so stop/reload aren't lost), but proxy.box is a lateinit that
                     // isn't built until proxy.init() finishes, so sleep()/wake() here during
                     // startup would throw UninitializedPropertyAccessException.
-                    if (state == State.Connected && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (state == State.Connected) {
                         if (SagerNet.power.isDeviceIdleMode) {
                             proxy?.box?.sleep()
                         } else {
@@ -218,6 +220,7 @@ class BaseService {
                     // a negative/absent id leaves selectedProxy as the refreshed snapshot value.
                     when {
                         profileId == 0L -> DataStore.selectedProxy = 0L
+
                         profileId > 0L && SagerDatabase.proxyDao.getById(profileId) != null ->
                             DataStore.selectedProxy = profileId
                     }
@@ -462,6 +465,7 @@ class BaseService {
                     DataStore.configurationStore.refreshSuspend()
                     when {
                         ipcProfileId == 0L -> DataStore.selectedProxy = 0L
+
                         ipcProfileId > 0L && SagerDatabase.proxyDao.getById(ipcProfileId) != null ->
                             DataStore.selectedProxy = ipcProfileId
                     }
@@ -497,9 +501,7 @@ class BaseService {
                 addAction(Intent.ACTION_SHUTDOWN)
                 addAction(Action.CLOSE)
                 // addAction(Action.SWITCH_WAKE_LOCK)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
-                }
+                addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
                 addAction(Action.RESET_UPSTREAM_CONNECTIONS)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

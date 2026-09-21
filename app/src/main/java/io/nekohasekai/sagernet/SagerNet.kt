@@ -168,7 +168,7 @@ class SagerNet :
                         application,
                         MainActivity::class.java,
                     ).setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0,
+                    PendingIntent.FLAG_IMMUTABLE,
                 )
             }
         }
@@ -180,10 +180,8 @@ class SagerNet :
         val uiMode by lazy { application.getSystemService<UiModeManager>()!! }
         val power by lazy { application.getSystemService<PowerManager>()!! }
 
-        fun getClipboardText(): String {
-            return clipboard.primaryClip?.takeIf { it.itemCount > 0 }
-                ?.getItemAt(0)?.text?.toString() ?: ""
-        }
+        fun getClipboardText(): String = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.text?.toString() ?: ""
 
         fun trySetPrimaryClip(clip: String) = try {
             clipboard.setPrimaryClip(ClipData.newPlainText(null, clip))
