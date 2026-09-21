@@ -69,10 +69,8 @@ import io.nekohasekai.sagernet.ui.profile.ChainSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.HttpSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.HysteriaSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.JuicitySettingsActivity
-import io.nekohasekai.sagernet.ui.profile.MasterDnsVpnSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.MieruSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.NaiveSettingsActivity
-import io.nekohasekai.sagernet.ui.profile.OlcrtcSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.SSHSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.ShadowsocksRSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.ShadowsocksSettingsActivity
@@ -167,13 +165,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     internal fun isRunningProfile(profileId: Long) = serviceStartedSnapshot && currentProfileSnapshot == profileId
 
-    fun getCurrentGroupFragment(): ConfigurationGroupFragment? {
-        return try {
-            childFragmentManager.findFragmentByTag("f" + DataStore.selectedGroup) as ConfigurationGroupFragment?
-        } catch (e: Exception) {
-            Logs.e(e)
-            null
-        }
+    fun getCurrentGroupFragment(): ConfigurationGroupFragment? = try {
+        childFragmentManager.findFragmentByTag("f" + DataStore.selectedGroup) as ConfigurationGroupFragment?
+    } catch (e: Exception) {
+        Logs.e(e)
+        null
     }
 
     fun switchAllGroupFragmentsLayout() {
@@ -258,7 +254,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             if (adapter.groupList.size > position) {
                 tab.text = adapter.groupList[position].displayName()
             }
-            tab.view.setOnLongClickListener { // clear toast
+            tab.view.setOnLongClickListener {
+                // clear toast
                 true
             }
         }.also { it.attach() }
@@ -584,14 +581,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                 startActivity(Intent(requireActivity(), SnellSettingsActivity::class.java))
             }
 
-            R.id.action_new_masterdnsvpn -> {
-                startActivity(Intent(requireActivity(), MasterDnsVpnSettingsActivity::class.java))
-            }
-
-            R.id.action_new_olcrtc -> {
-                startActivity(Intent(requireActivity(), OlcrtcSettingsActivity::class.java))
-            }
-
             R.id.action_new_wg -> {
                 startActivity(Intent(requireActivity(), WireGuardSettingsActivity::class.java))
             }
@@ -903,7 +892,7 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                             profile.status = 0
                             var address = profile.requireBean().serverAddress
-                            if (!address.isIpAddress()) {
+                            if (!address!!.isIpAddress()) {
                                 try {
                                     SagerNet.underlyingNetwork!!.getAllByName(address).apply {
                                         if (isNotEmpty()) {
@@ -914,7 +903,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 }
                             }
                             if (!isActive) break
-                            if (!address.isIpAddress()) {
+                            if (!address!!.isIpAddress()) {
                                 profile.status = 2
                                 profile.error = app.getString(R.string.connection_test_domain_not_found)
                                 test.update(profile)
@@ -934,7 +923,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                                         socket.connect(
                                             InetSocketAddress(
                                                 address,
-                                                profile.requireBean().serverPort,
+                                                profile.requireBean().serverPort!!,
                                             ),
                                             3000,
                                         )
@@ -1182,27 +1171,19 @@ class ConfigurationFragment @JvmOverloads constructor(
             reload(true)
         }
 
-        override fun getItemCount(): Int {
-            return groupList.size
-        }
+        override fun getItemCount(): Int = groupList.size
 
-        override fun createFragment(position: Int): Fragment {
-            return ConfigurationGroupFragment().apply {
-                proxyGroup = groupList[position]
-                groupFragments[proxyGroup.id] = this
-                if (position == selectedGroupIndex) {
-                    selected = true
-                }
+        override fun createFragment(position: Int): Fragment = ConfigurationGroupFragment().apply {
+            proxyGroup = groupList[position]
+            groupFragments[proxyGroup.id] = this
+            if (position == selectedGroupIndex) {
+                selected = true
             }
         }
 
-        override fun getItemId(position: Int): Long {
-            return groupList[position].id
-        }
+        override fun getItemId(position: Int): Long = groupList[position].id
 
-        override fun containsItem(itemId: Long): Boolean {
-            return groupList.any { it.id == itemId }
-        }
+        override fun containsItem(itemId: Long): Boolean = groupList.any { it.id == itemId }
 
         override suspend fun groupAdd(group: ProxyGroup) {
             if (disposed) return

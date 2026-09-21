@@ -37,8 +37,8 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
     val proxyList = ArrayList<ProxyEntity>()
 
     override fun ChainBean.init() {
-        DataStore.profileName = name
-        DataStore.serverProtocol = proxies.joinToString(",")
+        DataStore.profileName = name!!
+        DataStore.serverProtocol = proxies!!.joinToString(",")
     }
 
     override fun ChainBean.serialize() {
@@ -73,34 +73,30 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             ItemTouchHelper.UP or ItemTouchHelper.DOWN,
             ItemTouchHelper.START,
         ) {
-            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) =
-                if (viewHolder is ProfileHolder) {
-                    super.getSwipeDirs(recyclerView, viewHolder)
-                } else {
-                    0
-                }
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder is ProfileHolder) {
+                super.getSwipeDirs(recyclerView, viewHolder)
+            } else {
+                0
+            }
 
-            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) =
-                if (viewHolder is ProfileHolder) {
-                    super.getDragDirs(recyclerView, viewHolder)
-                } else {
-                    0
-                }
+            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder is ProfileHolder) {
+                super.getDragDirs(recyclerView, viewHolder)
+            } else {
+                0
+            }
 
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder,
-            ): Boolean {
-                return if (target !is ProfileHolder) {
-                    false
-                } else {
-                    configurationAdapter.move(
-                        viewHolder.bindingAdapterPosition,
-                        target.bindingAdapterPosition,
-                    )
-                    true
-                }
+            ): Boolean = if (target !is ProfileHolder) {
+                false
+            } else {
+                configurationAdapter.move(
+                    viewHolder.bindingAdapterPosition,
+                    target.bindingAdapterPosition,
+                )
+                true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
@@ -155,20 +151,14 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             DataStore.dirty = true
         }
 
-        override fun getItemId(position: Int): Long {
-            return if (position == 0) 0 else proxyList[position - 1].id
-        }
+        override fun getItemId(position: Int): Long = if (position == 0) 0 else proxyList[position - 1].id
 
-        override fun getItemViewType(position: Int): Int {
-            return if (position == 0) 0 else 1
-        }
+        override fun getItemViewType(position: Int): Int = if (position == 0) 0 else 1
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-            return if (viewType == 0) {
-                AddHolder(LayoutAddEntityBinding.inflate(layoutInflater, parent, false))
-            } else {
-                ProfileHolder(LayoutProfileBinding.inflate(layoutInflater, parent, false))
-            }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder = if (viewType == 0) {
+            AddHolder(LayoutAddEntityBinding.inflate(layoutInflater, parent, false))
+        } else {
+            ProfileHolder(LayoutProfileBinding.inflate(layoutInflater, parent, false))
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
@@ -179,9 +169,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             }
         }
 
-        override fun getItemCount(): Int {
-            return proxyList.size + 1
-        }
+        override fun getItemCount(): Int = proxyList.size + 1
     }
 
     fun testProfileAllowed(profile: ProxyEntity): Boolean {
@@ -198,9 +186,9 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         if (profile.type != 8 || anotherProfile.type != 8) return false
         if (profile.id == anotherProfile.id) return true
         val proxies = profile.chainBean!!.proxies
-        if (proxies.contains(anotherProfile.id)) return true
-        if (proxies.isNotEmpty()) {
-            for (entity in ProfileManager.getProfiles(proxies)) {
+        if (proxies!!.contains(anotherProfile.id)) return true
+        if (proxies!!.isNotEmpty()) {
+            for (entity in ProfileManager.getProfiles(proxies!!)) {
                 if (testProfileContains(entity, anotherProfile)) {
                     return true
                 }
@@ -245,8 +233,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             }
         }
 
-    inner class AddHolder(val binding: LayoutAddEntityBinding) :
-        RecyclerView.ViewHolder(binding.root) {
+    inner class AddHolder(val binding: LayoutAddEntityBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind() {
             binding.root.setOnClickListener {
                 replacing = 0
@@ -260,8 +247,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         }
     }
 
-    inner class ProfileHolder(binding: LayoutProfileBinding) :
-        RecyclerView.ViewHolder(binding.root) {
+    inner class ProfileHolder(binding: LayoutProfileBinding) : RecyclerView.ViewHolder(binding.root) {
 
         val profileName = binding.profileName
         val profileType = binding.profileType

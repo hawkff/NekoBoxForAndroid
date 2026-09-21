@@ -15,15 +15,15 @@ class SSHSettingsActivity : ProfileSettingsActivity<SSHBean>() {
     override fun createEntity() = SSHBean()
 
     override fun SSHBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverUsername = username
-        DataStore.serverAuthType = authType
-        DataStore.serverPassword = password
-        DataStore.serverPrivateKey = privateKey
-        DataStore.serverPassword1 = privateKeyPassphrase
-        DataStore.serverCertificates = publicKey
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverUsername = username!!
+        DataStore.serverAuthType = authType!!
+        DataStore.serverPassword = password!!
+        DataStore.serverPrivateKey = privateKey!!
+        DataStore.serverPassword1 = privateKeyPassphrase!!
+        DataStore.serverCertificates = publicKey!!
     }
 
     override fun SSHBean.serialize() {
@@ -35,9 +35,11 @@ class SSHSettingsActivity : ProfileSettingsActivity<SSHBean>() {
         when (authType) {
             SSHBean.AUTH_TYPE_NONE -> {
             }
+
             SSHBean.AUTH_TYPE_PASSWORD -> {
                 password = DataStore.serverPassword
             }
+
             SSHBean.AUTH_TYPE_PRIVATE_KEY -> {
                 privateKey = DataStore.serverPrivateKey
                 privateKeyPassphrase = DataStore.serverPassword1

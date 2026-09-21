@@ -8,47 +8,45 @@ import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.utils.listByLineOrComma
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_AnyTLSOptions {
-    return SingBoxOptions.Outbound_AnyTLSOptions().apply {
-        type = "anytls"
-        server = bean.serverAddress
-        server_port = bean.serverPort
-        password = bean.password
+fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_AnyTLSOptions = SingBoxOptions.Outbound_AnyTLSOptions().apply {
+    type = "anytls"
+    server = bean.serverAddress
+    server_port = bean.serverPort
+    password = bean.password
 
-        tls = SingBoxOptions.OutboundTLSOptions().apply {
-            enabled = true
-            server_name = bean.sni.blankAsNull()
-            if (bean.allowInsecure) insecure = true
-            alpn = bean.alpn.blankAsNull()?.listByLineOrComma()
-            bean.certificates.blankAsNull()?.let {
-                certificate = it
+    tls = SingBoxOptions.OutboundTLSOptions().apply {
+        enabled = true
+        server_name = bean.sni.blankAsNull()
+        if (bean.allowInsecure!!) insecure = true
+        alpn = bean.alpn.blankAsNull()?.listByLineOrComma()
+        bean.certificates.blankAsNull()?.let {
+            certificate = it
+        }
+        var fingerprint = bean.utlsFingerprint.blankAsNull()
+        if (!bean.realityPubKey.isNullOrBlank()) {
+            reality = SingBoxOptions.OutboundRealityOptions().apply {
+                enabled = true
+                public_key = bean.realityPubKey
+                short_id = bean.realityShortId
             }
-            var fingerprint = bean.utlsFingerprint.blankAsNull()
-            if (!bean.realityPubKey.isNullOrBlank()) {
-                reality = SingBoxOptions.OutboundRealityOptions().apply {
-                    enabled = true
-                    public_key = bean.realityPubKey
-                    short_id = bean.realityShortId
-                }
-                if (fingerprint.isNullOrBlank()) {
-                    fingerprint = "chrome"
-                }
+            if (fingerprint.isNullOrBlank()) {
+                fingerprint = "chrome"
             }
-            fingerprint?.let {
-                utls = SingBoxOptions.OutboundUTLSOptions().apply {
-                    enabled = true
-                    fingerprint = it
-                }
+        }
+        fingerprint?.let {
+            utls = SingBoxOptions.OutboundUTLSOptions().apply {
+                enabled = true
+                fingerprint = it
             }
-            bean.echConfig.blankAsNull()?.let {
-                // In new version, some complex options will be deprecated, so we just do this.
-                ech = SingBoxOptions.OutboundECHOptions().apply {
-                    enabled = true
-                    config = if (it.contains("BEGIN ECH CONFIGS")) {
-                        listOf(it)
-                    } else {
-                        listOf("-----BEGIN ECH CONFIGS-----", it.trim(), "-----END ECH CONFIGS-----")
-                    }
+        }
+        bean.echConfig.blankAsNull()?.let {
+            // In new version, some complex options will be deprecated, so we just do this.
+            ech = SingBoxOptions.OutboundECHOptions().apply {
+                enabled = true
+                config = if (it.contains("BEGIN ECH CONFIGS")) {
+                    listOf(it)
+                } else {
+                    listOf("-----BEGIN ECH CONFIGS-----", it.trim(), "-----END ECH CONFIGS-----")
                 }
             }
         }
@@ -57,13 +55,13 @@ fun buildSingBoxOutboundAnyTLSBean(bean: AnyTLSBean): SingBoxOptions.Outbound_An
 
 fun AnyTLSBean.toUri(): String {
     val builder = linkBuilder()
-        .host(serverAddress)
-        .port(serverPort)
-        .username(password)
+        .host(serverAddress!!)
+        .port(serverPort!!)
+        .username(password!!)
     if (!name.isNullOrBlank()) {
-        builder.encodedFragment(name.urlSafe())
+        builder.encodedFragment(name!!.urlSafe())
     }
-    if (allowInsecure) {
+    if (allowInsecure!!) {
         builder.addQueryParameter("insecure", "1")
     }
     if (!sni.isNullOrBlank()) {

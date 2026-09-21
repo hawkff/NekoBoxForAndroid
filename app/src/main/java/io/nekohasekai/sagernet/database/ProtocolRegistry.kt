@@ -43,8 +43,6 @@ import moe.matsuri.nb4a.proxy.config.ConfigBean
 import moe.matsuri.nb4a.proxy.config.ConfigSettingActivity
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSBean
 import moe.matsuri.nb4a.proxy.shadowtls.ShadowTLSSettingsActivity
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.toUri as toMasterDnsVpnUri
-import io.nekohasekai.sagernet.fmt.olcrtc.toUri as toOlcrtcUri
 
 /**
  * Single source of truth for per-protocol type dispatch on [ProxyEntity].
@@ -79,8 +77,8 @@ class ProtocolDescriptor(
     val displayType: (ProxyEntity) -> String,
     /** Whether this protocol needs an external process (may branch on bean state). */
     val needExternal: (ProxyEntity) -> Boolean = { false },
-    /** Settings screen opened for this persisted protocol type. */
-    val settingsActivityClass: Class<out Activity>,
+    /** Settings screen, or null for data-only entries. */
+    val settingsActivityClass: Class<out Activity>?,
     /** Whether the protocol exposes a conventional share link. */
     val hasStandardLink: Boolean = true,
     /** Conventional share-link encoder; null preserves the universal-link fallback. */
@@ -289,10 +287,9 @@ object ProtocolRegistry {
             beanClass = MasterDnsVpnBean::class.java,
             getBean = { it.masterDnsVpnBean },
             setBean = { e, b -> e.masterDnsVpnBean = b as MasterDnsVpnBean? },
-            displayType = { "MasterDnsVPN" },
-            needExternal = { true },
-            settingsActivityClass = MasterDnsVpnSettingsActivity::class.java,
-            toStandardLink = { (it as MasterDnsVpnBean).toMasterDnsVpnUri() },
+            displayType = { "Unsupported" },
+            settingsActivityClass = null,
+            hasStandardLink = false,
         ),
         ProtocolDescriptor(
             type = ProxyEntity.TYPE_OLCRTC,
@@ -300,10 +297,9 @@ object ProtocolRegistry {
             beanClass = OlcrtcBean::class.java,
             getBean = { it.olcrtcBean },
             setBean = { e, b -> e.olcrtcBean = b as OlcrtcBean? },
-            displayType = { "olcRTC" },
-            needExternal = { true },
-            settingsActivityClass = OlcrtcSettingsActivity::class.java,
-            toStandardLink = { (it as OlcrtcBean).toOlcrtcUri() },
+            displayType = { "Unsupported" },
+            settingsActivityClass = null,
+            hasStandardLink = false,
         ),
         ProtocolDescriptor(
             type = ProxyEntity.TYPE_AWG,

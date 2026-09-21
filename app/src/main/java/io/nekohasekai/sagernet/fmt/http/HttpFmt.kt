@@ -23,23 +23,23 @@ fun parseHttp(link: String): HttpBean {
 }
 
 fun HttpBean.toUri(): String {
-    val builder = HttpUrl.Builder().scheme(if (isTLS()) "https" else "http").host(serverAddress)
+    val builder = HttpUrl.Builder().scheme(if (isTLS()) "https" else "http").host(serverAddress!!)
 
     if (serverPort in 1..65535) {
-        builder.port(serverPort)
+        builder.port(serverPort!!)
     }
 
-    if (username.isNotBlank()) {
-        builder.username(username)
+    if (username!!.isNotBlank()) {
+        builder.username(username!!)
     }
-    if (password.isNotBlank()) {
-        builder.password(password)
+    if (password!!.isNotBlank()) {
+        builder.password(password!!)
     }
-    if (sni.isNotBlank()) {
+    if (sni!!.isNotBlank()) {
         builder.addQueryParameter("sni", sni)
     }
-    if (name.isNotBlank()) {
-        builder.encodedFragment(name.urlSafe())
+    if (name!!.isNotBlank()) {
+        builder.encodedFragment(name!!.urlSafe())
     }
 
     return builder.toString()

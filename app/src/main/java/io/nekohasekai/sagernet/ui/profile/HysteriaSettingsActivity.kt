@@ -21,29 +21,29 @@ class HysteriaSettingsActivity : ProfileSettingsActivity<HysteriaBean>() {
     override fun createEntity() = HysteriaBean().applyDefaultValues()
 
     override fun HysteriaBean.init() {
-        DataStore.profileName = name
-        DataStore.protocolVersion = protocolVersion
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPorts = serverPorts
-        DataStore.serverObfs = obfuscation
-        DataStore.serverHy2ObfsType = hysteria2ObfsType
-        DataStore.serverHy2GeckoMinPacket = geckoMinPacketSize
-        DataStore.serverHy2GeckoMaxPacket = geckoMaxPacketSize
-        DataStore.serverHy2EchEnabled = enableECH
-        DataStore.serverHy2EchConfig = echConfig
-        DataStore.serverAuthType = authPayloadType
-        DataStore.serverProtocolInt = protocol
-        DataStore.serverPassword = authPayload
-        DataStore.serverSNI = sni
-        DataStore.serverALPN = alpn
-        DataStore.serverCertificates = caText
-        DataStore.serverAllowInsecure = allowInsecure
-        DataStore.serverUploadSpeed = uploadMbps
-        DataStore.serverDownloadSpeed = downloadMbps
-        DataStore.serverStreamReceiveWindow = streamReceiveWindow
-        DataStore.serverConnectionReceiveWindow = connectionReceiveWindow
-        DataStore.serverDisableMtuDiscovery = disableMtuDiscovery
-        DataStore.serverHopInterval = hopInterval
+        DataStore.profileName = name!!
+        DataStore.protocolVersion = protocolVersion!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPorts = serverPorts!!
+        DataStore.serverObfs = obfuscation!!
+        DataStore.serverHy2ObfsType = hysteria2ObfsType!!
+        DataStore.serverHy2GeckoMinPacket = geckoMinPacketSize!!
+        DataStore.serverHy2GeckoMaxPacket = geckoMaxPacketSize!!
+        DataStore.serverHy2EchEnabled = enableECH!!
+        DataStore.serverHy2EchConfig = echConfig!!
+        DataStore.serverAuthType = authPayloadType!!
+        DataStore.serverProtocolInt = protocol!!
+        DataStore.serverPassword = authPayload!!
+        DataStore.serverSNI = sni!!
+        DataStore.serverALPN = alpn!!
+        DataStore.serverCertificates = caText!!
+        DataStore.serverAllowInsecure = allowInsecure!!
+        DataStore.serverUploadSpeed = uploadMbps!!
+        DataStore.serverDownloadSpeed = downloadMbps!!
+        DataStore.serverStreamReceiveWindow = streamReceiveWindow!!
+        DataStore.serverConnectionReceiveWindow = connectionReceiveWindow!!
+        DataStore.serverDisableMtuDiscovery = disableMtuDiscovery!!
+        DataStore.serverHopInterval = hopInterval!!
     }
 
     override suspend fun saveAndExit() {

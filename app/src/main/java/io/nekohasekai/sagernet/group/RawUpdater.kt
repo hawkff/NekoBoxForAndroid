@@ -68,6 +68,10 @@ object RawUpdater : GroupUpdater() {
         return ReconciliationResult(contentChanged, orderChanged)
     }
 
+    internal fun requireUpdatableProfiles(profiles: List<ProxyEntity>) {
+        require(profiles.all { it.haveSettings() }) { "Unsupported profile type" }
+    }
+
     @SuppressLint("Recycle")
     override suspend fun doUpdate(
         proxyGroup: ProxyGroup,
@@ -77,8 +81,8 @@ object RawUpdater : GroupUpdater() {
     ) {
         val link = subscription.link
         var proxies: List<AbstractBean>
-        if (link.startsWith("content://")) {
-            val contentText = app.contentResolver.openInputStream(link.toUri())
+        if (link!!.startsWith("content://")) {
+            val contentText = app.contentResolver.openInputStream(link!!.toUri())
                 ?.use { it.readTextBounded() }
 
             proxies = contentText?.let { parseRaw(contentText) }
@@ -99,7 +103,7 @@ object RawUpdater : GroupUpdater() {
                     allowInsecure()
                 }
                 setURL(subscription.link)
-                setUserAgent(subscription.customUserAgent.takeIf { it.isNotBlank() } ?: USER_AGENT)
+                setUserAgent(subscription.customUserAgent.takeIf { it!!.isNotBlank() } ?: USER_AGENT)
             }.execute()
             proxies = parseRaw(Util.getStringBox(response.getContentStringLimited(10L * 1024 * 1024)))
                 ?: error(app.getString(R.string.no_proxies_found))
@@ -134,7 +138,7 @@ object RawUpdater : GroupUpdater() {
         }
         proxies = proxiesMap.values.toList()
 
-        if (subscription.forceResolve) forceResolve(proxies, proxyGroup.id)
+        if (subscription.forceResolve!!) forceResolve(proxies, proxyGroup.id)
 
         val filterMode = subscription.filterMode ?: SubscriptionFilterMode.DISABLED
         val filterRegex = subscription.filterRegex ?: ""
@@ -149,8 +153,9 @@ object RawUpdater : GroupUpdater() {
         }
 
         val exists = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
+        requireUpdatableProfiles(exists)
         val duplicate = ArrayList<String>()
-        if (subscription.deduplication) {
+        if (subscription.deduplication!!) {
             Logs.d("Before deduplication: ${proxies.size}")
             val uniqueProxies = LinkedHashSet<Protocols.Deduplication>()
             val indexOf = HashMap<Protocols.Deduplication, Int>()
@@ -435,6 +440,7 @@ object RawUpdater : GroupUpdater() {
                             "vmess", "vless", "trojan" -> {
                                 val bean = when (type) {
                                     "vmess" -> VMessBean()
+
                                     "vless" -> VMessBean().apply {
                                         alterId = -1 // make it VLESS
                                         packetEncoding = 2 // clash meta default XUDP
@@ -453,6 +459,7 @@ object RawUpdater : GroupUpdater() {
                                 for (opt in proxy) {
                                     when (opt.key) {
                                         "name" -> bean.name = opt.value?.toString()
+
                                         "password" -> if (bean is TrojanBean) {
                                             bean.password =
                                                 opt.value?.toString()
@@ -752,14 +759,19 @@ object RawUpdater : GroupUpdater() {
                                     if (opt.value == null) continue
                                     when (opt.key.replace("_", "-")) {
                                         "name" -> bean.name = opt.value.toString()
+
                                         "server" -> bean.serverAddress = opt.value as String
+
                                         "port" -> bean.serverPort = opt.value.toString().toInt()
+
                                         "password" -> bean.password = opt.value.toString()
+
                                         "client-fingerprint" ->
                                             bean.utlsFingerprint =
                                                 opt.value as String
 
                                         "sni" -> bean.sni = opt.value.toString()
+
                                         "skip-cert-verify" ->
                                             bean.allowInsecure =
                                                 opt.value.toString() == "true"
@@ -768,9 +780,11 @@ object RawUpdater : GroupUpdater() {
                                             val alpn = (opt.value as? (List<String>))
                                             bean.alpn = alpn?.joinToString("\n")
                                         }
+
                                         "reality-pub-key", "public-key" ->
                                             bean.realityPubKey =
                                                 opt.value.toString()
+
                                         "reality-short-id", "short-id" ->
                                             bean.realityShortId =
                                                 opt.value.toString()
@@ -789,8 +803,11 @@ object RawUpdater : GroupUpdater() {
                                     for ((key, value) in configToUse) {
                                         when (key.replace("_", "-")) {
                                             "server" -> serverAddress = value.toString()
+
                                             "port" -> serverPort = value.toString().toIntOrNull() ?: 0
+
                                             "mtu" -> mtu = value.toString().toIntOrNull() ?: 0
+
                                             "ip" -> {
                                                 val ipValue = value.toString()
                                                 localAddress = if (!ipValue.contains("/")) {
@@ -799,6 +816,7 @@ object RawUpdater : GroupUpdater() {
                                                     ipValue
                                                 }
                                             }
+
                                             "ipv6" -> {
                                                 val ipv6Value = value.toString()
                                                 val processedIPv6Value = if (!ipv6Value.contains("/")) {
@@ -812,9 +830,13 @@ object RawUpdater : GroupUpdater() {
                                                     localAddress += "\n$processedIPv6Value"
                                                 }
                                             }
+
                                             "private-key" -> privateKey = value.toString()
+
                                             "public-key" -> peerPublicKey = value.toString()
+
                                             "pre-shared-key", "preshared-key" -> peerPreSharedKey = value.toString()
+
                                             "reserved" -> {
                                                 val reservedValue = value
                                                 when (reservedValue) {
@@ -830,6 +852,7 @@ object RawUpdater : GroupUpdater() {
                                                             ) { it.toString() }
                                                         }
                                                     }
+
                                                     else -> {
                                                         reserved = reservedValue.toString().replace(
                                                             "[\\[\\] ]".toRegex(),
@@ -852,8 +875,11 @@ object RawUpdater : GroupUpdater() {
                                     if (opt.value == null) continue
                                     when (opt.key.replace("_", "-")) {
                                         "name" -> bean.name = opt.value.toString()
+
                                         "server" -> bean.serverAddress = opt.value as String
+
                                         "port" -> bean.serverPorts = opt.value.toString()
+
                                         "ports" -> hopPorts = opt.value.toString()
 
                                         "obfs" -> bean.obfuscation = opt.value.toString()
@@ -911,8 +937,11 @@ object RawUpdater : GroupUpdater() {
                                     if (opt.value == null) continue
                                     when (opt.key.replace("_", "-")) {
                                         "name" -> bean.name = opt.value.toString()
+
                                         "server" -> bean.serverAddress = opt.value as String
+
                                         "port" -> bean.serverPorts = opt.value.toString()
+
                                         "ports" -> hopPorts = opt.value.toString()
 
                                         "obfs-password" -> bean.obfuscation = opt.value.toString()
@@ -947,8 +976,11 @@ object RawUpdater : GroupUpdater() {
                                     if (opt.value == null) continue
                                     when (opt.key.replace("_", "-")) {
                                         "name" -> bean.name = opt.value.toString()
+
                                         "server" -> bean.serverAddress = opt.value.toString()
+
                                         "ip" -> ip = opt.value.toString()
+
                                         "port" -> bean.serverPort = opt.value.toString().toInt()
 
                                         "token" -> {
@@ -988,7 +1020,7 @@ object RawUpdater : GroupUpdater() {
                                 }
                                 if (ip.isNotBlank()) {
                                     bean.serverAddress = ip
-                                    if (bean.sni.isNullOrBlank() && !bean.serverAddress.isNullOrBlank() && !bean.serverAddress.isIpAddress()) {
+                                    if (bean.sni.isNullOrBlank() && !bean.serverAddress.isNullOrBlank() && !bean.serverAddress!!.isIpAddress()) {
                                         bean.sni = bean.serverAddress
                                     }
                                 }
@@ -1012,7 +1044,7 @@ object RawUpdater : GroupUpdater() {
                     it.initializeDefaultValues()
                     if (it is StandardV2RayBean) {
                         // 1. SNI
-                        if (it.isTLS() && it.sni.isNullOrBlank() && !it.host.isNullOrBlank() && !it.host.isIpAddress()) {
+                        if (it.isTLS() && it.sni.isNullOrBlank() && !it.host.isNullOrBlank() && !it.host!!.isIpAddress()) {
                             it.sni = it.host
                         }
                         // 2. globalClientFingerprint
@@ -1076,11 +1108,9 @@ object RawUpdater : GroupUpdater() {
         return null
     }
 
-    fun clashCipher(cipher: String): String {
-        return when (cipher) {
-            "dummy" -> "none"
-            else -> cipher
-        }
+    fun clashCipher(cipher: String): String = when (cipher) {
+        "dummy" -> "none"
+        else -> cipher
     }
 
     fun parseWireGuard(conf: String): List<WireGuardBean> {

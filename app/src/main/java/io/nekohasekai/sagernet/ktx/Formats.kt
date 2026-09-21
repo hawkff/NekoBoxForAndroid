@@ -7,9 +7,7 @@ import io.nekohasekai.sagernet.fmt.http.parseHttp
 import io.nekohasekai.sagernet.fmt.hysteria.parseHysteria1
 import io.nekohasekai.sagernet.fmt.hysteria.parseHysteria2
 import io.nekohasekai.sagernet.fmt.juicity.parseJuicity
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.parseMasterDnsVpn
 import io.nekohasekai.sagernet.fmt.naive.parseNaive
-import io.nekohasekai.sagernet.fmt.olcrtc.parseOlcrtc
 import io.nekohasekai.sagernet.fmt.parseUniversal
 import io.nekohasekai.sagernet.fmt.shadowsocks.parseShadowsocks
 import io.nekohasekai.sagernet.fmt.shadowsocksr.parseShadowsocksR
@@ -29,9 +27,7 @@ import org.json.JSONObject
 
 // JSON & Base64
 
-fun JSONObject.toStringPretty(): String {
-    return gson.toJson(JsonParser.parseString(this.toString()))
-}
+fun JSONObject.toStringPretty(): String = gson.toJson(JsonParser.parseString(this.toString()))
 
 inline fun <reified T : Any> JSONArray.filterIsInstance(): List<T> {
     val list = mutableListOf<T>()
@@ -81,26 +77,20 @@ fun JSONObject.getStr(name: String): String? {
     }
 }
 
-fun JSONObject.getBool(name: String): Boolean? {
-    return try {
-        getBoolean(name)
-    } catch (ignored: Exception) {
-        null
-    }
+fun JSONObject.getBool(name: String): Boolean? = try {
+    getBoolean(name)
+} catch (ignored: Exception) {
+    null
 }
 
 // name collision, nya
-fun JSONObject.getIntNya(name: String): Int? {
-    return try {
-        getInt(name)
-    } catch (ignored: Exception) {
-        null
-    }
+fun JSONObject.getIntNya(name: String): Int? = try {
+    getInt(name)
+} catch (ignored: Exception) {
+    null
 }
 
-fun String.decodeBase64UrlSafe(): String {
-    return String(Util.b64Decode(this))
-}
+fun String.decodeBase64UrlSafe(): String = String(Util.b64Decode(this))
 
 // Sub
 
@@ -248,20 +238,6 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
                 entities.add(parseAnytls(this))
             }.onFailure {
                 Logs.w("AnyTLS parser rejected input")
-            }
-        } else if (startsWith("masterdns://")) {
-            Logs.d("Trying MasterDnsVPN parser")
-            runCatching {
-                entities.add(parseMasterDnsVpn(this))
-            }.onFailure {
-                Logs.w("MasterDnsVPN parser rejected input")
-            }
-        } else if (startsWith("olcrtc://")) {
-            Logs.d("Trying olcRTC parser")
-            runCatching {
-                entities.add(parseOlcrtc(this))
-            }.onFailure {
-                Logs.w("olcRTC parser rejected input")
             }
         }
     }

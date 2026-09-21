@@ -48,7 +48,8 @@ import kotlin.properties.Delegates
 @Suppress("UNCHECKED_CAST")
 abstract class ProfileSettingsActivity<T : AbstractBean>(
     @LayoutRes resId: Int = R.layout.layout_config_settings,
-) : ThemedActivity(resId), OnPreferenceDataStoreChangeListener {
+) : ThemedActivity(resId),
+    OnPreferenceDataStoreChangeListener {
 
     class UnsavedChangesDialogFragment : AlertDialogFragment<Empty, Empty>() {
         override fun AlertDialog.Builder.prepare(listener: DialogInterface.OnClickListener) {
@@ -211,9 +212,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
     open fun PreferenceFragmentCompat.viewCreated(view: View, savedInstanceState: Bundle?) {
     }
 
-    open fun PreferenceFragmentCompat.displayPreferenceDialog(preference: Preference): Boolean {
-        return false
-    }
+    open fun PreferenceFragmentCompat.displayPreferenceDialog(preference: Preference): Boolean = false
 
     class MyPreferenceFragmentCompat : PreferenceFragmentCompat() {
 
@@ -291,7 +290,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
             R.id.action_custom_outbound_json -> {
                 activity?.proxyEntity?.apply {
                     val bean = requireBean()
-                    DataStore.serverCustomOutbound = bean.customOutboundJson
+                    DataStore.serverCustomOutbound = bean.customOutboundJson!!
                     callbackCustomOutbound = { bean.customOutboundJson = it }
                     resultCallbackCustomOutbound.launch(
                         Intent(
@@ -308,7 +307,7 @@ abstract class ProfileSettingsActivity<T : AbstractBean>(
             R.id.action_custom_config_json -> {
                 activity?.proxyEntity?.apply {
                     val bean = requireBean()
-                    DataStore.serverCustom = bean.customConfigJson
+                    DataStore.serverCustom = bean.customConfigJson!!
                     callbackCustom = { bean.customConfigJson = it }
                     resultCallbackCustom.launch(
                         Intent(

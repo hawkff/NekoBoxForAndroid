@@ -139,8 +139,6 @@
                 <data android:scheme="vless" />
                 <data android:scheme="anytls" />
                 <data android:scheme="snell" />
-                <data android:scheme="masterdns" />
-                <data android:scheme="olcrtc" />
                 <data android:scheme="tuic" />
                 <data android:scheme="juicity" />
 
@@ -204,12 +202,6 @@
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.SnellSettingsActivity"
-            android:configChanges="uiMode" />
-        <activity
-            android:name="io.nekohasekai.sagernet.ui.profile.MasterDnsVpnSettingsActivity"
-            android:configChanges="uiMode" />
-        <activity
-            android:name="io.nekohasekai.sagernet.ui.profile.OlcrtcSettingsActivity"
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.ChainSettingsActivity"

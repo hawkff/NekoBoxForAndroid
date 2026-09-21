@@ -14,16 +14,16 @@ class NaiveSettingsActivity : ProfileSettingsActivity<NaiveBean>() {
     override fun createEntity() = NaiveBean()
 
     override fun NaiveBean.init() {
-        DataStore.profileName = name
-        DataStore.serverAddress = serverAddress
-        DataStore.serverPort = serverPort
-        DataStore.serverUsername = username
-        DataStore.serverPassword = password
-        DataStore.serverProtocol = proto
-        DataStore.serverSNI = sni
-        DataStore.serverCertificates = certificates
-        DataStore.serverHeaders = extraHeaders
-        DataStore.serverInsecureConcurrency = insecureConcurrency
+        DataStore.profileName = name!!
+        DataStore.serverAddress = serverAddress!!
+        DataStore.serverPort = serverPort!!
+        DataStore.serverUsername = username!!
+        DataStore.serverPassword = password!!
+        DataStore.serverProtocol = proto!!
+        DataStore.serverSNI = sni!!
+        DataStore.serverCertificates = certificates!!
+        DataStore.serverHeaders = extraHeaders!!
+        DataStore.serverInsecureConcurrency = insecureConcurrency!!
         DataStore.profileCacheStore.putBoolean("sUoT", sUoT)
     }
 

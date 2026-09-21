@@ -37,17 +37,6 @@
     </issue>
 
     <issue
-        id="DefaultLocale"
-        message="Implicitly using the default locale is a common source of bugs: Use `toLowerCase(Locale)` instead. For strings meant to be internal use `Locale.ROOT`, otherwise `Locale.getDefault()`."
-        errorLine1="        type = type.toLowerCase();"
-        errorLine2="                    ~~~~~~~~~~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/fmt/v2ray/StandardV2RayBean.java"
-            line="101"
-            column="21"/>
-    </issue>
-
-    <issue
         id="NewApi"
         message="`android:dialogCornerRadius` requires API level 28 (current min is 21)"
         errorLine1="        &lt;item name=&quot;android:dialogCornerRadius&quot;>@dimen/dialog_corner_radius&lt;/item>"
@@ -111,50 +100,6 @@
             file="src/main/AndroidManifest.xml"
             line="53"
             column="9"/>
-    </issue>
-
-    <issue
-        id="UseRequiresApi"
-        message="Use `@RequiresApi(31) instead of `@TargetApi` to propagate the requirement"
-        errorLine1="                in 31..Int.MAX_VALUE -> @TargetApi(31) {"
-        errorLine2="                                        ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/utils/DefaultNetworkListener.kt"
-            line="128"
-            column="41"/>
-    </issue>
-
-    <issue
-        id="UseRequiresApi"
-        message="Use `@RequiresApi(28) instead of `@TargetApi` to propagate the requirement"
-        errorLine1="                in 28 until 31 -> @TargetApi(28) {  // we want REQUEST here instead of LISTEN"
-        errorLine2="                                  ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/utils/DefaultNetworkListener.kt"
-            line="133"
-            column="35"/>
-    </issue>
-
-    <issue
-        id="UseRequiresApi"
-        message="Use `@RequiresApi(26) instead of `@TargetApi` to propagate the requirement"
-        errorLine1="                in 26 until 28 -> @TargetApi(26) {"
-        errorLine2="                                  ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/utils/DefaultNetworkListener.kt"
-            line="136"
-            column="35"/>
-    </issue>
-
-    <issue
-        id="UseRequiresApi"
-        message="Use `@RequiresApi(24) instead of `@TargetApi` to propagate the requirement"
-        errorLine1="                in 24 until 26 -> @TargetApi(24) {"
-        errorLine2="                                  ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/utils/DefaultNetworkListener.kt"
-            line="139"
-            column="35"/>
     </issue>
 
     <issue

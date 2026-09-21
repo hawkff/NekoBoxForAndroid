@@ -7,8 +7,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
 
 fun ShadowsocksBean.fixPluginName() {
-    if (plugin.startsWith("simple-obfs")) {
-        plugin = plugin.replaceFirst("simple-obfs", "obfs-local")
+    if (plugin!!.startsWith("simple-obfs")) {
+        plugin = plugin!!.replaceFirst("simple-obfs", "obfs-local")
     }
 }
 
@@ -79,49 +79,45 @@ fun parseShadowsocks(url: String): ShadowsocksBean {
 
 fun ShadowsocksBean.toUri(): String {
     val builder = linkBuilder().username(Util.b64EncodeUrlSafe("$method:$password"))
-        .host(serverAddress)
-        .port(serverPort)
+        .host(serverAddress!!)
+        .port(serverPort!!)
 
-    if (plugin.isNotBlank()) {
+    if (plugin!!.isNotBlank()) {
         builder.addQueryParameter("plugin", plugin)
     }
 
-    if (name.isNotBlank()) {
-        builder.encodedFragment(name.urlSafe())
+    if (name!!.isNotBlank()) {
+        builder.encodedFragment(name!!.urlSafe())
     }
 
     return builder.toLink("ss").replace("$serverPort/", "$serverPort")
 }
 
-fun JSONObject.parseShadowsocks(): ShadowsocksBean {
-    return ShadowsocksBean().apply {
-        serverAddress = getStr("server")
-        serverPort = getIntNya("server_port")
-        password = getStr("password")
-        method = getStr("method")
-        name = optString("remarks", "")
+fun JSONObject.parseShadowsocks(): ShadowsocksBean = ShadowsocksBean().apply {
+    serverAddress = getStr("server")
+    serverPort = getIntNya("server_port")
+    password = getStr("password")
+    method = getStr("method")
+    name = optString("remarks", "")
 
-        val pId = getStr("plugin")
-        if (!pId.isNullOrBlank()) {
-            plugin = pId + ";" + optString("plugin_opts", "")
-        }
+    val pId = getStr("plugin")
+    if (!pId.isNullOrBlank()) {
+        plugin = pId + ";" + optString("plugin_opts", "")
     }
 }
 
-fun buildSingBoxOutboundShadowsocksBean(bean: ShadowsocksBean): SingBoxOptions.Outbound_ShadowsocksOptions {
-    return SingBoxOptions.Outbound_ShadowsocksOptions().apply {
-        type = "shadowsocks"
-        server = bean.serverAddress
-        server_port = bean.serverPort
-        password = bean.password
-        method = bean.method
-        if (bean.plugin.isNotBlank()) {
-            plugin = bean.plugin.substringBefore(";")
-            plugin_opts = bean.plugin.substringAfter(";")
-            if (plugin == "none") {
-                plugin = null
-                plugin_opts = null
-            }
+fun buildSingBoxOutboundShadowsocksBean(bean: ShadowsocksBean): SingBoxOptions.Outbound_ShadowsocksOptions = SingBoxOptions.Outbound_ShadowsocksOptions().apply {
+    type = "shadowsocks"
+    server = bean.serverAddress
+    server_port = bean.serverPort
+    password = bean.password
+    method = bean.method
+    if (bean.plugin!!.isNotBlank()) {
+        plugin = bean.plugin!!.substringBefore(";")
+        plugin_opts = bean.plugin!!.substringAfter(";")
+        if (plugin == "none") {
+            plugin = null
+            plugin_opts = null
         }
     }
 }

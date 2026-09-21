@@ -36,47 +36,45 @@ fun parseJuicity(url: String): JuicityBean {
 }
 
 fun JuicityBean.toUri(): String {
-    val builder = linkBuilder().username(uuid).password(password).host(serverAddress).port(serverPort)
+    val builder = linkBuilder().username(uuid!!).password(password!!).host(serverAddress!!).port(serverPort!!)
 
-    if (sni.isNotBlank()) {
+    if (sni!!.isNotBlank()) {
         builder.addQueryParameter("sni", sni)
     }
-    if (pinnedCertchainSha256.isNotBlank()) {
-        normalizePinnedCertChainHash(pinnedCertchainSha256.listByLineOrComma().firstOrNull())?.let {
+    if (pinnedCertchainSha256!!.isNotBlank()) {
+        normalizePinnedCertChainHash(pinnedCertchainSha256!!.listByLineOrComma().firstOrNull())?.let {
             builder.addQueryParameter("pinned_certchain_sha256", it)
         }
     }
-    if (allowInsecure) {
+    if (allowInsecure!!) {
         builder.addQueryParameter("allow_insecure", "1")
     }
-    if (name.isNotBlank()) {
-        builder.encodedFragment(name.urlSafe())
+    if (name!!.isNotBlank()) {
+        builder.encodedFragment(name!!.urlSafe())
     }
 
     return builder.toLink("juicity")
 }
 
-fun buildSingBoxOutboundJuicityBean(bean: JuicityBean): Outbound_JuicityOptions {
-    return Outbound_JuicityOptions().apply {
-        type = "juicity"
-        server = bean.serverAddress
-        server_port = bean.serverPort
-        uuid = bean.uuid
-        password = bean.password
+fun buildSingBoxOutboundJuicityBean(bean: JuicityBean): Outbound_JuicityOptions = Outbound_JuicityOptions().apply {
+    type = "juicity"
+    server = bean.serverAddress
+    server_port = bean.serverPort
+    uuid = bean.uuid
+    password = bean.password
 
-        // Create TLS options object
-        tls = SingBoxOptions.OutboundTLSOptions().apply {
-            enabled = true
-            if (bean.sni.isNotBlank()) {
-                server_name = bean.sni
-            }
-            insecure = bean.allowInsecure || DataStore.globalAllowInsecure || bean.pinnedCertchainSha256.isNotBlank()
+    // Create TLS options object
+    tls = SingBoxOptions.OutboundTLSOptions().apply {
+        enabled = true
+        if (bean.sni!!.isNotBlank()) {
+            server_name = bean.sni
         }
+        insecure = bean.allowInsecure!! || DataStore.globalAllowInsecure || bean.pinnedCertchainSha256!!.isNotBlank()
+    }
 
-        if (bean.pinnedCertchainSha256.isNotBlank()) {
-            normalizePinnedCertChainHash(bean.pinnedCertchainSha256.listByLineOrComma().firstOrNull())?.let {
-                pin_cert_sha256 = it
-            }
+    if (bean.pinnedCertchainSha256!!.isNotBlank()) {
+        normalizePinnedCertChainHash(bean.pinnedCertchainSha256!!.listByLineOrComma().firstOrNull())?.let {
+            pin_cert_sha256 = it
         }
     }
 }
@@ -86,6 +84,7 @@ private fun normalizePinnedCertChainHash(rawHash: String?): String? {
     return when {
         certChainHash.length == 64 -> Base64.getUrlEncoder()
             .encodeToString(certChainHash.chunked(2).map { chunk -> chunk.toInt(16).toByte() }.toByteArray())
+
         else -> certChainHash.replace('/', '_').replace('+', '-')
     }
 }

@@ -58,15 +58,15 @@ class GroupSettingsActivity(
             if (landingProxy >= 0) OutboundPreference.VALUE_SELECT_PROFILE.toInt() else 0
 
         val subscription = subscription ?: SubscriptionBean().applyDefaultValues()
-        DataStore.subscriptionLink = subscription.link
-        DataStore.subscriptionForceResolve = subscription.forceResolve
-        DataStore.subscriptionDeduplication = subscription.deduplication
-        DataStore.subscriptionUpdateWhenConnectedOnly = subscription.updateWhenConnectedOnly
-        DataStore.subscriptionUserAgent = subscription.customUserAgent
-        DataStore.subscriptionAutoUpdate = subscription.autoUpdate
-        DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay
-        DataStore.subscriptionFilterMode = subscription.filterMode
-        DataStore.subscriptionFilterRegex = subscription.filterRegex
+        DataStore.subscriptionLink = subscription.link!!
+        DataStore.subscriptionForceResolve = subscription.forceResolve!!
+        DataStore.subscriptionDeduplication = subscription.deduplication!!
+        DataStore.subscriptionUpdateWhenConnectedOnly = subscription.updateWhenConnectedOnly!!
+        DataStore.subscriptionUserAgent = subscription.customUserAgent!!
+        DataStore.subscriptionAutoUpdate = subscription.autoUpdate!!
+        DataStore.subscriptionAutoUpdateDelay = subscription.autoUpdateDelay!!
+        DataStore.subscriptionFilterMode = subscription.filterMode!!
+        DataStore.subscriptionFilterRegex = subscription.filterRegex!!
         DataStore.subscriptionCustomDns = subscription.customDnsResolver ?: ""
     }
 
@@ -108,9 +108,7 @@ class GroupSettingsActivity(
 
     private var isFromClipboard = false
 
-    fun needSave(): Boolean {
-        return DataStore.dirty
-    }
+    fun needSave(): Boolean = DataStore.dirty
 
     fun PreferenceFragmentCompat.createPreferences(savedInstanceState: Bundle?, rootKey: String?) {
         addPreferencesFromResource(R.xml.group_preferences)

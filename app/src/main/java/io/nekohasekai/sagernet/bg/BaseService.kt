@@ -116,11 +116,7 @@ class BaseService {
         ISagerNetService.Stub(),
         CoroutineScope,
         AutoCloseable {
-        private val callbacks = object : RemoteCallbackList<ISagerNetServiceCallback>() {
-            override fun onCallbackDied(callback: ISagerNetServiceCallback?, cookie: Any?) {
-                super.onCallbackDied(callback, cookie)
-            }
-        }
+        private val callbacks = RemoteCallbackList<ISagerNetServiceCallback>()
 
         val callbackIdMap = ConcurrentHashMap<ISagerNetServiceCallback, Int>()
 
@@ -457,8 +453,8 @@ class BaseService {
             // Track the connect coroutine so stopRunner()/reload() can cancel an in-flight
             // start. Without this, data.connectingJob stays null and stopRunner's
             // cancelAndJoin() is a no-op: a superseded start's awaitExternalProcessesReady()
-            // keeps polling a now-killed sidecar port for its full (60s for MasterDnsVPN)
-            // window and then throws "sidecar listener not ready", surfacing a false
+            // keeps polling a now-killed sidecar port until its readiness deadline
+            // and then throws "sidecar listener not ready", surfacing a false
             // "connection failed" even though the live instance is already carrying traffic.
             data.connectingJob = runOnDefaultDispatcher {
                 try {

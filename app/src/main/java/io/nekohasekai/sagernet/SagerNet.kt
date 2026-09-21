@@ -13,7 +13,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.os.StrictMode
 import android.os.UserManager
-import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import go.Seq
@@ -58,6 +57,7 @@ class SagerNet :
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 
         if (isMainProcess || isBgProcess) {
+            updateNotificationChannels()
             externalAssets.mkdirs()
             Seq.setContext(this)
             // Prime the cached configurationStore off the main thread before the first
@@ -106,8 +106,6 @@ class SagerNet :
                 DefaultNetworkListener.start(this) {
                     underlyingNetwork = it
                 }
-
-                updateNotificationChannels()
             }
         }
 
@@ -193,37 +191,34 @@ class SagerNet :
 
         fun updateNotificationChannels() {
             if (Build.VERSION.SDK_INT >= 26) {
-                @RequiresApi(26)
-                {
-                    notification.createNotificationChannels(
-                        listOf(
-                            NotificationChannel(
-                                "service-vpn",
-                                application.getText(R.string.service_vpn),
-                                if (Build.VERSION.SDK_INT >= 28) {
-                                    NotificationManager.IMPORTANCE_MIN
-                                } else {
-                                    NotificationManager.IMPORTANCE_LOW
-                                },
-                            ), // #1355
-                            NotificationChannel(
-                                "service-proxy",
-                                application.getText(R.string.service_proxy),
-                                NotificationManager.IMPORTANCE_LOW,
-                            ),
-                            NotificationChannel(
-                                "service-subscription",
-                                application.getText(R.string.service_subscription),
-                                NotificationManager.IMPORTANCE_DEFAULT,
-                            ),
-                            NotificationChannel(
-                                "connection-test",
-                                application.getText(R.string.connection_test),
-                                NotificationManager.IMPORTANCE_DEFAULT,
-                            ),
+                notification.createNotificationChannels(
+                    listOf(
+                        NotificationChannel(
+                            "service-vpn",
+                            application.getText(R.string.service_vpn),
+                            if (Build.VERSION.SDK_INT >= 28) {
+                                NotificationManager.IMPORTANCE_MIN
+                            } else {
+                                NotificationManager.IMPORTANCE_LOW
+                            },
+                        ), // #1355
+                        NotificationChannel(
+                            "service-proxy",
+                            application.getText(R.string.service_proxy),
+                            NotificationManager.IMPORTANCE_LOW,
                         ),
-                    )
-                }
+                        NotificationChannel(
+                            "service-subscription",
+                            application.getText(R.string.service_subscription),
+                            NotificationManager.IMPORTANCE_DEFAULT,
+                        ),
+                        NotificationChannel(
+                            "connection-test",
+                            application.getText(R.string.connection_test),
+                            NotificationManager.IMPORTANCE_DEFAULT,
+                        ),
+                    ),
+                )
             }
         }
 

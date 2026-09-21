@@ -197,6 +197,8 @@ data class ProxyEntity(
         else -> true
     }
 
+    fun haveSettings() = ProtocolRegistry.forType(type)?.settingsActivityClass != null
+
     fun haveStandardLink(): Boolean {
         requireBean()
         return ProtocolRegistry.forType(type)!!.hasStandardLink
@@ -338,9 +340,8 @@ data class ProxyEntity(
         return this
     }
 
-    fun settingIntent(ctx: Context, isSubscription: Boolean): Intent {
-        val activityClass = ProtocolRegistry.forType(type)?.settingsActivityClass
-            ?: throw IllegalArgumentException("No settings activity for type $type")
+    fun settingIntent(ctx: Context, isSubscription: Boolean): Intent? {
+        val activityClass = ProtocolRegistry.forType(type)?.settingsActivityClass ?: return null
         return Intent(ctx, activityClass).apply {
             putExtra(ProfileSettingsActivity.EXTRA_PROFILE_ID, id)
             putExtra(ProfileSettingsActivity.EXTRA_IS_SUBSCRIPTION, isSubscription)

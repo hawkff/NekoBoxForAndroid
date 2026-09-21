@@ -70,8 +70,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     val pluginSignerApprovals: Set<String>
         get() = configurationStore.getStringSet(Key.PLUGIN_SIGNER_APPROVALS).orEmpty()
 
-    suspend fun approvePluginSigner(identity: String) =
-        configurationStore.addToStringSetDurable(Key.PLUGIN_SIGNER_APPROVALS, setOf(identity))
+    suspend fun approvePluginSigner(identity: String) = configurationStore.addToStringSetDurable(Key.PLUGIN_SIGNER_APPROVALS, setOf(identity))
 
     fun currentGroupId(): Long {
         val currentSelected = configurationStore.getLong(Key.PROFILE_GROUP, -1)
@@ -239,9 +238,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         }
     }
 
-    private fun getLocalPort(key: String, default: Int): Int {
-        return parsePort(configurationStore.getString(key), default + userIndex)
-    }
+    private fun getLocalPort(key: String, default: Int): Int = parsePort(configurationStore.getString(key), default + userIndex)
 
     private fun saveLocalPort(key: String, value: Int) {
         configurationStore.putString(key, "$value")
@@ -324,38 +321,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serverHy2GeckoMaxPacket by profileCacheStore.stringToInt(Key.SERVER_HY2_GECKO_MAX_PACKET) { 1200 }
     var serverHy2EchEnabled by profileCacheStore.boolean(Key.SERVER_HY2_ECH_ENABLED)
     var serverHy2EchConfig by profileCacheStore.string(Key.SERVER_HY2_ECH_CONFIG)
-
-    // MasterDnsVPN
-    var mdvDomains by profileCacheStore.string(Key.MDV_DOMAINS)
-    var mdvEncryptionMethod by profileCacheStore.stringToInt(Key.MDV_ENCRYPTION_METHOD) { 0 }
-    var mdvEncryptionKey by profileCacheStore.string(Key.MDV_ENCRYPTION_KEY)
-    var mdvResolvers by profileCacheStore.string(Key.MDV_RESOLVERS)
-    var mdvBalancingStrategy by profileCacheStore.stringToInt(Key.MDV_BALANCING_STRATEGY) { 3 }
-    var mdvPacketDup by profileCacheStore.stringToInt(Key.MDV_PACKET_DUP) { 3 }
-    var mdvSetupPacketDup by profileCacheStore.stringToInt(Key.MDV_SETUP_PACKET_DUP) { 4 }
-    var mdvAutoDisableTimeout by profileCacheStore.boolean(Key.MDV_AUTO_DISABLE_TIMEOUT)
-    var mdvAutoRemoveLowMtu by profileCacheStore.boolean(Key.MDV_AUTO_REMOVE_LOW_MTU)
-    var mdvBaseEncode by profileCacheStore.boolean(Key.MDV_BASE_ENCODE)
-    var mdvUploadCompression by profileCacheStore.stringToInt(Key.MDV_UPLOAD_COMPRESSION) { 0 }
-    var mdvDownloadCompression by profileCacheStore.stringToInt(Key.MDV_DOWNLOAD_COMPRESSION) { 0 }
-    var mdvCompressionMinSize by profileCacheStore.stringToInt(Key.MDV_COMPRESSION_MIN_SIZE) { 120 }
-    var mdvMinUploadMtu by profileCacheStore.stringToInt(Key.MDV_MIN_UPLOAD_MTU) { 38 }
-    var mdvMinDownloadMtu by profileCacheStore.stringToInt(Key.MDV_MIN_DOWNLOAD_MTU) { 200 }
-    var mdvMaxUploadMtu by profileCacheStore.stringToInt(Key.MDV_MAX_UPLOAD_MTU) { 150 }
-    var mdvMaxDownloadMtu by profileCacheStore.stringToInt(Key.MDV_MAX_DOWNLOAD_MTU) { 4000 }
-    var mdvLocalDnsEnabled by profileCacheStore.boolean(Key.MDV_LOCAL_DNS_ENABLED)
-    var mdvLocalDnsPort by profileCacheStore.stringToInt(Key.MDV_LOCAL_DNS_PORT) { 53 }
-    var mdvLogLevel by profileCacheStore.string(Key.MDV_LOG_LEVEL) { "INFO" }
-    var mdvAdvancedJson by profileCacheStore.string(Key.MDV_ADVANCED_JSON)
-
-    var olcrtcCarrier by profileCacheStore.string(Key.OLCRTC_CARRIER) { "jitsi" }
-    var olcrtcRoomId by profileCacheStore.string(Key.OLCRTC_ROOM_ID)
-    var olcrtcClientId by profileCacheStore.string(Key.OLCRTC_CLIENT_ID)
-    var olcrtcKeyHex by profileCacheStore.string(Key.OLCRTC_KEY_HEX)
-    var olcrtcTransport by profileCacheStore.string(Key.OLCRTC_TRANSPORT) { "vp8channel" }
-    var olcrtcVp8Fps by profileCacheStore.stringToInt(Key.OLCRTC_VP8_FPS) { 30 }
-    var olcrtcVp8Batch by profileCacheStore.stringToInt(Key.OLCRTC_VP8_BATCH) { 8 }
-    var olcrtcDnsServer by profileCacheStore.string(Key.OLCRTC_DNS_SERVER) { "" }
 
     var protocolVersion by profileCacheStore.stringToInt(Key.PROTOCOL_VERSION) { 2 } // default is SOCKS5
 
