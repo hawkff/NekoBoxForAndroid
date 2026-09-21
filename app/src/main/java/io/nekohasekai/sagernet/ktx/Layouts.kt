@@ -6,8 +6,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.nekohasekai.sagernet.database.DataStore
 
-class FixedLinearLayoutManager(val recyclerView: RecyclerView) :
-    LinearLayoutManager(recyclerView.context, RecyclerView.VERTICAL, false) {
+class FixedLinearLayoutManager(val recyclerView: RecyclerView) : LinearLayoutManager(recyclerView.context, RecyclerView.VERTICAL, false) {
 
     override fun onLayoutChildren(recycler: RecyclerView.Recycler?, state: RecyclerView.State?) {
         try {
@@ -67,8 +66,7 @@ class FixedLinearLayoutManager(val recyclerView: RecyclerView) :
     }
 }
 
-class FixedGridLayoutManager(val recyclerView: RecyclerView, spanCount: Int) :
-    GridLayoutManager(recyclerView.context, spanCount) {
+class FixedGridLayoutManager(val recyclerView: RecyclerView, spanCount: Int) : GridLayoutManager(recyclerView.context, spanCount) {
 
     override fun onLayoutChildren(recycler: RecyclerView.Recycler?, state: RecyclerView.State?) {
         try {
@@ -79,9 +77,7 @@ class FixedGridLayoutManager(val recyclerView: RecyclerView, spanCount: Int) :
 
     private var listenerDisabled = false
 
-    override fun supportsPredictiveItemAnimations(): Boolean {
-        return false
-    }
+    override fun supportsPredictiveItemAnimations(): Boolean = false
 
     override fun scrollVerticallyBy(dx: Int, recycler: RecyclerView.Recycler, state: RecyclerView.State): Int {
         // Matsuri style

@@ -322,8 +322,12 @@ class BackupFragment : NamedFragment(R.layout.layout_backup) {
                         Logs.d("WebDAV backup - PROPFIND response: ${response.code}")
                         when (response.code) {
                             404 -> needCreateDir = true
-                            207 -> needCreateDir = false // directory exists
+
+                            207 -> needCreateDir = false
+
+                            // directory exists
                             401 -> throw Exception("Authentication failed")
+
                             else -> {
                                 if (!response.isSuccessful) {
                                     Logs.e("WebDAV backup - PROPFIND failed: ${response.code} ${response.message}")

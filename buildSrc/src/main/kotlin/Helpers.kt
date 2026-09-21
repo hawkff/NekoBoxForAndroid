@@ -50,7 +50,7 @@ fun Project.requireLocalProperties(): Properties {
 
 fun Project.setupCommon() {
     android.apply {
-        buildToolsVersion = "36.0.0"
+        buildToolsVersion = "37.0.0"
         compileSdk {
             version = release(37) {
                 minorApiLevel = 2

@@ -6,7 +6,7 @@
 # This lets NekoBox run NaïveProxy profiles without installing the separate
 # external plugin (moe.matsuri.exe.naive). PluginManager.initNativeInternal
 # resolves "naive-plugin" -> libnaive.so from nativeLibraryDir, mirroring the
-# bundled Mieru / Hysteria mechanism, and falls back to the external APK plugin
+# bundled Mieru mechanism, and falls back to the external APK plugin
 # when the bundled binary is absent.
 #
 # Usage: ./run lib naive
@@ -16,11 +16,11 @@ set -o pipefail
 # Pinned naiveproxy release. The SHA256 values below are for the downloaded
 # plugin APKs for this exact version; update them in the same change as any
 # NAIVE_VERSION bump.
-NAIVE_VERSION="${NAIVE_VERSION:-v149.0.7827.114-1}"
-NAIVE_SHA256_ARM64_V8A="${NAIVE_SHA256_ARM64_V8A:-07f58c14849f3fb047d342fdc8e34d65a745a133f436469673f29624bba87f6a}"
-NAIVE_SHA256_ARMEABI_V7A="${NAIVE_SHA256_ARMEABI_V7A:-be0e126d2631a0a4c8f9140595243f51a8c676c0756deb67144677ebfe7d7202}"
-NAIVE_SHA256_X86="${NAIVE_SHA256_X86:-82a3b8ef29876ccaa6f7df4dc3dabfaa92eb954a7de8a3e0ff93f92afc17e9ca}"
-NAIVE_SHA256_X86_64="${NAIVE_SHA256_X86_64:-7957af60ac3bedaf6bd35c172297bd9e730b90ac25f6bd26fa19a4591ceec13a}"
+NAIVE_VERSION="${NAIVE_VERSION:-v150.0.7871.63-1}"
+NAIVE_SHA256_ARM64_V8A="${NAIVE_SHA256_ARM64_V8A:-733fbbbebb383a91f42036992c21cfd19b99e089ac3d15d7c077df79fc471a89}"
+NAIVE_SHA256_ARMEABI_V7A="${NAIVE_SHA256_ARMEABI_V7A:-d52b01d0a55cd0807fe196e72abd5aa4859a783798b1bc1b3cf1bfa9ad8f7ae4}"
+NAIVE_SHA256_X86="${NAIVE_SHA256_X86:-101d8e52c7473005b8ad072b7d446db624c76ba77ccce116564fadcc2cd4e0d7}"
+NAIVE_SHA256_X86_64="${NAIVE_SHA256_X86_64:-a6800d30bb70798d7b9ad3d0218469c58776c250b462926a7cc2e7795d915f78}"
 BASE="https://github.com/klzgrad/naiveproxy/releases/download/${NAIVE_VERSION}"
 
 OUT="$(pwd)/app/executableSo"

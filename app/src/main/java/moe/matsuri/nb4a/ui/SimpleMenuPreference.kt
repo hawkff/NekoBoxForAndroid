@@ -66,8 +66,7 @@ open class SimpleMenuPreference
         }
     }
 
-    private class SimpleMenuAdapter(context: Context, resource: Int) :
-        ArrayAdapter<CharSequence?>(context, resource) {
+    private class SimpleMenuAdapter(context: Context, resource: Int) : ArrayAdapter<CharSequence?>(context, resource) {
 
         var currentPosition = -1
 

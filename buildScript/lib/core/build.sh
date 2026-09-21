@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 source "buildScript/init/env.sh"
 export CGO_ENABLED=1

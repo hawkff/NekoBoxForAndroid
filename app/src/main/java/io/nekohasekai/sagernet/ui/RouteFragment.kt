@@ -25,7 +25,9 @@ import io.nekohasekai.sagernet.widget.ListListener
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
 
-class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItemClickListener {
+class RouteFragment :
+    ToolbarFragment(R.layout.layout_route),
+    Toolbar.OnMenuItemClickListener {
 
     lateinit var activity: MainActivity
     lateinit var ruleListView: RecyclerView
@@ -55,19 +57,17 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             ItemTouchHelper.START,
         ) {
 
-            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) =
-                if (viewHolder is RuleAdapter.DocumentHolder) {
-                    0
-                } else {
-                    super.getSwipeDirs(recyclerView, viewHolder)
-                }
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder is RuleAdapter.DocumentHolder) {
+                0
+            } else {
+                super.getSwipeDirs(recyclerView, viewHolder)
+            }
 
-            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) =
-                if (viewHolder is RuleAdapter.DocumentHolder) {
-                    0
-                } else {
-                    super.getDragDirs(recyclerView, viewHolder)
-                }
+            override fun getDragDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) = if (viewHolder is RuleAdapter.DocumentHolder) {
+                0
+            } else {
+                super.getDragDirs(recyclerView, viewHolder)
+            }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val index = viewHolder.bindingAdapterPosition
@@ -79,13 +79,11 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder,
-            ): Boolean {
-                return if (target is RuleAdapter.DocumentHolder) {
-                    false
-                } else {
-                    ruleAdapter.move(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
-                    true
-                }
+            ): Boolean = if (target is RuleAdapter.DocumentHolder) {
+                false
+            } else {
+                ruleAdapter.move(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                true
             }
 
             override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
@@ -107,6 +105,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             R.id.action_new_route -> {
                 startActivity(Intent(context, RouteSettingsActivity::class.java))
             }
+
             R.id.action_reset_route -> {
                 MaterialAlertDialogBuilder(activity).setTitle(R.string.confirm)
                     .setMessage(R.string.clear_profiles_message)
@@ -120,6 +119,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                     .setNegativeButton(R.string.no, null)
                     .show()
             }
+
             R.id.action_manage_assets -> {
                 startActivity(Intent(requireContext(), AssetsActivity::class.java))
             }
@@ -127,7 +127,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
         return true
     }
 
-    inner class RuleAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ProfileManager.RuleListener, UndoSnackbarManager.Interface<RuleEntity> {
+    inner class RuleAdapter :
+        RecyclerView.Adapter<RecyclerView.ViewHolder>(),
+        ProfileManager.RuleListener,
+        UndoSnackbarManager.Interface<RuleEntity> {
 
         val ruleList = ArrayList<RuleEntity>()
         suspend fun reload() {
@@ -145,12 +148,10 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             }
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-            return if (viewType == 0) {
-                DocumentHolder(LayoutEmptyRouteBinding.inflate(layoutInflater, parent, false))
-            } else {
-                RuleHolder(LayoutRouteItemBinding.inflate(layoutInflater, parent, false))
-            }
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder = if (viewType == 0) {
+            DocumentHolder(LayoutEmptyRouteBinding.inflate(layoutInflater, parent, false))
+        } else {
+            RuleHolder(LayoutRouteItemBinding.inflate(layoutInflater, parent, false))
         }
 
         override fun getItemViewType(position: Int): Int {
@@ -166,9 +167,7 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
             }
         }
 
-        override fun getItemCount(): Int {
-            return ruleList.size + 1
-        }
+        override fun getItemCount(): Int = ruleList.size + 1
 
         override fun getItemId(position: Int): Long {
             if (position == 0) return 0L
@@ -289,9 +288,15 @@ class RouteFragment : ToolbarFragment(R.layout.layout_route), Toolbar.OnMenuItem
                 // set text color based on route type
                 val ctx = itemView.context
                 val outboundColor = when (rule.outbound) {
-                    -2L -> ContextCompat.getColor(ctx, R.color.color_route_block) // block: red
-                    -1L -> ContextCompat.getColor(ctx, R.color.color_route_direct) // direct: green
-                    0L -> ctx.getColorAttr(R.attr.routeProxyColor) // proxy: blue/cyan
+                    -2L -> ContextCompat.getColor(ctx, R.color.color_route_block)
+
+                    // block: red
+                    -1L -> ContextCompat.getColor(ctx, R.color.color_route_direct)
+
+                    // direct: green
+                    0L -> ctx.getColorAttr(R.attr.routeProxyColor)
+
+                    // proxy: blue/cyan
                     else -> ContextCompat.getColor(ctx, R.color.color_route_config) // config: purple
                 }
                 routeOutbound.setTextColor(outboundColor)
