@@ -275,6 +275,7 @@ class ProtocolRegistryDispatchTest {
             assertEquals(type, restored.type)
             assertArrayEquals(bytes, KryoConverters.serialize(restored))
             assertFalse(restored.needExternal())
+            assertFalse(ProtocolRegistry.forType(type)!!.canBuild)
             assertFalse(restored.haveSettings())
             assertThrows(IllegalArgumentException::class.java) {
                 io.nekohasekai.sagernet.group.RawUpdater.requireUpdatableProfiles(listOf(restored))

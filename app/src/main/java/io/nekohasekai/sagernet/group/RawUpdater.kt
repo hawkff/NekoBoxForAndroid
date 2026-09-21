@@ -69,7 +69,7 @@ object RawUpdater : GroupUpdater() {
     }
 
     internal fun requireUpdatableProfiles(profiles: List<ProxyEntity>) {
-        require(profiles.all { it.haveSettings() }) { "Unsupported profile type" }
+        require(profiles.all { it.canBuild() }) { app.getString(R.string.profile_unsupported) }
     }
 
     @SuppressLint("Recycle")

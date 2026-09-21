@@ -1011,7 +1011,7 @@ class ConfigurationGroupFragment : Fragment() {
                 }
             }
 
-            if (!profile.haveSettings()) {
+            if (!profile.canBuild()) {
                 popup.menu.removeItem(R.id.action_config_export_clipboard)
                 popup.menu.removeItem(R.id.action_config_export_file)
             }

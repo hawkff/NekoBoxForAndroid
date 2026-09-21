@@ -199,6 +199,8 @@ data class ProxyEntity(
 
     fun haveSettings() = ProtocolRegistry.forType(type)?.settingsActivityClass != null
 
+    fun canBuild() = ProtocolRegistry.forType(type)?.canBuild == true
+
     fun haveStandardLink(): Boolean {
         requireBean()
         return ProtocolRegistry.forType(type)!!.hasStandardLink

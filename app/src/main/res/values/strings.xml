@@ -120,6 +120,7 @@
     <string name="connection_test_url">Connection Test URL</string>
     <!-- proxy category -->
     <string name="profile_name">Profile Name</string>
+    <string name="profile_unsupported">Unsupported profile type</string>
     <string name="server_address">Server</string>
     <string name="server_port">Remote Port</string>
     <string name="username">Username</string>

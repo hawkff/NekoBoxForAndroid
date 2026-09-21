@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.database
 
 import android.app.Activity
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
@@ -35,6 +36,7 @@ import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.v2ray.isTLS
 import io.nekohasekai.sagernet.fmt.v2ray.toUriVMessVLESSTrojan
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
+import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ui.profile.*
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSBean
 import moe.matsuri.nb4a.proxy.anytls.AnyTLSSettingsActivity
@@ -79,6 +81,7 @@ class ProtocolDescriptor(
     val needExternal: (ProxyEntity) -> Boolean = { false },
     /** Settings screen, or null for data-only entries. */
     val settingsActivityClass: Class<out Activity>?,
+    val canBuild: Boolean = true,
     /** Whether the protocol exposes a conventional share link. */
     val hasStandardLink: Boolean = true,
     /** Conventional share-link encoder; null preserves the universal-link fallback. */
@@ -287,8 +290,9 @@ object ProtocolRegistry {
             beanClass = MasterDnsVpnBean::class.java,
             getBean = { it.masterDnsVpnBean },
             setBean = { e, b -> e.masterDnsVpnBean = b as MasterDnsVpnBean? },
-            displayType = { "Unsupported" },
+            displayType = { app.getString(R.string.profile_unsupported) },
             settingsActivityClass = null,
+            canBuild = false,
             hasStandardLink = false,
         ),
         ProtocolDescriptor(
@@ -297,8 +301,9 @@ object ProtocolRegistry {
             beanClass = OlcrtcBean::class.java,
             getBean = { it.olcrtcBean },
             setBean = { e, b -> e.olcrtcBean = b as OlcrtcBean? },
-            displayType = { "Unsupported" },
+            displayType = { app.getString(R.string.profile_unsupported) },
             settingsActivityClass = null,
+            canBuild = false,
             hasStandardLink = false,
         ),
         ProtocolDescriptor(

@@ -6,7 +6,6 @@ import io.nekohasekai.sagernet.*
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.ProtocolRegistry
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyEntity.Companion.TYPE_CONFIG
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -517,7 +516,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
             profileList.forEachIndexed { index, proxyEntity ->
                 val bean = proxyEntity.requireBean()
-                require(ProtocolRegistry.forType(proxyEntity.type)?.settingsActivityClass != null) { "Unsupported profile type" }
+                require(proxyEntity.canBuild()) { SagerNet.application.getString(R.string.profile_unsupported) }
 
                 // tagOut: v2ray outbound tag for a profile
                 // profile2 (in) (global)   tag g-(id)

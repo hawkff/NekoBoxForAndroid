@@ -228,6 +228,19 @@ class HysteriaFmtTest {
     }
 
     @Test
+    fun hysteria1_preservesBothReceiveWindows() {
+        ConfigBuilderTestEnv.reset()
+        val bean = hysteria2Bean().apply {
+            protocolVersion = 1
+            streamReceiveWindow = 65_536
+            connectionReceiveWindow = 262_144
+        }
+        val outbound = buildSingBoxOutboundHysteriaBean(bean) as SingBoxOptions.Outbound_HysteriaOptions
+        assertEquals(65_536L, outbound.recv_window_conn)
+        assertEquals(262_144L, outbound.recv_window)
+    }
+
+    @Test
     fun hysteria1_ignoresEchFields() {
         val bean = hysteria2Bean().apply {
             protocolVersion = 1
