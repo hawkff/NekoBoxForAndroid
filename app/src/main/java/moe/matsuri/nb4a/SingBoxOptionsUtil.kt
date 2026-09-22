@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import moe.matsuri.nb4a.SingBoxOptions.RuleSet
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlin.Exception
 
 object SingBoxOptionsUtil {
@@ -152,7 +153,7 @@ fun generateRemoteRuleSet(url: String, ruleSets: MutableList<RuleSet>, updateInt
         RuleSet().apply {
             type = "remote"
             this.tag = tag
-            format = "binary"
+            format = if (url.toHttpUrlOrNull()?.pathSegments?.last()?.endsWith(".json", ignoreCase = true) == true) "source" else "binary"
             this.url = url
             update_interval = updateInterval
         },

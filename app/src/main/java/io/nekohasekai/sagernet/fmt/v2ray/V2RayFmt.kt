@@ -2,6 +2,8 @@ package io.nekohasekai.sagernet.fmt.v2ray
 
 import android.text.TextUtils
 import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonParser
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
@@ -39,6 +41,8 @@ data class VmessQRCode(
     var sni: String = "",
     var alpn: String = "",
     var fp: String = "",
+    var mode: String? = null,
+    var extra: JsonElement? = null,
 )
 
 fun StandardV2RayBean.isTLS(): Boolean = security == "tls"
@@ -135,7 +139,8 @@ fun parseV2Ray(link: String): StandardV2RayBean {
                 }
             }
 
-            "xhttp" -> {
+            "xhttp", "splithttp" -> {
+                bean.type = "xhttp"
                 url.queryParameter("host")?.let {
                     bean.host = it
                 }
@@ -177,6 +182,7 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
 
     type = url.queryParameter("type") ?: "tcp"
     if (type == "h2" || url.queryParameter("headerType") == "http") type = "http"
+    if (type == "splithttp") type = "xhttp"
 
     security = url.queryParameter("security")
     if (security.isNullOrBlank()) {
@@ -396,7 +402,13 @@ fun parseV2RayN(link: String): VMessBean {
     bean.encryption = vmessQRCode.scy
     bean.uuid = vmessQRCode.id
     bean.alterId = vmessQRCode.aid.toIntOrNull()
-    bean.type = vmessQRCode.net
+    bean.type = if (vmessQRCode.net == "splithttp") "xhttp" else vmessQRCode.net
+    if (bean.type == "xhttp") {
+        bean.xhttpMode = vmessQRCode.mode
+        vmessQRCode.extra?.takeUnless { it.isJsonNull }?.let {
+            bean.xhttpExtra = XhttpExtraConverter.xrayToSingBox(if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else it.toString())
+        }
+    }
     bean.host = vmessQRCode.host
     bean.path = vmessQRCode.path
     val headerType = vmessQRCode.type
@@ -462,7 +474,14 @@ fun VMessBean.toV2rayN(): String {
         port = bean.serverPort.toString()
         id = bean.uuid!!
         aid = bean.alterId.toString()
-        net = bean.type!!
+        net = if (bean.type == "splithttp") "xhttp" else bean.type!!
+        if (net == "xhttp") {
+            mode = bean.xhttpMode
+            if (!bean.xhttpExtra.isNullOrBlank()) {
+                val converted = XhttpExtraConverter.singBoxToXray(bean.xhttpExtra!!)
+                extra = runCatching { JsonParser.parseString(converted) }.getOrElse { com.google.gson.JsonPrimitive(converted) }
+            }
+        }
         host = bean.host!!
         path = bean.path!!
 
@@ -556,7 +575,8 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
             }
         }
 
-        "xhttp" -> {
+        "xhttp", "splithttp" -> {
+            builder.setQueryParameter("type", "xhttp")
             if (host!!.isNotBlank()) {
                 builder.addQueryParameter("host", host)
             }
@@ -704,59 +724,28 @@ fun buildSingBoxOutboundStreamSettings(bean: StandardV2RayBean): V2RayTransportO
             }
         }
 
-        "xhttp" -> {
+        "xhttp", "splithttp" -> {
             val baseConfig = V2RayTransportOptions_XHTTPOptions().apply {
                 type = "xhttp"
                 mode = bean.xhttpMode.takeIf { it!!.isNotBlank() } ?: "auto"
                 host = bean.host.takeIf { it!!.isNotBlank() }
                 path = bean.path.takeIf { it!!.isNotBlank() } ?: "/"
             }
-
-            // Merge xhttpExtra JSON config if present
-            if (bean.xhttpExtra!!.isNotBlank()) {
-                try {
-                    val gson = Gson()
-                    // Convert base config to JSON
-                    val baseJson = JSONObject(gson.toJson(baseConfig))
-                    // Parse extra config
-                    val extraJson = JSONObject(bean.xhttpExtra)
-                    // Merge extra fields into base config
-                    val allowedKeys = arrayOf(
-                        "download",
-                        "xmux",
-                        "headers",
-                        "x_padding_bytes",
-                        "no_grpc_header",
-                        "sc_max_each_post_bytes",
-                        "sc_min_posts_interval_ms",
-                        "x_padding_obfs_mode",
-                        "x_padding_key",
-                        "x_padding_header",
-                        "x_padding_placement",
-                        "x_padding_method",
-                        "uplink_http_method",
-                        "session_placement",
-                        "session_key",
-                        "seq_placement",
-                        "seq_key",
-                        "uplink_data_placement",
-                        "uplink_data_key",
-                        "uplink_chunk_size",
-                    )
-                    allowedKeys.forEach { key ->
-                        if (extraJson.has(key)) {
-                            baseJson.put(key, extraJson.get(key))
-                        }
-                    }
-                    // Convert merged JSON back to object
-                    return gson.fromJson(baseJson.toString(), V2RayTransportOptions_XHTTPOptions::class.java)
-                } catch (e: Exception) {
-                    // If parsing fails, return base config
-                    e.printStackTrace()
-                    return baseConfig
-                }
+            if (bean.xhttpExtra.isNullOrBlank()) return baseConfig
+            val extraJson = try {
+                JSONObject(bean.xhttpExtra!!)
+            } catch (_: Exception) {
+                error("Invalid XHTTP extra settings")
             }
-            return baseConfig
+            val coreExtra = XhttpExtraConverter.forCore(extraJson)
+            return try {
+                val gson = Gson()
+                val baseJson = JSONObject(gson.toJson(baseConfig))
+                coreExtra.keys().forEach { key -> baseJson.put(key, coreExtra.get(key)) }
+                gson.fromJson(baseJson.toString(), V2RayTransportOptions_XHTTPOptions::class.java)
+            } catch (_: Exception) {
+                error("Invalid XHTTP extra settings")
+            }
         }
     }
 

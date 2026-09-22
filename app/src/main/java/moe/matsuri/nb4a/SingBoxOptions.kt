@@ -1691,9 +1691,17 @@ class SingBoxOptions {
 
         @JvmField var no_grpc_header: JsonElement? = null
 
+        @JvmField var no_sse_header: JsonElement? = null
+
         @JvmField var sc_max_each_post_bytes: JsonElement? = null
 
         @JvmField var sc_min_posts_interval_ms: JsonElement? = null
+
+        @JvmField var sc_max_buffered_posts: JsonElement? = null
+
+        @JvmField var sc_stream_up_server_secs: JsonElement? = null
+
+        @JvmField var server_max_header_bytes: JsonElement? = null
 
         @JvmField var x_padding_obfs_mode: JsonElement? = null
 
