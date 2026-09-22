@@ -121,6 +121,7 @@
     <!-- proxy category -->
     <string name="profile_name">Profile Name</string>
     <string name="profile_unsupported">Unsupported profile type</string>
+    <string name="profile_archived">Archived profile</string>
     <string name="server_address">Server</string>
     <string name="server_port">Remote Port</string>
     <string name="username">Username</string>
@@ -248,7 +249,6 @@
     <string name="action_shadowsocksr" translatable="false">ShadowsocksR</string>
     <string name="action_vmess" translatable="false">VMess</string>
     <string name="action_trojan" translatable="false">Trojan</string>
-    <string name="action_trojan_go" translatable="false">Trojan Go</string>
     <string name="action_mieru" translatable="false">Mieru</string>
     <string name="action_naive" translatable="false">Naïve</string>
     <string name="action_anytls" translatable="false">AnyTLS</string>

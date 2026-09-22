@@ -26,7 +26,6 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            excludes += setOf("**/libmasterdnsvpn.so", "**/libolcrtc.so")
         }
     }
     sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")

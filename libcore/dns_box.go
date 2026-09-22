@@ -125,6 +125,12 @@ func (p *platformLocalDNSTransport) Exchange(ctx context.Context, message *mDNS.
 	}
 }
 
+func (p *platformLocalDNSTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	go func() { callback(p.Exchange(ctx, message)) }()
+}
+
+var _ adapter.DNSTransport = (*platformLocalDNSTransport)(nil)
+
 type Func interface {
 	Invoke() error
 }

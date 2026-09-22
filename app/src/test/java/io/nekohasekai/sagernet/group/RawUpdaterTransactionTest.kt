@@ -8,9 +8,9 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubscriptionBean
+import io.nekohasekai.sagernet.fmt.ArchivedBean
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.KryoConverters
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -130,7 +130,7 @@ class RawUpdaterTransactionTest {
     @Test
     fun dataOnlyRecords_rejectReconciliationWithoutChangingAnyRows() = runTest {
         withContext(Dispatchers.IO) {
-            val bean = MasterDnsVpnBean().applyDefaultValues().apply { name = "data-only" }
+            val bean = ArchivedBean(25, byteArrayOf(1, 2, 3)).applyDefaultValues()
             SagerDatabase.proxyDao.addProxy(ProxyEntity(groupId = group.id, userOrder = 30).putBean(bean))
             assertEquals(app.getString(R.string.profile_unsupported), assertRejected(validContent).message)
         }

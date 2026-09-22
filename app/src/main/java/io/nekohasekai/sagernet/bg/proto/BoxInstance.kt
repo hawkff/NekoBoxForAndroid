@@ -15,8 +15,6 @@ import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.mieru.buildMieruConfig
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.naive.buildNaiveConfig
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
-import io.nekohasekai.sagernet.fmt.trojan_go.buildTrojanGoConfig
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.plugin.PluginManager
 import kotlinx.coroutines.*
@@ -54,11 +52,6 @@ abstract class BoxInstance(val profile: ProxyEntity) : AbstractInstance {
         for ((chain) in config.externalIndex) {
             for ((port, profile) in chain) {
                 when (val bean = profile.requireBean()) {
-                    is TrojanGoBean -> {
-                        initPlugin("trojan-go-plugin")
-                        pluginConfigs[port] = bean.buildTrojanGoConfig(port)
-                    }
-
                     is MieruBean -> {
                         initPlugin("mieru-plugin")
                         pluginConfigs[port] = bean.buildMieruConfig(port)
@@ -92,13 +85,6 @@ abstract class BoxInstance(val profile: ProxyEntity) : AbstractInstance {
             for ((port, profile) in chain) {
                 val config = pluginConfigs[port].orEmpty()
                 when (val bean = profile.requireBean()) {
-                    is TrojanGoBean -> {
-                        val configFile = File(cacheDir, "trojan_go_${SystemClock.elapsedRealtime()}.json")
-                        configFile.writeText(config)
-                        cacheFiles.add(configFile)
-                        processes.start(listOf(initPlugin("trojan-go-plugin").path, "-config", configFile.absolutePath))
-                    }
-
                     is MieruBean -> {
                         val configFile = File(cacheDir, "mieru_${SystemClock.elapsedRealtime()}.json")
                         configFile.writeText(config)

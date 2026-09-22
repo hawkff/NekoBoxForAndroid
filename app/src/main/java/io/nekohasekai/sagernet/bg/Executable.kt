@@ -10,13 +10,9 @@ import java.io.IOException
 
 object Executable {
     private val EXECUTABLES = setOf(
-        "libtrojan.so",
-        "libtrojan-go.so",
         "libnaive.so",
         "libhysteria.so",
         "libmieru.so",
-        "libmasterdnsvpn.so",
-        "libolcrtc.so",
     )
 
     fun killAll(alsoKillBg: Boolean = false) {

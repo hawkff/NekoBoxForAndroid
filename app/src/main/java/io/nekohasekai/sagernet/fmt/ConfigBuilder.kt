@@ -347,7 +347,11 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
     val routeRules = mutableListOf<Rule>()
     val routeRuleSets = mutableListOf<RuleSet>()
     val dnsServers = mutableListOf<DNSServerOptions>()
-    val dnsRules = mutableListOf<DNSRule>()
+    val dnsRules = mutableListOf<DNSRule_DefaultOptions>()
+    val outboundHosts = linkedMapOf<SingBoxOption, String?>()
+    val mappingResolvers = linkedMapOf<Rule_DefaultOptions, String?>()
+    val directStrategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct"), ipv6Mode)
+    val remoteStrategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-remote"), ipv6Mode)
 
     return MyOptions().apply {
         if (!forTest) {
@@ -385,10 +389,12 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         val dns = DNSOptions().apply {
             servers = dnsServers
             rules = dnsRules
-            independent_cache = true
+            strategy = when (val selected = if (forTest) directStrategy else remoteStrategy) {
+                "ipv4_only" -> "prefer_ipv4"
+                "ipv6_only" -> "prefer_ipv6"
+                else -> selected
+            }
         }.also { dns = it }
-
-        fun autoDnsDomainStrategy(s: String): String? = autoDnsDomainStrategy(s, ipv6Mode)
 
         val inbounds = mutableListOf<Inbound>().also { inbounds = it }
 
@@ -462,6 +468,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
             // add concurrent dial setting
             concurrent_dial = DataStore.concurrentDial
+            default_domain_resolver = dnsResolver("dns-direct", directStrategy)
 
             // sing-box 1.13 moved sniffing + domain resolution off inbounds onto route
             // rule actions. Emit them first so behaviour matches the old inbound fields.
@@ -710,15 +717,14 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     } catch (_: Exception) {
                     }
 
-                    // domain_strategy
+                    // Keep chain server lookups off the proxy's DNS path.
                     pastEntity?.requireBean()?.apply {
                         // don't loopback
                         if (defaultServerDomainStrategy != "" && !serverAddress!!.isIpAddress()) {
                             domainListDNSDirectForce.add("full:$serverAddress")
                         }
                     }
-                    _hack_config_map["domain_strategy"] =
-                        if (forTest) "" else defaultServerDomainStrategy
+                    outboundHosts[this] = serverHostOf(bean)
 
                     _hack_config_map["tag"] = tagOut
 
@@ -780,6 +786,14 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                                     routeRules.add(
                                         Rule_DefaultOptions().apply {
                                             inbound = listOf(pastInboundTag)
+                                            action = "resolve"
+                                            strategy = if (forTest) null else defaultServerDomainStrategy
+                                            mappingResolvers[this] = serverHostOf(bean)
+                                        },
+                                    )
+                                    routeRules.add(
+                                        Rule_DefaultOptions().apply {
+                                            inbound = listOf(pastInboundTag)
                                             outbound = TAG_DIRECT
                                         },
                                     )
@@ -801,7 +815,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
         // build outbounds
         if (buildSelector) {
-            val list = group.id.let { SagerDatabase.proxyDao.getByGroup(it) }
+            val list = SagerDatabase.proxyDao.getByGroup(group.id).filter { it.canBuild() }
             list.forEach {
                 tagMap[it.id] = buildChain(it.id, it)
             }
@@ -982,11 +996,11 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                             }
 
                             -2L -> {
-                                dnsRule.server = "dns-block"
-                                dnsRule.disable_cache = true
+                                dnsRule.action = "predefined"
+                                dnsRule.rcode = "NOERROR"
                             }
                         }
-                        if (dnsRule.server != null) userDNSRuleList += dnsRule
+                        if (dnsRule.server != null || dnsRule.action != null) userDNSRuleList += dnsRule
                     }
 
                     outbound = when (val outId = rule.outbound) {
@@ -1082,45 +1096,24 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             }
         }
 
+        dnsServers.add(dnsServer("local", "dns-local", "dns-local"))
         dnsServers.add(
-            DNSServerOptions().apply {
-                address = "rcode://success"
-                tag = "dns-block"
-            },
+            dnsServer(
+                directDNS.firstOrNull() ?: throw Exception("No direct DNS, check your settings!"),
+                "dns-direct",
+                "dns-local",
+            ),
         )
-
-        dnsServers.add(
-            DNSServerOptions().apply {
-                address = "local"
-                tag = "dns-local"
-                detour = TAG_DIRECT
-            },
-        )
-
-        directDNS.firstOrNull().let {
+        // Typed DNS servers dial directly unless an explicit proxy detour is set.
+        if (!forTest) {
             dnsServers.add(
-                DNSServerOptions().apply {
-                    address = it ?: throw Exception("No direct DNS, check your settings!")
-                    tag = "dns-direct"
-                    detour = TAG_DIRECT
-                    address_resolver = "dns-local"
-                    strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct"))
-                },
+                dnsServer(
+                    remoteDns.firstOrNull() ?: throw Exception("No remote DNS, check your settings!"),
+                    "dns-remote",
+                    "dns-direct",
+                    mainProxyTag,
+                ),
             )
-        }
-
-        remoteDns.firstOrNull().let {
-            // Always use direct DNS for urlTest
-            if (!forTest) {
-                dnsServers.add(
-                    DNSServerOptions().apply {
-                        address = it ?: throw Exception("No remote DNS, check your settings!")
-                        tag = "dns-remote"
-                        address_resolver = "dns-direct"
-                        strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-remote"))
-                    },
-                )
-            }
         }
 
         dns.final_ = if (forTest) "dns-direct" else "dns-remote"
@@ -1168,16 +1161,12 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             )
             // FakeDNS obj
             if (useFakeDns) {
-                dns.fakeip = DNSFakeIPOptions().apply {
-                    enabled = true
-                    inet4_range = "198.18.0.0/15"
-                    inet6_range = "fc00::/18"
-                }
                 dnsServers.add(
                     DNSServerOptions().apply {
-                        address = "fakeip"
+                        type = "fakeip"
                         tag = "dns-fake"
-                        strategy = "ipv4_only"
+                        inet4_range = "198.18.0.0/15"
+                        inet6_range = "fc00::/18"
                     },
                 )
                 dnsRules.add(
@@ -1219,14 +1208,6 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     },
                 )
             }
-            // avoid loopback
-            dnsRules.add(
-                0,
-                DNSRule_DefaultOptions().apply {
-                    outbound = mutableListOf("any")
-                    server = "dns-direct"
-                },
-            )
             // force bypass (always top DNS rule)
             if (domainListDNSDirectForce.isNotEmpty()) {
                 dnsRules.add(
@@ -1251,18 +1232,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 if (hosts.isNullOrEmpty()) return@forEach
 
                 val serverTag = "dns-sub-$gid"
-                dnsServers.add(
-                    DNSServerOptions().apply {
-                        address = resolver
-                        tag = serverTag
-                        detour = TAG_DIRECT
-                        address_resolver = "dns-local"
-                        // Reached via direct detour, so use the direct domain strategy (like
-                        // dns-direct), not the server strategy (the tag would otherwise fall into
-                        // the "server" arm of domainStrategy).
-                        strategy = autoDnsDomainStrategy(SingBoxOptionsUtil.domainStrategy("dns-direct"))
-                    },
-                )
+                dnsServers.add(dnsServer(resolver, serverTag, "dns-local"))
                 dnsRules.add(
                     0,
                     DNSRule_DefaultOptions().apply {
@@ -1271,6 +1241,35 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     },
                 )
             }
+        }
+
+        fun resolverFor(host: String?): String {
+            if (host != null && isExclusiveCustomHost(host)) {
+                perGroupServerHosts.entries.firstOrNull { host in it.value }?.let { return "dns-sub-${it.key}" }
+            }
+            return "dns-direct"
+        }
+        outboundHosts.forEach { (outbound, host) ->
+            val strategy = if (forTest) null else SingBoxOptionsUtil.domainStrategy("server")
+            // A chain with as-is resolution must still pass hostnames to its next hop.
+            if (outbound._hack_config_map["detour"] == null || !strategy.isNullOrEmpty()) {
+                outbound._hack_config_map["domain_resolver"] = dnsResolver(resolverFor(host), strategy?.takeIf { it.isNotEmpty() } ?: directStrategy).asMap()
+            }
+        }
+        mappingResolvers.forEach { (rule, host) -> rule.server = resolverFor(host) }
+
+        val finalStrategy = if (forTest) directStrategy else remoteStrategy
+        if (finalStrategy == "ipv4_only" || finalStrategy == "ipv6_only") {
+            dnsRules.add(DNSRule_DefaultOptions().apply { server = dns.final_ })
+        }
+        dns.rules = dnsRules.flatMap { rule ->
+            val strategy = when {
+                rule.server == "dns-fake" -> "ipv4_only"
+                rule.server == "dns-direct" || rule.server?.startsWith("dns-sub-") == true -> directStrategy
+                rule.server == "dns-remote" -> remoteStrategy
+                else -> null
+            }
+            dnsFamilyRules(rule, strategy)
         }
 
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig

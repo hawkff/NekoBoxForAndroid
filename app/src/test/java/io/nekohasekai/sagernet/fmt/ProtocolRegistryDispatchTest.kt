@@ -8,10 +8,8 @@ import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.hysteria.toUri
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
-import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.toUri
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
@@ -20,7 +18,6 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.socks.toUri
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.v2ray.toUriVMessVLESSTrojan
@@ -42,6 +39,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
+import java.util.Base64
 
 /**
  * Wire-format safety net for the protocol descriptor registry (Plan 029, Option C).
@@ -133,11 +132,6 @@ class ProtocolRegistryDispatchTest {
         serverPort = 443
         password = "p"
     }
-    private fun trojanGo() = TrojanGoBean().apply {
-        serverAddress = "192.0.2.7"
-        serverPort = 443
-        password = "p"
-    }
     private fun mieru() = MieruBean().apply {
         serverAddress = "192.0.2.8"
         serverPort = 4443
@@ -194,14 +188,6 @@ class ProtocolRegistryDispatchTest {
         serverPort = 443
         psk = "k"
     }
-    private fun masterDnsVpn() = MasterDnsVpnBean().apply {
-        serverAddress = "192.0.2.19"
-        serverPort = 443
-    }
-    private fun olcrtc() = OlcrtcBean().apply {
-        serverAddress = "192.0.2.20"
-        serverPort = 443
-    }
     private fun chain() = ChainBean().apply { name = "chain" }
     private fun config() = ConfigBean().apply { name = "config" }
 
@@ -212,7 +198,6 @@ class ProtocolRegistryDispatchTest {
         ssr() to ProxyEntity.TYPE_SSR,
         vmess() to ProxyEntity.TYPE_VMESS,
         trojan() to ProxyEntity.TYPE_TROJAN,
-        trojanGo() to ProxyEntity.TYPE_TROJAN_GO,
         mieru() to ProxyEntity.TYPE_MIERU,
         naive() to ProxyEntity.TYPE_NAIVE,
         hysteria() to ProxyEntity.TYPE_HYSTERIA,
@@ -224,11 +209,52 @@ class ProtocolRegistryDispatchTest {
         shadowTls() to ProxyEntity.TYPE_SHADOWTLS,
         anyTls() to ProxyEntity.TYPE_ANYTLS,
         snell() to ProxyEntity.TYPE_SNELL,
-        masterDnsVpn() to ProxyEntity.TYPE_MASTERDNSVPN,
-        olcrtc() to ProxyEntity.TYPE_OLCRTC,
         chain() to ProxyEntity.TYPE_CHAIN,
         config() to ProxyEntity.TYPE_CONFIG,
     )
+
+    @Test
+    fun nativeProtocolConfigurationsUseTheApplicationBuilder() {
+        ConfigBuilderTestEnv.reset()
+        val directory = File("build/generated-core-configs/protocols").apply { mkdirs() }
+        val key = Base64.getEncoder().encodeToString(ByteArray(32) { 1 })
+        val beans = allBeans.map { it.first }.filterNot { it is ChainBean || it is ConfigBean }.toMutableList()
+        beans += (1..5).map { version -> snell().apply { this.version = version } }
+        beans += snell().apply {
+            version = 5
+            network = "udp"
+        }
+        beans += hysteria().apply { protocolVersion = 1 }
+        beans += hysteria().apply { protocolVersion = 2 }
+        beans += listOf("tcp", "ws", "http", "grpc", "xhttp").map { transport ->
+            vmess().apply {
+                alterId = -1
+                type = transport
+                security = "tls"
+                sni = "example.invalid"
+            }
+        }
+        for ((index, bean) in beans.withIndex()) {
+            bean.initializeDefaultValues()
+            when (bean) {
+                is WireGuardBean -> {
+                    bean.localAddress = "192.0.2.100/32"
+                    bean.privateKey = key
+                    bean.peerPublicKey = key
+                }
+
+                is AmneziaWGBean -> {
+                    bean.localAddress = "192.0.2.100/32"
+                    bean.privateKey = key
+                    bean.peerPublicKey = key
+                }
+            }
+            val profile = ProxyEntity(id = index + 1L).putBean(bean)
+            if (profile.needExternal()) continue
+            val config = ConfigBuilderTestEnv.io { buildConfig(profile, forTest = true).config }
+            directory.resolve("$index-${bean.javaClass.simpleName}.json").writeText(config)
+        }
+    }
 
     @Test
     fun everyBean_roundTripIsByteStable() {
@@ -267,7 +293,8 @@ class ProtocolRegistryDispatchTest {
     @Test
     fun dataOnlyEntriesKeepTheirBytesWithoutAnExecutionPath() {
         ConfigBuilderTestEnv.reset()
-        for ((bean, type) in allBeans.filter { ProtocolRegistry.forType(it.second)!!.settingsActivityClass == null }) {
+        for (type in listOf(7, 25, 27, 9997)) {
+            val bean = ArchivedBean(type, byteArrayOf(1, 0, -1, 42))
             bean.initializeDefaultValues()
             val profile = ProxyEntity().putBean(bean)
             val bytes = KryoConverters.serialize(profile)
@@ -275,7 +302,7 @@ class ProtocolRegistryDispatchTest {
             assertEquals(type, restored.type)
             assertArrayEquals(bytes, KryoConverters.serialize(restored))
             assertFalse(restored.needExternal())
-            assertFalse(ProtocolRegistry.forType(type)!!.canBuild)
+            assertFalse(restored.canBuild())
             assertFalse(restored.haveSettings())
             assertThrows(IllegalArgumentException::class.java) {
                 io.nekohasekai.sagernet.group.RawUpdater.requireUpdatableProfiles(listOf(restored))
@@ -297,7 +324,6 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SSR to ShadowsocksRSettingsActivity::class.java,
             ProxyEntity.TYPE_VMESS to VMessSettingsActivity::class.java,
             ProxyEntity.TYPE_TROJAN to TrojanSettingsActivity::class.java,
-            ProxyEntity.TYPE_TROJAN_GO to TrojanGoSettingsActivity::class.java,
             ProxyEntity.TYPE_MIERU to MieruSettingsActivity::class.java,
             ProxyEntity.TYPE_NAIVE to NaiveSettingsActivity::class.java,
             ProxyEntity.TYPE_HYSTERIA to HysteriaSettingsActivity::class.java,
@@ -311,8 +337,6 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_CHAIN to ChainSettingsActivity::class.java,
             ProxyEntity.TYPE_CONFIG to ConfigSettingActivity::class.java,
             ProxyEntity.TYPE_SNELL to SnellSettingsActivity::class.java,
-            ProxyEntity.TYPE_MASTERDNSVPN to null,
-            ProxyEntity.TYPE_OLCRTC to null,
         )
         val nonStandardLinkTypes = setOf(
             ProxyEntity.TYPE_SSH,
@@ -320,8 +344,6 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_AWG,
             ProxyEntity.TYPE_SHADOWTLS,
             ProxyEntity.TYPE_CONFIG,
-            ProxyEntity.TYPE_MASTERDNSVPN,
-            ProxyEntity.TYPE_OLCRTC,
         )
         val dedicatedStandardLinkTypes = setOf(
             ProxyEntity.TYPE_SOCKS,
@@ -330,7 +352,6 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SSR,
             ProxyEntity.TYPE_VMESS,
             ProxyEntity.TYPE_TROJAN,
-            ProxyEntity.TYPE_TROJAN_GO,
             ProxyEntity.TYPE_NAIVE,
             ProxyEntity.TYPE_HYSTERIA,
             ProxyEntity.TYPE_TUIC,
@@ -339,7 +360,7 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SNELL,
         )
 
-        assertEquals(22, allBeans.size)
+        assertEquals(19, allBeans.size)
         assertEquals(allBeans.map { it.second }.toSet(), settingsActivities.keys)
         for ((_, type) in allBeans) {
             val descriptor = ProtocolRegistry.forType(type)!!

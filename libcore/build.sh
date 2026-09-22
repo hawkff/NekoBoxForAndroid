@@ -15,7 +15,8 @@ if [ -z "$GOPATH" ]; then
   GOPATH=$(go env GOPATH)
 fi
 
-export GOBIND=gobind-matsuri
+tool_dir="$GOPATH/bin/nekobox-mobile"
+export PATH="$tool_dir:$PATH"
 
 # Inject the real sing-box version so the About screen shows it instead of "unknown".
 # gomobile bind does not reliably forward `-ldflags -X` to the gobind-generated package
@@ -105,7 +106,7 @@ go test -tags="$PRODUCTION_TAGS" ./... || exit 1
 # 16 KB page alignment (issue #1125): Android 15+ may use 16 KB memory pages, which
 # requires native .so LOAD segments aligned to 16384. Force the external linker to use a
 # 16 KB max/common page size so libgojni.so is aligned regardless of the gomobile/Go default.
-"$GOPATH"/bin/gomobile-matsuri bind -v -androidapi 21 -cache "$(realpath $BUILD)" -trimpath -ldflags='-s -w -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' -tags="$PRODUCTION_TAGS" . || exit 1
+"$tool_dir/gomobile" bind -v -androidapi 21 -trimpath -ldflags='-s -w -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' -tags="$PRODUCTION_TAGS" . || exit 1
 rm -r libcore-sources.jar
 
 proj=../app/libs

@@ -13,11 +13,9 @@ import io.nekohasekai.sagernet.fmt.hysteria.toUri
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
 import io.nekohasekai.sagernet.fmt.juicity.toUri
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.naive.toUri
-import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.toUri
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
@@ -28,8 +26,6 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.socks.toUri
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
-import io.nekohasekai.sagernet.fmt.trojan_go.toUri
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.tuic.toUri
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
@@ -153,17 +149,6 @@ object ProtocolRegistry {
             toStandardLink = { (it as TrojanBean).toUriVMessVLESSTrojan(true) },
         ),
         ProtocolDescriptor(
-            type = ProxyEntity.TYPE_TROJAN_GO,
-            deserialize = { KryoConverters.trojanGoDeserialize(it) },
-            beanClass = TrojanGoBean::class.java,
-            getBean = { it.trojanGoBean },
-            setBean = { e, b -> e.trojanGoBean = b as TrojanGoBean? },
-            displayType = { "Trojan-Go" },
-            needExternal = { true },
-            settingsActivityClass = TrojanGoSettingsActivity::class.java,
-            toStandardLink = { (it as TrojanGoBean).toUri() },
-        ),
-        ProtocolDescriptor(
             type = ProxyEntity.TYPE_MIERU,
             deserialize = { KryoConverters.mieruDeserialize(it) },
             beanClass = MieruBean::class.java,
@@ -285,28 +270,6 @@ object ProtocolRegistry {
             toStandardLink = { (it as SnellBean).toUri() },
         ),
         ProtocolDescriptor(
-            type = ProxyEntity.TYPE_MASTERDNSVPN,
-            deserialize = { KryoConverters.masterDnsVpnDeserialize(it) },
-            beanClass = MasterDnsVpnBean::class.java,
-            getBean = { it.masterDnsVpnBean },
-            setBean = { e, b -> e.masterDnsVpnBean = b as MasterDnsVpnBean? },
-            displayType = { app.getString(R.string.profile_unsupported) },
-            settingsActivityClass = null,
-            canBuild = false,
-            hasStandardLink = false,
-        ),
-        ProtocolDescriptor(
-            type = ProxyEntity.TYPE_OLCRTC,
-            deserialize = { KryoConverters.olcrtcDeserialize(it) },
-            beanClass = OlcrtcBean::class.java,
-            getBean = { it.olcrtcBean },
-            setBean = { e, b -> e.olcrtcBean = b as OlcrtcBean? },
-            displayType = { app.getString(R.string.profile_unsupported) },
-            settingsActivityClass = null,
-            canBuild = false,
-            hasStandardLink = false,
-        ),
-        ProtocolDescriptor(
             type = ProxyEntity.TYPE_AWG,
             deserialize = { KryoConverters.amneziaWGDeserialize(it) },
             beanClass = AmneziaWGBean::class.java,
@@ -338,6 +301,7 @@ object ProtocolRegistry {
 
     /** All typed-field setters, used by putBean to null out every field before assigning one. */
     fun clearAllBeans(entity: ProxyEntity) {
+        entity.archivedData = null
         for (d in descriptors) d.setBean(entity, null)
     }
 }

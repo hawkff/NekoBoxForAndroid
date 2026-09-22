@@ -1,7 +1,7 @@
 package moe.matsuri.nb4a
 
+import io.nekohasekai.sagernet.fmt.ArchivedBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
-import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import moe.matsuri.nb4a.proxy.config.ConfigBean
@@ -12,9 +12,9 @@ import org.junit.Test
 class DeduplicationTest {
 
     @Test
-    fun olcrtcDifferentRooms_areNotDuplicates() {
-        val first = olcrtc("standup-4821", "11".repeat(32))
-        val second = olcrtc("review-sync", "22".repeat(32))
+    fun archivedPayloads_areNotConflated() {
+        val first = ArchivedBean(25, byteArrayOf(1, 2, 3))
+        val second = ArchivedBean(25, byteArrayOf(1, 2, 4))
         val values = LinkedHashSet<Protocols.Deduplication>()
 
         assertTrue(values.add(wrap(first)))
@@ -81,15 +81,6 @@ class DeduplicationTest {
 
         assertTrue(values.add(wrap(socks)))
         assertTrue(values.add(wrap(http)))
-    }
-
-    private fun olcrtc(roomId: String, keyHex: String) = OlcrtcBean().apply {
-        serverAddress = "olcrtc"
-        serverPort = 1
-        this.roomId = roomId
-        clientId = "client-7"
-        this.keyHex = keyHex
-        initializeDefaultValues()
     }
 
     private fun socks(password: String) = SOCKSBean().apply {

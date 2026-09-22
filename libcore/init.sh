@@ -3,26 +3,19 @@ set -euo pipefail
 
 rm -rf .build
 GOPATH="${GOPATH:-$(go env GOPATH)}"
-GOMOBILE_COMMIT="${GOMOBILE_COMMIT:-17d6af34f6bd6d7e1e428e0c652c8b54a46bda4f}"
+GOMOBILE_COMMIT="${GOMOBILE_COMMIT:-9f03b8f25789099c5c8abef4a02085da783ba923}"
 toolchain="$GOMOBILE_COMMIT $(go env GOVERSION)"
-stamp="$GOPATH/bin/gomobile-matsuri.version"
+tool_dir="$GOPATH/bin/nekobox-mobile"
+stamp="$tool_dir/version"
 
-if [ ! -x "$GOPATH/bin/gomobile-matsuri" ] || [ ! -x "$GOPATH/bin/gobind-matsuri" ] ||
+if [ ! -x "$tool_dir/gomobile" ] || [ ! -x "$tool_dir/gobind" ] ||
     ! cmp -s <(printf '%s\n' "$toolchain") "$stamp"; then
-    source_dir="$(mktemp -d)"
-    trap 'rm -rf "$source_dir"' EXIT
-    git -C "$source_dir" init -q
-    git -C "$source_dir" remote add origin https://github.com/MatsuriDayo/gomobile.git
-    git -C "$source_dir" fetch --depth 1 origin "$GOMOBILE_COMMIT"
-    git -C "$source_dir" checkout -q FETCH_HEAD
-    (
-        cd "$source_dir"
-        GOBIN="$source_dir/bin" go install ./cmd/gomobile ./cmd/gobind
-    )
-    mkdir -p "$GOPATH/bin"
-    install -m 755 "$source_dir/bin/gomobile" "$GOPATH/bin/gomobile-matsuri"
-    install -m 755 "$source_dir/bin/gobind" "$GOPATH/bin/gobind-matsuri"
+    mkdir -p "$tool_dir"
+    GOBIN="$tool_dir" go install \
+        "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_COMMIT" \
+        "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_COMMIT"
     printf '%s\n' "$toolchain" > "$stamp"
 fi
 
-GOBIND="$GOPATH/bin/gobind-matsuri" "$GOPATH/bin/gomobile-matsuri" init
+# bind initializes its Android environment itself. `gomobile init` installs an
+# unpinned gobind@latest and is only needed here for optional OpenAL builds.

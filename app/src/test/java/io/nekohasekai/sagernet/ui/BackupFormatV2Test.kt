@@ -7,6 +7,8 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SubscriptionBean
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
+import io.nekohasekai.sagernet.fmt.ArchivedBean
+import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
 import org.json.JSONArray
@@ -66,6 +68,29 @@ class BackupFormatV2Test {
         assertEquals("pass", bean.password)
         assertEquals(2, bean.protocol)
         assertEquals("socks node", bean.name)
+    }
+
+    @Test
+    fun archivedProfileRoundTrip_preservesBytesAndStatistics() {
+        val payload = ByteArray(5000) { it.toByte() }
+        val profile = ProxyEntity(id = 31, groupId = 4, userOrder = 7, tx = 12, rx = 34, lifetimeTx = 1234, lifetimeRx = 5678)
+            .putBean(ArchivedBean(9001, payload))
+        val encoded = BackupFormatV2.encodeProfile(profile)
+        val restored = BackupFormatV2.decodeProfile(encoded)
+        assertEquals(profile.type, restored.type)
+        assertEquals(profile.id, restored.id)
+        assertEquals(profile.groupId, restored.groupId)
+        assertEquals(profile.userOrder, restored.userOrder)
+        assertEquals(profile.tx, restored.tx)
+        assertEquals(profile.rx, restored.rx)
+        assertEquals(profile.lifetimeTx, restored.lifetimeTx)
+        assertEquals(profile.lifetimeRx, restored.lifetimeRx)
+        org.junit.Assert.assertArrayEquals(payload, KryoConverters.serialize(restored.requireBean()))
+        encoded.remove("lifetimeTx")
+        encoded.remove("lifetimeRx")
+        val older = BackupFormatV2.decodeProfile(encoded)
+        assertEquals(0L, older.lifetimeTx)
+        assertEquals(0L, older.lifetimeRx)
     }
 
     @Test

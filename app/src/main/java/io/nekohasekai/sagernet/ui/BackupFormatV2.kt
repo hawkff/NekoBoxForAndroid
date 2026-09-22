@@ -46,6 +46,8 @@ internal object BackupFormatV2 {
         put("userOrder", profile.userOrder)
         put("tx", profile.tx)
         put("rx", profile.rx)
+        put("lifetimeTx", profile.lifetimeTx)
+        put("lifetimeRx", profile.lifetimeRx)
         put("status", profile.status)
         put("ping", profile.ping)
         put("uuid", profile.uuid)
@@ -61,6 +63,8 @@ internal object BackupFormatV2 {
         userOrder = json.getLong("userOrder"),
         tx = json.getLong("tx"),
         rx = json.getLong("rx"),
+        lifetimeTx = json.optLong("lifetimeTx", 0L),
+        lifetimeRx = json.optLong("lifetimeRx", 0L),
         status = json.getInt("status"),
         ping = json.getInt("ping"),
         uuid = json.getString("uuid"),

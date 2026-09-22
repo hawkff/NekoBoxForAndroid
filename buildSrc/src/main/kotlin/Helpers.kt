@@ -9,6 +9,7 @@ import org.gradle.api.provider.Property
 import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.getByName
 import org.gradle.kotlin.dsl.register
@@ -188,6 +189,13 @@ fun Project.setupApp() {
     }
     setupAppCommon()
 
+    val bundledExecutables = tasks.register<PrepareBundledExecutablesTask>("prepareBundledExecutables") {
+        from(layout.projectDirectory.dir("executableSo")) {
+            include("*/libmieru.so", "*/libnaive.so")
+        }
+        outputDirectory.set(layout.buildDirectory.dir("generated/bundledExecutables"))
+    }
+
     android.apply {
         buildTypes {
             getByName("release") {
@@ -227,10 +235,6 @@ fun Project.setupApp() {
                 dependsOn("assembleFdroidRelease")
             }
         }
-
-        sourceSets.getByName("main").apply {
-            jniLibs.directories.add("executableSo")
-        }
     }
 
     // APK output renaming. The legacy applicationVariants/BaseVariantOutputImpl API was removed in
@@ -239,6 +243,10 @@ fun Project.setupApp() {
     // The preview flavor uses PRE_VERSION_NAME to match the previous behaviour.
     val previewVersionName = requireMetadata().getProperty("PRE_VERSION_NAME")
     androidComponents.onVariants { variant ->
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(
+            bundledExecutables,
+            PrepareBundledExecutablesTask::outputDirectory,
+        )
         val shortcutResourcesTask = tasks.register<GenerateShortcutResourcesTask>(
             "generate${variant.name.replaceFirstChar { it.uppercase() }}ShortcutResources",
         ) {
@@ -266,6 +274,15 @@ fun Project.setupApp() {
         variant.artifacts.use(renameTask)
             .wiredWith { it.input }
             .toListenTo(SingleArtifact.APK)
+    }
+}
+
+abstract class PrepareBundledExecutablesTask : Sync() {
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    init {
+        into(outputDirectory)
     }
 }
 
