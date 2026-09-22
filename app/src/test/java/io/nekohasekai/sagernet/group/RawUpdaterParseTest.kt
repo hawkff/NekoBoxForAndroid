@@ -1,16 +1,23 @@
 package io.nekohasekai.sagernet.group
 
+import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
+import io.nekohasekai.sagernet.ktx.ImportTooLargeException
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.MAX_IMPORT_BYTES
+import io.nekohasekai.sagernet.ktx.SubscriptionFoundException
+import io.nekohasekai.sagernet.ktx.parseProxies
 import kotlinx.coroutines.test.runTest
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -130,6 +137,135 @@ class RawUpdaterParseTest {
     fun emptyInput_returnsNull() = runTest {
         assertNull(RawUpdater.parseRaw(""))
     }
+
+    @Test
+    fun commentHeaders_workOutsideAndInsideBase64WithBothAlphabets() = runTest {
+        val title = "Example подписка"
+        val links = "ss://aes-128-gcm:alpha@192.0.2.1:443#first\nsocks://192.0.2.2:1080#second"
+        val header = "\uFEFF # Profile-Title: base64:${encode(title)}\r\n" +
+            "# SUBSCRIPTION-USERINFO: upload=1; download=2; total=100\r\n" +
+            "#support-url: https://support.example/help\r\n" +
+            "#announce: clash://install-config?url=https://announcement.example/\r\n\r\n"
+        val inputs = listOf(
+            header + links,
+            header + encode(links).chunked(30).joinToString("\n# comment\n"),
+            encode(header + links),
+            Base64.getUrlEncoder().withoutPadding().encodeToString((header + links).toByteArray()),
+        )
+        for (input in inputs) {
+            val content = RawUpdater.readSubscriptionContent(input)
+            assertEquals(title, content.title)
+            assertEquals("upload=1; download=2; total=100", content.userinfo)
+            assertEquals(listOf("first", "second"), RawUpdater.parseRaw(input)!!.map { it.name })
+        }
+    }
+
+    @Test
+    fun comments_neverBecomeProfilesOrSubscriptionCandidates() = runTest {
+        val comments = """
+            # support-url: https://support.example/help
+              # announce: https://announcement.example/
+            # hidden-proxy: https://reader:password@192.0.2.3:443
+            # sn://subscription?url=https://ignored.example/
+            # clash://install-config?url=https://ignored.example/
+        """.trimIndent()
+        for (input in listOf(comments, encode(comments))) {
+            assertNull(RawUpdater.parseRaw(input))
+        }
+        assertTrue(parseProxies(comments).isEmpty())
+        assertEquals("kept", RawUpdater.parseRaw("$comments\nsocks://192.0.2.4:1080#kept")!!.single().name)
+    }
+
+    @Test
+    fun bodyMetadata_isPreambleOnlyAndOuterFirst() {
+        val inner = "#profile-title: Inner\n#subscription-userinfo: download=2\nsocks://192.0.2.4:1080#kept"
+        val content = RawUpdater.readSubscriptionContent("#profile-title: Outer\n#profile-title: Duplicate\n${encode(inner)}")
+        assertEquals("Outer", content.title)
+        assertEquals("download=2", content.userinfo)
+        assertNull(RawUpdater.readSubscriptionContent("socks://192.0.2.4:1080\n#profile-title: Late").title)
+        assertNull(RawUpdater.readSubscriptionContent("#profile-title:\n#support-url: https://support.example").title)
+    }
+
+    @Test
+    fun malformedOrEmptyBase64Titles_areIgnored() {
+        for (title in listOf("", "base64:", "base64:!!!", "base64:/w==", "base64:${encode("\n")}")) {
+            assertNull(RawUpdater.decodeProfileTitle(title))
+        }
+        assertEquals("Example", RawUpdater.decodeProfileTitle("  Example  "))
+        assertEquals("Example", RawUpdater.decodeProfileTitle("BASE64:${encode("Example")}"))
+        assertEquals("Fallback", RawUpdater.readSubscriptionContent("#profile-title: base64:!!!\n#profile-title: Fallback").title)
+    }
+
+    @Test
+    fun commentPrefixedStructuredFormats_preserveExistingParsers() = runTest {
+        for (fixtureName in listOf("clash-basic.yaml", "singbox-outbounds.json", "wireguard.conf")) {
+            val input = "#profile-title: Example\n#support-url: https://support.example\n${fixture(fixtureName)}"
+            val expected = RawUpdater.parseRaw(fixture(fixtureName))!!.map { it.javaClass }
+            assertEquals(expected, RawUpdater.parseRaw(input)!!.map { it.javaClass })
+            assertEquals(expected, RawUpdater.parseRaw(encode(input))!!.map { it.javaClass })
+        }
+    }
+
+    @Test
+    fun emptyAndWhollyMalformedStructuredInput_returnsNull() = runTest {
+        for (input in listOf("{}", "[]", "{\"outbounds\":[]}", "proxies: []", "proxies: [{type: unsupported}]", "proxies: [{type: socks5, port: invalid}]")) {
+            assertNull(input, RawUpdater.parseRaw(input))
+            assertNull(RawUpdater.parseRaw(encode(input)))
+        }
+        assertNull(RawUpdater.parseRaw("{\"outbounds\":[]} trailing"))
+    }
+
+    @Test
+    fun jsonArray_skipsMalformedEntriesAndKeepsValidOutbounds() = runTest {
+        val input = """[{"method":[]}, {"server":"192.0.2.9","server_port":1080,"type":"socks"}, false]"""
+        val bean = RawUpdater.parseRaw(input)!!.single() as ConfigBean
+        assertEquals("192.0.2.9", JSONObject(bean.config).getString("server"))
+    }
+
+    @Test
+    fun jsonEndpointValidation_preservesHysteriaPortStorage() = runTest {
+        for (input in listOf(
+            """{"server":"192.0.2.3:8443","up_mbps":10,"auth_str":"example"}""",
+            """{"server":"192.0.2.3:8443","auth":"example"}""",
+        )) {
+            val bean = RawUpdater.parseRaw(input)!!.single() as HysteriaBean
+            assertEquals("192.0.2.3", bean.serverAddress)
+            assertEquals("8443", bean.serverPorts)
+            assertEquals("", bean.customConfigJson)
+        }
+    }
+
+    @Test
+    fun parserFailures_doNotLogHeadersCredentialsOrYamlSnippets() = runTest {
+        val logs = mutableListOf<String>()
+        Logs.sink = { logs.add(it) }
+        val marker = "private-parser-marker"
+        val malformed = "proxies:\n  - type: socks5\n    server: $marker.example\n    port: $marker\n"
+        assertNull(RawUpdater.parseRaw("#profile-title: $marker\n$malformed"))
+        assertNull(RawUpdater.parseRaw("proxies: !!invalid.$marker {}"))
+        assertNull(RawUpdater.parseRaw("#profile-title: $marker\n${encode("{invalid $marker")}"))
+        assertFalse(logs.joinToString("\n").contains(marker))
+    }
+
+    @Test
+    fun parsingSingleSubscriptionUrl_doesNotFetchBeforeConfirmation() = runTest {
+        val failure = runCatching { RawUpdater.parseRaw("https://subscription.example/list") }.exceptionOrNull()
+        assertTrue(failure is SubscriptionFoundException)
+        val encodedFailure = runCatching { RawUpdater.parseRaw(encode("https://subscription.example/list")) }.exceptionOrNull()
+        assertTrue(encodedFailure is SubscriptionFoundException)
+    }
+
+    @Test
+    fun contentNormalization_preservesByteLimit() {
+        assertThrows(ImportTooLargeException::class.java) {
+            RawUpdater.readSubscriptionContent("#".repeat(MAX_IMPORT_BYTES.toInt() + 1))
+        }
+        assertThrows(ImportTooLargeException::class.java) {
+            RawUpdater.readSubscriptionContent("界".repeat(MAX_IMPORT_BYTES.toInt() / 3 + 1))
+        }
+    }
+
+    private fun encode(text: String) = Base64.getEncoder().encodeToString(text.toByteArray())
 
     private fun fixture(name: String) = requireNotNull(javaClass.getResource("/subscriptions/$name")).readText()
 }

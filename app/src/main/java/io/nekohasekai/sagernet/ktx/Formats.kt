@@ -96,9 +96,12 @@ fun String.decodeBase64UrlSafe(): String = String(Util.b64Decode(this))
 
 class SubscriptionFoundException(val link: String) : RuntimeException()
 
+internal fun String.linesNoComments(): List<String> = removePrefix("\uFEFF").lineSequence()
+    .map { it.trim() }.filterNot { it.startsWith('#') || it.isEmpty() }.toList()
+
 suspend fun parseProxies(text: String): List<AbstractBean> {
-    val links = text.split('\n').flatMap { it.trim().split(' ') }
-    val linksByLine = text.split('\n').map { it.trim() }
+    val linksByLine = text.linesNoComments()
+    val links = linksByLine.flatMap { it.split(' ') }
 
     val entities = ArrayList<AbstractBean>()
     val entitiesByLine = ArrayList<AbstractBean>()
