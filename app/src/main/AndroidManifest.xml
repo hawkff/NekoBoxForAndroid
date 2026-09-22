@@ -130,7 +130,6 @@
                 <data android:scheme="sock5" />
                 <data android:scheme="vmess" />
                 <data android:scheme="trojan" />
-                <data android:scheme="trojan-go" />
                 <data android:scheme="naive+https" />
                 <data android:scheme="naive+quic" />
                 <data android:scheme="hysteria" />
@@ -172,9 +171,6 @@
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.TrojanSettingsActivity"
-            android:configChanges="uiMode" />
-        <activity
-            android:name="io.nekohasekai.sagernet.ui.profile.TrojanGoSettingsActivity"
             android:configChanges="uiMode" />
         <activity
             android:name="io.nekohasekai.sagernet.ui.profile.MieruSettingsActivity"

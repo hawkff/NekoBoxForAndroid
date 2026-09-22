@@ -39,7 +39,7 @@ XHTTP / Reality config examples are below.
 
 ### ⚡ QUIC & high-speed
 
-`TUIC` · `Juicity` · `Hysteria 2`
+`TUIC 5` · `Juicity` · `Hysteria 2`
 
 The Hysteria 2 client supports Salamander and Gecko obfuscation.
 
@@ -58,7 +58,6 @@ The Hysteria 2 client supports Salamander and Gecko obfuscation.
 <br>
 
 - `Hysteria 1` - native over UDP; an external sidecar covers the rare faketcp transport
-- `Trojan-Go` - requires the separate `trojan-go-plugin` companion
 
 </details>
 

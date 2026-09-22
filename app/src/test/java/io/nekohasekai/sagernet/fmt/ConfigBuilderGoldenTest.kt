@@ -237,6 +237,17 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
+    fun selectorGroup_skipsArchivedEntriesWithoutDeletingThem() {
+        val group = addGroup(isSelector = true)
+        val active = addSocks(group, "192.0.2.42", 1080, "active")
+        val archived = addProfile(group, ArchivedBean(7, byteArrayOf(1, 2, 3)))
+        val result = build(active)
+        val selector = outbound(JSONObject(result.config), "selector")
+        assertEquals(listOf(result.profileTagMap.getValue(active.id)), strings(selector.getJSONArray("outbounds")))
+        assertTrue(ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(archived.id) } != null)
+    }
+
+    @Test
     fun selectorGroup_appliesSharedFrontAndLandingToEveryMemberChain() {
         val supportGroup = addGroup()
         val front = addSocks(supportGroup, "192.0.2.43", 1083, "selector-front")

@@ -126,10 +126,15 @@ class ConfigBuilderDnsRuleTest {
                 replaceRules(RuleEntity(outbound = outbound, packages = packages))
                 val rule = dnsRules().single { it.has("user_id") }
                 assertEquals(listOf(10001), values(rule.getJSONArray("user_id")))
-                assertEquals(server, rule.getString("server"))
+                if (outbound == -2L) {
+                    assertEquals("predefined", rule.getString("action"))
+                    assertEquals("NOERROR", rule.getString("rcode"))
+                    assertFalse(rule.has("server"))
+                } else {
+                    assertEquals(server, rule.getString("server"))
+                }
                 assertFalse(rule.has("domain"))
                 assertFalse(rule.has("rule_set"))
-                assertEquals(outbound == -2L, rule.optBoolean("disable_cache"))
                 if (fake && outbound == 0L) {
                     assertEquals(listOf("tun-in"), values(rule.getJSONArray("inbound")))
                     assertEquals(listOf("A", "AAAA"), values(rule.getJSONArray("query_type")))
@@ -193,10 +198,10 @@ class ConfigBuilderDnsRuleTest {
         val rules = dnsRules()
         assertEquals("dns-direct", rules.first().getString("server"))
         assertTrue(values(rules.first().getJSONArray("domain")).containsAll(listOf("server.example", "resolver.example")))
-        assertEquals(listOf("any"), values(rules[1].getJSONArray("outbound")))
-        assertEquals(listOf("dns-fake", "dns-direct", "dns-block"), rules.drop(2).dropLast(1).map { it.getString("server") })
-        assertEquals(listOf("geosite:category-anticensorship"), values(rules[2].getJSONArray("rule_set")))
-        assertEquals(listOf("geosite:cn"), values(rules[3].getJSONArray("rule_set")))
+        assertFalse(rules.any { it.has("outbound") })
+        assertEquals(listOf("dns-fake", "dns-direct", "predefined"), rules.drop(1).dropLast(1).map { it.optString("server", it.optString("action")) })
+        assertEquals(listOf("geosite:category-anticensorship"), values(rules[1].getJSONArray("rule_set")))
+        assertEquals(listOf("geosite:cn"), values(rules[2].getJSONArray("rule_set")))
         assertEquals("dns-fake", rules.last().getString("server"))
         assertEquals(listOf("A", "AAAA"), values(rules.last().getJSONArray("query_type")))
         DataStore.enableDnsRouting = false
@@ -221,9 +226,13 @@ class ConfigBuilderDnsRuleTest {
         assertEquals(tag, rules.first().getString("server"))
         assertEquals(listOf("server.example"), values(rules.first().getJSONArray("domain")))
         val server = objects(root.getJSONObject("dns").getJSONArray("servers")).single { it.optString("tag") == tag }
-        assertEquals("https://subscription-resolver.example/dns-query", server.getString("address"))
-        assertEquals(TAG_DIRECT, server.getString("detour"))
-        assertEquals("dns-local", server.getString("address_resolver"))
+        assertEquals("https", server.getString("type"))
+        assertEquals("subscription-resolver.example", server.getString("server"))
+        assertEquals("/dns-query", server.getString("path"))
+        assertFalse(server.has("detour"))
+        assertEquals("dns-local", server.getJSONObject("domain_resolver").getString("server"))
+        val outbound = objects(root.getJSONArray("outbounds")).single { it.optString("type") == "socks" }
+        assertEquals(tag, outbound.getJSONObject("domain_resolver").getString("server"))
         assertTrue(rules.indexOfFirst { it.has("user_id") } > 0)
         assertFalse(rules.filter { it.optString("server") == "dns-direct" }.any { it.optJSONArray("domain")?.toString()?.contains("server.example") == true })
     }
@@ -259,6 +268,7 @@ class ConfigBuilderDnsRuleTest {
 
     private fun build() = ConfigBuilderTestEnv.io { JSONObject(buildConfig(profile).config) }
     private fun dnsRules(root: JSONObject = build()) = objects(root.getJSONObject("dns").getJSONArray("rules"))
+        .filterNot { it.optString("action") == "predefined" && it.has("query_type") }
     private fun objects(array: JSONArray) = (0 until array.length()).map(array::getJSONObject)
     private fun values(array: JSONArray) = (0 until array.length()).map(array::get)
 }

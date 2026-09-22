@@ -14,7 +14,6 @@ import io.nekohasekai.sagernet.fmt.shadowsocksr.parseShadowsocksR
 import io.nekohasekai.sagernet.fmt.snell.parseSnell
 import io.nekohasekai.sagernet.fmt.socks.parseSOCKS
 import io.nekohasekai.sagernet.fmt.trojan.parseTrojan
-import io.nekohasekai.sagernet.fmt.trojan_go.parseTrojanGo
 import io.nekohasekai.sagernet.fmt.tuic.parseTuic
 import io.nekohasekai.sagernet.fmt.v2ray.parseV2Ray
 import moe.matsuri.nb4a.proxy.anytls.parseAnytls
@@ -171,13 +170,6 @@ suspend fun parseProxies(text: String): List<AbstractBean> {
                 entities.add(parseTrojan(this))
             }.onFailure {
                 Logs.w("Trojan parser rejected input")
-            }
-        } else if (startsWith("trojan-go://")) {
-            Logs.d("Trying Trojan-Go parser")
-            runCatching {
-                entities.add(parseTrojanGo(this))
-            }.onFailure {
-                Logs.w("Trojan-Go parser rejected input")
             }
         } else if (startsWith("ss://")) {
             Logs.d("Trying Shadowsocks parser")

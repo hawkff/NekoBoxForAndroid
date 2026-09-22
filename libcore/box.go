@@ -15,6 +15,7 @@ import (
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/boxapi"
 	"github.com/sagernet/sing-box/protocol/group"
 
@@ -85,7 +86,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx,
 		nekoboxAndroidInboundRegistry(), nekoboxAndroidOutboundRegistry(), nekoboxAndroidEndpointRegistry(),
-		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(),
+		nekoboxAndroidDNSTransportRegistry(localTransport), nekoboxAndroidServiceRegistry(), certificate.NewRegistry(),
 	)
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	ctx = service.ContextWith[adapter.PlatformInterface](ctx, newBoxPlatformInterfaceWrapper())
@@ -94,6 +95,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, []byte(config))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("decode config: %v", err)
 	}
 

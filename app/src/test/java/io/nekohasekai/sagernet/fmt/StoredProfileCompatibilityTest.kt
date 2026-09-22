@@ -21,6 +21,11 @@ import java.lang.reflect.Modifier
 @Config(application = Application::class, sdk = [35])
 class StoredProfileCompatibilityTest {
     private val gson = GsonBuilder().serializeNulls().disableHtmlEscaping().create()
+    private val archivedFixtureTypes = mapOf(
+        "io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean" to 7,
+        "io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean" to 25,
+        "io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean" to 27,
+    )
 
     private fun resource(name: String) = checkNotNull(javaClass.getResource("/profiles/$name")).readText()
     private fun String.bytes() = trim().chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -32,6 +37,15 @@ class StoredProfileCompatibilityTest {
             val fixture = entry.asJsonObject
             val name = fixture["name"].asString
             val bytes = fixture["hex"].asString.bytes()
+            val archivedType = archivedFixtureTypes[fixture["class"].asString]
+            if (archivedType != null) {
+                val archived = ArchivedBean(archivedType, bytes)
+                assertArrayEquals(name, bytes, KryoConverters.serialize(archived.clone()))
+                val restored = parseUniversal(archived.toUniversalLink()) as ArchivedBean
+                assertEquals(name, archivedType, restored.originalType)
+                assertArrayEquals(name, bytes, KryoConverters.serialize(restored))
+                continue
+            }
             val decoded = bean(fixture["class"].asString)
             ByteBufferInput(bytes).use { input ->
                 decoded.deserializeFromBuffer(input)
@@ -51,7 +65,12 @@ class StoredProfileCompatibilityTest {
         for (entry in JsonParser.parseString(resource("profiles.json")).asJsonArray) {
             val fixture = entry.asJsonObject
             val name = fixture["name"].asString
-            val instance = KryoConverters.deserialize(bean(fixture["class"].asString), fixture["hex"].asString.bytes())
+            val archivedType = archivedFixtureTypes[fixture["class"].asString]
+            val instance = if (archivedType != null) {
+                ArchivedBean(archivedType, fixture["hex"].asString.bytes())
+            } else {
+                KryoConverters.deserialize(bean(fixture["class"].asString), fixture["hex"].asString.bytes())
+            }
             val creator = instance.javaClass.getField("CREATOR").get(null) as Parcelable.Creator<*>
             val array = creator.newArray(2)
             assertEquals(name, 2, array.size)
@@ -61,8 +80,13 @@ class StoredProfileCompatibilityTest {
                 instance.writeToParcel(parcel, 0)
                 parcel.setDataPosition(0)
                 val restored = creator.createFromParcel(parcel) as Serializable
-                assertEquals(name, fixture["decoded"], gson.toJsonTree(restored))
-                assertArrayEquals(name, fixture["canonicalHex"].asString.bytes(), KryoConverters.serialize(restored))
+                if (archivedType != null) {
+                    assertEquals(name, archivedType, (restored as ArchivedBean).originalType)
+                    assertArrayEquals(name, fixture["hex"].asString.bytes(), KryoConverters.serialize(restored))
+                } else {
+                    assertEquals(name, fixture["decoded"], gson.toJsonTree(restored))
+                    assertArrayEquals(name, fixture["canonicalHex"].asString.bytes(), KryoConverters.serialize(restored))
+                }
             } finally {
                 parcel.recycle()
             }
@@ -70,10 +94,11 @@ class StoredProfileCompatibilityTest {
     }
 
     @Test
-    fun freshInstancesKeepNullableFieldsAndTheirOriginalDefaults() {
+    fun activeConstructorsKeepNullableFieldsAndTheirOriginalDefaults() {
         for (entry in JsonParser.parseString(resource("constructors.json")).asJsonArray) {
             val fixture = entry.asJsonObject
             val name = fixture["class"].asString
+            if (name in archivedFixtureTypes) continue
             val instance = bean(name)
             assertEquals(name, fixture["fresh"], gson.toJsonTree(instance))
             assertEquals(

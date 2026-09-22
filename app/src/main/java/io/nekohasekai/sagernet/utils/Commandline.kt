@@ -56,7 +56,7 @@ object Commandline {
                 "(?:conference|muc)\\.[^'\"]+(['\"])",
         ) to "\$1<redacted>\$2",
         Regex("(?i)((?:from|to)=['\"])[^'\"]+@[^'\"]+(['\"])") to "\$1<redacted>\$2",
-        Regex("(?i)\\bolcrtc://\\S+") to "<redacted>",
+        Regex("(?i)\\b(?!https?://)[a-z][a-z0-9+.-]*://\\S+") to "<redacted>",
         Regex("(?i)(colibri-ws=)\\S+") to "\$1<redacted>",
         Regex(
             "(?i)((?:room(?:\\s+(?:url|id))?|roomID|roomId)" +

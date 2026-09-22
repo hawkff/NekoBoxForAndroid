@@ -10,7 +10,6 @@ import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.isTLS
 import io.nekohasekai.sagernet.ktx.*
@@ -109,10 +108,6 @@ abstract class GroupUpdater {
                 }
 
                 is TrojanBean -> {
-                    if (sni!!.isBlank()) sni = bean.serverAddress
-                }
-
-                is TrojanGoBean -> {
                     if (sni!!.isBlank()) sni = bean.serverAddress
                 }
 

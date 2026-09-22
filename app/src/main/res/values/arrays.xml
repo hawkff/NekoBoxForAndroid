@@ -385,32 +385,6 @@
         <item>stream-one</item>
     </string-array>
 
-    <string-array name="trojan_go_networks_entry">
-        <item>NONE</item>
-        <item>WEBSOCKET</item>
-    </string-array>
-
-    <string-array name="trojan_go_networks_value">
-        <item>none</item>
-        <item>ws</item>
-    </string-array>
-
-    <string-array name="trojan_go_security_entry">
-        <item>NONE</item>
-        <item>SHADOWSOCKS</item>
-    </string-array>
-
-    <string-array name="trojan_go_security_value">
-        <item>none</item>
-        <item>ss</item>
-    </string-array>
-
-    <string-array name="trojan_go_methods">
-        <item>AES-128-GCM</item>
-        <item>AES-256-GCM</item>
-        <item>CHACHA20-IETF-POLY1305</item>
-    </string-array>
-
     <string-array name="vmess_encryption_value">
         <item>chacha20-poly1305</item>
         <item>aes-128-gcm</item>

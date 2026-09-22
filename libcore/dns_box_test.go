@@ -72,6 +72,29 @@ func TestPlatformLocalDNSTransportExchangeAAAA(t *testing.T) {
 	}
 }
 
+func TestPlatformLocalDNSTransportExchangeAsync(t *testing.T) {
+	transport := &platformLocalDNSTransport{iif: &successfulLookupTransport{result: "192.0.2.5"}}
+	request := new(mDNS.Msg)
+	request.SetQuestion("example.invalid.", mDNS.TypeA)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan *mDNS.Msg, 1)
+	transport.ExchangeAsync(ctx, request, func(response *mDNS.Msg, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+		done <- response
+	})
+	select {
+	case response := <-done:
+		if response == nil || len(response.Answer) != 1 {
+			t.Fatal("missing asynchronous response")
+		}
+	case <-ctx.Done():
+		t.Fatal("asynchronous exchange did not complete")
+	}
+}
+
 type successfulLookupTransport struct {
 	result string
 }

@@ -192,15 +192,13 @@ class SingBoxOptions {
     class DNSOptions : SingBoxOption() {
         @JvmField var servers: List<DNSServerOptions>? = null
 
-        @JvmField var rules: List<DNSRule>? = null
+        @JvmField var rules: List<SingBoxOption>? = null
 
         @SerializedName("final")
         @JvmField
         var final_: String? = null
 
         @JvmField var reverse_mapping: Boolean? = null
-
-        @JvmField var fakeip: DNSFakeIPOptions? = null
 
         @JvmField var strategy: String? = null
 
@@ -211,24 +209,26 @@ class SingBoxOptions {
         @JvmField var independent_cache: Boolean? = null
     }
 
-    class DNSServerOptions : SingBoxOption() {
-        @JvmField var tag: String? = null
-
-        @JvmField var address: String? = null
-
-        @JvmField var address_resolver: String? = null
-
-        @JvmField var address_strategy: String? = null
-
-        @JvmField var address_fallback_delay: Long? = null
+    class DomainResolveOptions : SingBoxOption() {
+        @JvmField var server: String? = null
 
         @JvmField var strategy: String? = null
-
-        @JvmField var detour: String? = null
     }
 
-    class DNSFakeIPOptions : SingBoxOption() {
-        @JvmField var enabled: Boolean? = null
+    class DNSServerOptions : SingBoxOption() {
+        @JvmField var type: String? = null
+
+        @JvmField var tag: String? = null
+
+        @JvmField var server: String? = null
+
+        @JvmField var server_port: Int? = null
+
+        @JvmField var path: String? = null
+
+        @JvmField var domain_resolver: DomainResolveOptions? = null
+
+        @JvmField var detour: String? = null
 
         @JvmField var inet4_range: String? = null
 
@@ -400,6 +400,8 @@ class SingBoxOptions {
         @JvmField var default_mark: Int? = null
 
         @JvmField var concurrent_dial: Boolean? = null
+
+        @JvmField var default_domain_resolver: DomainResolveOptions? = null
     }
 
     open class Rule : SingBoxOption() {
@@ -1620,7 +1622,9 @@ class SingBoxOptions {
 
         @JvmField var user_id: List<Int>? = null
 
-        @JvmField var outbound: List<String>? = null
+        @JvmField var action: String? = null
+
+        @JvmField var rcode: String? = null
 
         @JvmField var clash_mode: String? = null
 

@@ -7,17 +7,14 @@ import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
-import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
 import io.nekohasekai.sagernet.fmt.snell.SnellBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
@@ -97,10 +94,6 @@ object KryoConverters {
 
     @TypeConverter
     @JvmStatic
-    fun trojanGoDeserialize(bytes: ByteArray?): TrojanGoBean? = if (bytes.isNullOrEmpty()) null else deserialize(TrojanGoBean(), bytes)
-
-    @TypeConverter
-    @JvmStatic
     fun mieruDeserialize(bytes: ByteArray?): MieruBean? = if (bytes.isNullOrEmpty()) null else deserialize(MieruBean(), bytes)
 
     @TypeConverter
@@ -142,14 +135,6 @@ object KryoConverters {
     @TypeConverter
     @JvmStatic
     fun snellDeserialize(bytes: ByteArray?): SnellBean? = if (bytes.isNullOrEmpty()) null else deserialize(SnellBean(), bytes)
-
-    @TypeConverter
-    @JvmStatic
-    fun masterDnsVpnDeserialize(bytes: ByteArray?): MasterDnsVpnBean? = if (bytes.isNullOrEmpty()) null else deserialize(MasterDnsVpnBean(), bytes)
-
-    @TypeConverter
-    @JvmStatic
-    fun olcrtcDeserialize(bytes: ByteArray?): OlcrtcBean? = if (bytes.isNullOrEmpty()) null else deserialize(OlcrtcBean(), bytes)
 
     @TypeConverter
     @JvmStatic

@@ -15,7 +15,7 @@ import io.nekohasekai.sagernet.fmt.KryoConverters
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
-    version = 12,
+    version = 13,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -47,6 +47,7 @@ abstract class SagerDatabase : RoomDatabase() {
             SagerNet.application.getDatabasePath(Key.DB_PROFILE).parentFile?.mkdirs()
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
                 .setJournalMode(JournalMode.TRUNCATE)
+                .addMigrations(ProfileArchiveMigration)
                 // Plan 027 Stage 3: the main-thread-DB allowance is behind a build flag so it can
                 // be removed once the app runs StrictMode-clean (debug already ships with it off).
                 .apply { if (BuildConfig.ALLOW_MAIN_THREAD_DB) allowMainThreadQueries() }

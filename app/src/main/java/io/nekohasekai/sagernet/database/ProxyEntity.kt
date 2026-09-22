@@ -12,20 +12,16 @@ import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.*
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.juicity.JuicityBean
-import io.nekohasekai.sagernet.fmt.masterdnsvpn.MasterDnsVpnBean
 import io.nekohasekai.sagernet.fmt.mieru.MieruBean
 import io.nekohasekai.sagernet.fmt.mieru.buildMieruConfig
 import io.nekohasekai.sagernet.fmt.naive.NaiveBean
 import io.nekohasekai.sagernet.fmt.naive.buildNaiveConfig
-import io.nekohasekai.sagernet.fmt.olcrtc.OlcrtcBean
 import io.nekohasekai.sagernet.fmt.shadowsocks.*
 import io.nekohasekai.sagernet.fmt.shadowsocksr.ShadowsocksRBean
 import io.nekohasekai.sagernet.fmt.snell.SnellBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
-import io.nekohasekai.sagernet.fmt.trojan_go.TrojanGoBean
-import io.nekohasekai.sagernet.fmt.trojan_go.buildTrojanGoConfig
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.*
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
@@ -66,7 +62,6 @@ data class ProxyEntity(
     var ssrBean: ShadowsocksRBean? = null,
     var vmessBean: VMessBean? = null,
     var trojanBean: TrojanBean? = null,
-    var trojanGoBean: TrojanGoBean? = null,
     var mieruBean: MieruBean? = null,
     var naiveBean: NaiveBean? = null,
     var hysteriaBean: HysteriaBean? = null,
@@ -79,9 +74,8 @@ data class ProxyEntity(
     var chainBean: ChainBean? = null,
     var configBean: ConfigBean? = null,
     var snellBean: SnellBean? = null,
-    var masterDnsVpnBean: MasterDnsVpnBean? = null,
     var awgBean: AmneziaWGBean? = null,
-    var olcrtcBean: OlcrtcBean? = null,
+    var archivedData: ByteArray? = null,
 ) : Serializable() {
 
     companion object {
@@ -95,7 +89,6 @@ data class ProxyEntity(
         const val TYPE_SSH = 17
         const val TYPE_WG = 18
 
-        const val TYPE_TROJAN_GO = 7
         const val TYPE_NAIVE = 9
         const val TYPE_HYSTERIA = 15
         const val TYPE_SHADOWTLS = 19
@@ -104,11 +97,7 @@ data class ProxyEntity(
         const val TYPE_ANYTLS = 22
         const val TYPE_JUICITY = 23
         const val TYPE_SNELL = 24
-        const val TYPE_MASTERDNSVPN = 25
-
-        // Preserve these IDs for stored profiles.
         const val TYPE_AWG = 26
-        const val TYPE_OLCRTC = 27
 
         const val TYPE_CONFIG = 998
 
@@ -176,19 +165,22 @@ data class ProxyEntity(
     }
 
     fun putByteArray(byteArray: ByteArray) {
-        // Registry routes each persisted type id to the same KryoConverters.*Deserialize the
-        // historical when(type) ladder used and stores it in the matching typed field. An
-        // unknown/dead id is a no-op, matching the old ladder's absent else-branch.
-        ProtocolRegistry.forType(type)?.let { it.setBean(this, it.deserialize(byteArray)) }
+        val descriptor = ProtocolRegistry.forType(type)
+        if (descriptor == null) {
+            archivedData = byteArray.copyOf()
+        } else {
+            descriptor.setBean(this, descriptor.deserialize(byteArray))
+        }
     }
 
-    fun displayType(): String = ProtocolRegistry.forType(type)?.displayType?.invoke(this) ?: "Undefined type $type"
+    fun displayType(): String = ProtocolRegistry.forType(type)?.displayType?.invoke(this) ?: app.getString(R.string.profile_archived)
 
     fun displayName() = requireBean().displayName()
     fun displayAddress() = requireBean().displayAddress()
 
     fun requireBean(): AbstractBean {
-        val descriptor = ProtocolRegistry.forType(type) ?: error("Undefined type $type")
+        val descriptor = ProtocolRegistry.forType(type)
+            ?: return ArchivedBean(type, archivedData ?: byteArrayOf()).apply { initializeDefaultValues() }
         return descriptor.getBean(this) ?: error("Null ${displayType()} profile")
     }
 
@@ -203,12 +195,12 @@ data class ProxyEntity(
 
     fun haveStandardLink(): Boolean {
         requireBean()
-        return ProtocolRegistry.forType(type)!!.hasStandardLink
+        return ProtocolRegistry.forType(type)?.hasStandardLink == true
     }
 
     fun toStdLink(compact: Boolean = false): String {
         val bean = requireBean()
-        return ProtocolRegistry.forType(type)!!.toStandardLink?.invoke(bean) ?: bean.toUniversalLink()
+        return ProtocolRegistry.forType(type)?.toStandardLink?.invoke(bean) ?: bean.toUniversalLink()
     }
 
     fun exportConfig(): Pair<String, String> {
@@ -226,11 +218,6 @@ data class ProxyEntity(
                 for ((chain) in config.externalIndex) {
                     chain.entries.forEachIndexed { index, (port, profile) ->
                         when (val bean = profile.requireBean()) {
-                            is TrojanGoBean -> {
-                                append("\n\n")
-                                append(bean.buildTrojanGoConfig(port))
-                            }
-
                             is MieruBean -> {
                                 append("\n\n")
                                 append(bean.buildMieruConfig(port))
@@ -331,10 +318,13 @@ data class ProxyEntity(
     }
 
     fun putBean(bean: AbstractBean): ProxyEntity {
-        // Registry clears every typed field then assigns the one matching this bean's class and
-        // sets the corresponding type id - identical result to the historical null-out block +
-        // when(bean) ladder, but declared once per protocol. An unregistered bean class errors,
-        // matching the old else-branch.
+        if (bean is ArchivedBean) {
+            require(ProtocolRegistry.forType(bean.originalType) == null) { "Cannot archive an active profile type" }
+            ProtocolRegistry.clearAllBeans(this)
+            type = bean.originalType
+            archivedData = KryoConverters.serialize(bean)
+            return this
+        }
         ProtocolRegistry.clearAllBeans(this)
         val descriptor = ProtocolRegistry.forBean(bean) ?: error("Unregistered bean class ${bean.javaClass.simpleName}")
         type = descriptor.type
