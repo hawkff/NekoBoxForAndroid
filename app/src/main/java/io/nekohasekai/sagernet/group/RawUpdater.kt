@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SubscriptionFilterMode
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.fmt.AbstractBean
+import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
@@ -38,6 +39,7 @@ import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
 import org.yaml.snakeyaml.error.YAMLException
+import java.nio.ByteBuffer
 
 @Suppress("EXPERIMENTAL_API_USAGE")
 object RawUpdater : GroupUpdater() {
@@ -80,13 +82,11 @@ object RawUpdater : GroupUpdater() {
         byUser: Boolean,
     ) {
         val link = subscription.link
-        var proxies: List<AbstractBean>
         if (link!!.startsWith("content://")) {
-            val contentText = app.contentResolver.openInputStream(link!!.toUri())
+            val contentText = app.contentResolver.openInputStream(link.toUri())
                 ?.use { it.readTextBounded() }
-
-            proxies = contentText?.let { parseRaw(contentText) }
                 ?: error(app.getString(R.string.no_proxies_found_in_subscription))
+            updateFromContent(proxyGroup, subscription, contentText, userInterface, byUser)
         } else {
             val response = Libcore.newHttpClient().apply {
                 trySocks5(
@@ -105,30 +105,46 @@ object RawUpdater : GroupUpdater() {
                 setURL(subscription.link)
                 setUserAgent(subscription.customUserAgent.takeIf { it!!.isNotBlank() } ?: USER_AGENT)
             }.execute()
-            proxies = parseRaw(Util.getStringBox(response.getContentStringLimited(10L * 1024 * 1024)))
-                ?: error(app.getString(R.string.no_proxies_found))
-
-            subscription.subscriptionUserinfo =
-                Util.getStringBox(response.getHeader("Subscription-Userinfo"))
-
-            // modify the default name
-            if (proxyGroup.name?.startsWith("Subscription #") == true) {
-                var remoteName = Util.getStringBox(response.getHeader("content-disposition"))
-                if (remoteName.isNotBlank()) {
-                    remoteName = Util.decodeFilename(remoteName)
-                    if (remoteName.isNotBlank()) {
-                        proxyGroup.name = remoteName
-                    }
-                }
-            }
+            updateFromContent(
+                proxyGroup,
+                subscription,
+                Util.getStringBox(response.getContentStringLimited(MAX_IMPORT_BYTES)),
+                userInterface,
+                byUser,
+                Util.getStringBox(response.getHeader("Profile-Title")),
+                Util.getStringBox(response.getHeader("Subscription-Userinfo")),
+                Util.getStringBox(response.getHeader("Content-Disposition")),
+            )
         }
+    }
+
+    internal suspend fun updateFromContent(
+        proxyGroup: ProxyGroup,
+        subscription: SubscriptionBean,
+        text: String,
+        userInterface: GroupManager.Interface? = null,
+        byUser: Boolean = false,
+        httpTitle: String = "",
+        httpUserinfo: String? = null,
+        contentDisposition: String = "",
+    ) {
+        val content = readSubscriptionContent(text)
+        var proxies = parseRawContent(content.body)?.takeIf { it.isNotEmpty() }
+            ?: error(app.getString(R.string.no_proxies_found_in_subscription))
+
+        // Nonblank HTTP metadata wins. Titles fall back to Content-Disposition, then
+        // the body preamble. Missing usage clears on HTTP success, stays unchanged for files.
+        val remoteName = decodeProfileTitle(httpTitle)
+            ?: runCatching { Util.decodeFilename(contentDisposition).trim().takeIf { it.isNotEmpty() } }.getOrNull()
+            ?: content.title
+        val userinfo = httpUserinfo?.trim()?.takeIf { it.isNotEmpty() }
+            ?: content.userinfo ?: httpUserinfo ?: subscription.subscriptionUserinfo
 
         val proxiesMap = LinkedHashMap<String, AbstractBean>()
         for (proxy in proxies) {
             var index = 0
             var name = proxy.displayName()
             while (proxiesMap.containsKey(name)) {
-                println("Exists name: $name")
                 index++
                 name = name.replace(" (${index - 1})", "")
                 name = "$name ($index)"
@@ -143,13 +159,18 @@ object RawUpdater : GroupUpdater() {
         val filterMode = subscription.filterMode ?: SubscriptionFilterMode.DISABLED
         val filterRegex = subscription.filterRegex ?: ""
         if (filterMode != SubscriptionFilterMode.DISABLED && filterRegex.isNotBlank()) {
-            val regex = filterRegex.toRegex()
+            val regex = try {
+                filterRegex.toRegex()
+            } catch (_: IllegalArgumentException) {
+                error(app.getString(R.string.subscription_filter_invalid))
+            }
             proxies = when (filterMode) {
                 SubscriptionFilterMode.INCLUDE -> proxies.filter { regex.containsMatchIn(it.displayName()) }
                 SubscriptionFilterMode.EXCLUDE -> proxies.filterNot { regex.containsMatchIn(it.displayName()) }
                 else -> proxies
             }
             Logs.d("After filter (mode=$filterMode): ${proxies.size}")
+            check(proxies.isNotEmpty()) { app.getString(R.string.subscription_filter_empty) }
         }
 
         val exists = SagerDatabase.proxyDao.getByGroup(proxyGroup.id)
@@ -185,6 +206,7 @@ object RawUpdater : GroupUpdater() {
             proxies = uniqueProxies.toList().map { it.bean }
         }
 
+        check(proxies.isNotEmpty()) { app.getString(R.string.no_proxies_found_in_subscription) }
         Logs.d("New profiles: ${proxies.size}")
 
         val nameMap = proxies.associateBy { bean ->
@@ -228,13 +250,13 @@ object RawUpdater : GroupUpdater() {
                 if (reconciliation.contentChanged) {
                     changed++
                     updated[entity.displayName()] = name
-                    Logs.d("Updated profile: $name")
+                    Logs.d("Updated profile")
                 }
                 if (reconciliation.orderChanged) {
-                    Logs.d("Reordered profile: $name")
+                    Logs.d("Reordered profile")
                 }
                 if (!reconciliation.contentChanged && !reconciliation.orderChanged) {
-                    Logs.d("Ignored profile: $name")
+                    Logs.d("Ignored profile")
                 }
             } else {
                 changed++
@@ -250,9 +272,18 @@ object RawUpdater : GroupUpdater() {
                     },
                 )
                 added.add(name)
-                Logs.d("Inserted profile: $name")
+                Logs.d("Inserted profile")
             }
             userOrder++
+        }
+
+        val updatedSubscription = KryoConverters.deserialize(SubscriptionBean(), KryoConverters.serialize(subscription)).apply {
+            subscriptionUserinfo = userinfo
+            lastUpdated = (System.currentTimeMillis() / 1000).toInt()
+        }
+        val updatedGroup = proxyGroup.copy(subscription = updatedSubscription)
+        if (updatedGroup.name?.startsWith("Subscription #") == true && remoteName != null) {
+            updatedGroup.name = remoteName
         }
 
         var updatedCount = 0
@@ -275,9 +306,12 @@ object RawUpdater : GroupUpdater() {
                 error(message)
             }
 
-            subscription.lastUpdated = (System.currentTimeMillis() / 1000).toInt()
-            SagerDatabase.groupDao.updateGroup(proxyGroup)
+            SagerDatabase.groupDao.updateGroup(updatedGroup)
         }
+        // Publish metadata only after the profile transaction commits.
+        proxyGroup.name = updatedGroup.name
+        subscription.subscriptionUserinfo = updatedSubscription.subscriptionUserinfo
+        subscription.lastUpdated = updatedSubscription.lastUpdated
 
         Logs.d("Inserted profiles: ${toInsert.size}")
         Logs.d("Updated profiles: $updatedCount")
@@ -295,8 +329,63 @@ object RawUpdater : GroupUpdater() {
         )
     }
 
+    internal data class SubscriptionContent(val body: String, val title: String?, val userinfo: String?)
+
+    private fun decodeSubscriptionBase64(value: String): String? = try {
+        val encoded = value.filterNot { it.isWhitespace() }
+        if (encoded.isEmpty() || !encoded.matches("[A-Za-z0-9+/_-]+={0,2}".toRegex())) {
+            null
+        } else {
+            Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(Util.b64Decode(encoded))).toString()
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    internal fun decodeProfileTitle(value: String): String? {
+        val title = value.trim().let {
+            if (it.startsWith("base64:", ignoreCase = true)) {
+                decodeSubscriptionBase64(it.substringAfter(':')) ?: return null
+            } else {
+                it
+            }
+        }.trim()
+        return title.takeIf { it.isNotEmpty() && it.none(Char::isISOControl) }
+    }
+
+    private fun readPreamble(text: String): SubscriptionContent {
+        val lines = text.removePrefix("\uFEFF").lines()
+        var title: String? = null
+        var userinfo: String? = null
+        val preamble = lines.takeWhile { it.isBlank() || it.trimStart().startsWith('#') }
+        for (line in preamble) {
+            val header = line.trim().removePrefix("#").trim()
+            if (!header.contains(':')) continue
+            val value = header.substringAfter(':').trim()
+            when (header.substringBefore(':').trim().lowercase()) {
+                "profile-title" -> if (title == null) title = decodeProfileTitle(value)
+                "subscription-userinfo" -> if (userinfo == null) userinfo = value.takeIf { it.isNotEmpty() }
+            }
+        }
+        return SubscriptionContent(lines.drop(preamble.size).joinToString("\n"), title, userinfo)
+    }
+
+    internal fun readSubscriptionContent(text: String): SubscriptionContent {
+        if (text.length > MAX_IMPORT_BYTES || text.toByteArray(Charsets.UTF_8).size > MAX_IMPORT_BYTES) {
+            throw ImportTooLargeException(MAX_IMPORT_BYTES)
+        }
+        val outer = readPreamble(text)
+        val decoded = decodeSubscriptionBase64(outer.body.linesNoComments().joinToString("\n"))
+            ?: return outer
+        val inner = readPreamble(decoded)
+        // Decode one envelope only. Outer metadata takes precedence over encoded metadata.
+        return inner.copy(title = outer.title ?: inner.title, userinfo = outer.userinfo ?: inner.userinfo)
+    }
+
+    suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? = parseRawContent(readSubscriptionContent(text).body, fileName)
+
     @Suppress("UNCHECKED_CAST")
-    suspend fun parseRaw(text: String, fileName: String = ""): List<AbstractBean>? {
+    private suspend fun parseRawContent(text: String, fileName: String = ""): List<AbstractBean>? {
         val proxies = mutableListOf<AbstractBean>()
 
         if (text.contains("proxies:")) {
@@ -1035,7 +1124,7 @@ object RawUpdater : GroupUpdater() {
                     } catch (e: Exception) {
                         // Malformed node (e.g. a type-confused field): skip it and keep the
                         // rest of the subscription instead of failing the whole update.
-                        Logs.w("skipping malformed Clash node: ${e.readableMessage}", e)
+                        Logs.w("Skipping malformed Clash node")
                     }
                 }
 
@@ -1054,16 +1143,13 @@ object RawUpdater : GroupUpdater() {
                         }
                     }
                 }
-                return proxies
-            } catch (e: YAMLException) {
-                Logs.w(e)
-            } catch (e: Exception) {
-                // Defensive: a type-confused field could still produce a
-                // ClassCastException/NumberFormatException outside the per-entry guards
-                // above. Keep whatever was parsed rather than discarding it and falling
-                // through to the JSON/base64/plain-text branches.
-                Logs.w(e)
-                if (proxies.isNotEmpty()) return proxies
+                return proxies.takeIf { it.isNotEmpty() }
+            } catch (_: YAMLException) {
+                Logs.w("Subscription YAML rejected")
+                return null
+            } catch (_: Exception) {
+                Logs.w("Malformed subscription YAML")
+                return proxies.takeIf { it.isNotEmpty() }
             }
         } else if (text.contains("[Interface]")) {
             // amneziawg (wireguard with obfuscation params) or plain wireguard
@@ -1080,22 +1166,22 @@ object RawUpdater : GroupUpdater() {
                     },
                 )
                 return proxies
-            } catch (e: Exception) {
-                Logs.w(e)
+            } catch (_: Exception) {
+                Logs.w("Subscription INI rejected")
+                return null
             }
         }
 
-        try {
-            val json = JSONTokener(text).nextValue()
-            return parseJSON(json)
-        } catch (ignored: Exception) {
-        }
-
-        try {
-            return parseProxies(text.decodeBase64UrlSafe()).takeIf { it.isNotEmpty() }
-                ?: error("Not found")
-        } catch (e: Exception) {
-            Logs.w(e)
+        if (text.trimStart().startsWith('{') || text.trimStart().startsWith('[')) {
+            return try {
+                val tokener = JSONTokener(text)
+                val json = tokener.nextValue()
+                if (tokener.nextClean() != '\u0000') return null
+                parseJSON(json).takeIf { it.isNotEmpty() }
+            } catch (_: Exception) {
+                Logs.w("Subscription JSON rejected")
+                null
+            }
         }
 
         try {
@@ -1204,7 +1290,16 @@ object RawUpdater : GroupUpdater() {
         return beans
     }
 
-    fun parseJSON(json: Any): List<AbstractBean> {
+    fun parseJSON(json: Any): List<AbstractBean> = parseJSONValue(json).filter { bean ->
+        // Check before applying defaults: missing endpoints must not become localhost profiles.
+        val hasPort = if (bean is HysteriaBean) !bean.serverPorts.isNullOrBlank() else (bean.serverPort ?: 0) in 1..65535
+        bean is ConfigBean || (
+            !bean.serverAddress.isNullOrBlank() && hasPort &&
+                (bean !is ShadowsocksBean || !bean.method.isNullOrBlank())
+            )
+    }.onEach { it.initializeDefaultValues() }
+
+    private fun parseJSONValue(json: Any): List<AbstractBean> {
         val proxies = ArrayList<AbstractBean>()
 
         if (json is JSONObject) {
@@ -1266,13 +1361,16 @@ object RawUpdater : GroupUpdater() {
         } else {
             json as JSONArray
             json.forEach { _, it ->
-                if (isJsonObjectValid(it)) {
-                    proxies.addAll(parseJSON(it))
+                try {
+                    if (isJsonObjectValid(it)) {
+                        proxies.addAll(parseJSON(if (it is String) JSONTokener(it).nextValue() else it))
+                    }
+                } catch (_: Exception) {
+                    Logs.w("Skipping malformed JSON subscription entry")
                 }
             }
         }
 
-        proxies.forEach { it.initializeDefaultValues() }
         return proxies
     }
 }
