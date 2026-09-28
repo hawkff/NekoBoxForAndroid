@@ -16,6 +16,12 @@ jobs:
         run: bash ./scripts/check-lint-baseline.sh
       - name: Guard - release publication requires explicit opt-in
         run: bash scripts/check-release-publish-gate.sh --self-test
+      - name: Guard - AGENTS.md stays untracked
+        run: bash scripts/check-agents-untracked.sh
+      - name: Guard - no SharedPreferences in app code
+        run: bash scripts/check-no-shared-prefs.sh
+      - name: Guard - native toolchain init caching and failure propagation
+        run: bash scripts/check-native-init.sh
   test:
     name: Unit Tests
     runs-on: namespace-profile-nekoyay
