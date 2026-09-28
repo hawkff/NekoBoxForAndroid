@@ -116,6 +116,31 @@
     </PreferenceScreen>
 
     <PreferenceScreen
+        app:icon="@drawable/ic_baseline_security_24"
+        app:key="screen_protection"
+        app:summary="@string/settings_protection_summary"
+        app:title="@string/settings_protection">
+        <Preference
+            app:icon="@drawable/ic_baseline_vpn_key_24"
+            app:key="protectionAlwaysOn"
+            app:title="@string/protection_always_on" />
+        <Preference
+            app:icon="@drawable/ic_action_lock"
+            app:key="protectionLockdown"
+            app:title="@string/protection_lockdown" />
+        <Preference
+            app:icon="@drawable/baseline_developer_board_24"
+            app:key="protectionBattery"
+            app:title="@string/protection_battery" />
+        <Preference
+            app:icon="@drawable/ic_baseline_info_24"
+            app:key="protectionNotes"
+            app:selectable="false"
+            app:summary="@string/protection_notes"
+            app:title="@string/protection_notes_title" />
+    </PreferenceScreen>
+
+    <PreferenceScreen
         app:icon="@drawable/ic_maps_directions"
         app:key="screen_route"
         app:summary="@string/settings_route_summary"
@@ -274,7 +299,7 @@
     </PreferenceScreen>
 
     <PreferenceScreen
-        app:icon="@drawable/ic_baseline_security_24"
+        app:icon="@drawable/ic_notification_enhanced_encryption"
         app:key="screen_tls"
         app:summary="@string/settings_tls_summary"
         app:title="@string/security_settings">

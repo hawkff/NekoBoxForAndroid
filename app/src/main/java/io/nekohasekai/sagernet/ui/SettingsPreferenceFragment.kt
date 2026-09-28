@@ -1,10 +1,13 @@
 package io.nekohasekai.sagernet.ui
 
+import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -81,6 +84,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
         setupAppearance()
         setupConnection()
+        setupProtection()
         setupRoute()
         setupDns()
         setupInbound()
@@ -165,6 +169,68 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
             Key.ACQUIRE_WAKE_LOCK,
         )) {
             findPreference<Preference>(key)?.onPreferenceChangeListener = reloadListener
+        }
+    }
+
+    // ACTION_VPN_SETTINGS is API 24; on 23 the resolve fails and openSystemSettings falls back.
+    @SuppressLint("InlinedApi")
+    private fun setupProtection() {
+        val openVpnSettings = Preference.OnPreferenceClickListener {
+            openSystemSettings(Settings.ACTION_VPN_SETTINGS)
+            true
+        }
+        findPreference<Preference>(Key.PROTECTION_ALWAYS_ON)?.onPreferenceClickListener = openVpnSettings
+        findPreference<Preference>(Key.PROTECTION_LOCKDOWN)?.onPreferenceClickListener = openVpnSettings
+        findPreference<Preference>(Key.PROTECTION_BATTERY)?.setOnPreferenceClickListener {
+            openSystemSettings(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            true
+        }
+        refreshProtection()
+    }
+
+    // Summaries reflect system state that changes outside the app, so they are recomputed on
+    // every resume (after the user returns from the system settings).
+    private fun refreshProtection() {
+        val alwaysOn = findPreference<Preference>(Key.PROTECTION_ALWAYS_ON) ?: return
+        val lockdown = findPreference<Preference>(Key.PROTECTION_LOCKDOWN) ?: return
+        when {
+            DataStore.serviceMode != Key.MODE_VPN -> {
+                alwaysOn.setSummary(R.string.protection_proxy_mode)
+                lockdown.setSummary(R.string.protection_proxy_mode)
+            }
+
+            Build.VERSION.SDK_INT < 29 -> {
+                alwaysOn.setSummary(R.string.protection_unknown)
+                lockdown.setSummary(R.string.protection_unknown)
+            }
+
+            else -> {
+                // isAlwaysOn/isLockdownEnabled answer for the calling app through a static system
+                // binder and never touch the service instance, so a bare VpnService object works
+                // from the UI process while the tunnel is down.
+                val vpn = android.net.VpnService()
+                alwaysOn.setSummary(
+                    if (vpn.isAlwaysOn) R.string.protection_always_on_enabled else R.string.protection_always_on_disabled,
+                )
+                lockdown.setSummary(
+                    if (vpn.isLockdownEnabled) R.string.protection_lockdown_enabled else R.string.protection_lockdown_disabled,
+                )
+            }
+        }
+        findPreference<Preference>(Key.PROTECTION_BATTERY)?.setSummary(
+            if (SagerNet.power.isIgnoringBatteryOptimizations(requireContext().packageName)) {
+                R.string.protection_battery_unrestricted
+            } else {
+                R.string.protection_battery_optimized
+            },
+        )
+    }
+
+    private fun openSystemSettings(action: String) {
+        try {
+            startActivity(Intent(action))
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
         }
     }
 
@@ -371,6 +437,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
 
         isProxyApps?.isChecked = DataStore.proxyApps
         globalCustomConfig?.notifyChanged()
+        refreshProtection()
     }
 
     private fun clearAppCache() {
