@@ -116,6 +116,14 @@ class GroupSettingsActivity(
     fun PreferenceFragmentCompat.createPreferences(savedInstanceState: Bundle?, rootKey: String?) {
         addPreferencesFromResource(R.xml.group_preferences)
 
+        // Turning the selector off clears automatic selection so the disabled switch shows the
+        // value that will be saved.
+        val autoSelectPreference = findPreference<SwitchPreference>(Key.GROUP_AUTO_SELECT)!!
+        findPreference<SwitchPreference>(Key.GROUP_IS_SELECTOR)!!.setOnPreferenceChangeListener { _, newValue ->
+            if (newValue == false) autoSelectPreference.isChecked = false
+            true
+        }
+
         frontProxyPreference = findPreference(Key.GROUP_FRONT_PROXY)!!
         frontProxyPreference.apply {
             setEntries(R.array.front_proxy_entry)
