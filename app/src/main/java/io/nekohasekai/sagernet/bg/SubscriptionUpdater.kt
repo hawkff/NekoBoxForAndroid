@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.bg
 
 import android.Manifest.permission.POST_NOTIFICATIONS
+import android.app.Notification
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,11 +14,14 @@ import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkerParameters
 import androidx.work.multiprocess.RemoteWorkManager
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import moe.matsuri.nb4a.utils.Util
 import java.util.concurrent.TimeUnit
 
 internal data class SubscriptionWorkSchedule(
@@ -51,6 +55,58 @@ internal fun computeSubscriptionWorkSchedule(
 object SubscriptionUpdater {
 
     private const val WORK_NAME = "SubscriptionUpdater"
+    private const val EXPIRY_NOTIFICATION_ID_BASE = 1000
+    private const val EXPIRY_WARNING_SECONDS = 3 * 24 * 3600L
+    private const val DAY_SECONDS = 24 * 3600L
+
+    /**
+     * Reminds about a subscription whose `expire=` is within three days or passed less than a day
+     * ago, at most once per day. Runs from the periodic worker and after every successful update.
+     */
+    fun notifyExpiry(group: ProxyGroup, nowSeconds: Long = System.currentTimeMillis() / 1000L) {
+        val subscription = group.subscription ?: return
+        val expiry = subscription.expiry() ?: return
+        if (!expiryReminderDue(expiry, subscription.expiryNotifiedAt ?: 0, nowSeconds)) return
+        val context = app
+        val text = if (nowSeconds < expiry) {
+            context.getString(R.string.subscription_expiring_message, group.displayName(), Util.timeStamp2Text(expiry * 1000))
+        } else {
+            context.getString(R.string.subscription_expired_message, group.displayName())
+        }
+        val notification = NotificationCompat.Builder(context, "service-subscription")
+            .setContentTitle(context.getString(R.string.subscription_expiring_title))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSmallIcon(R.drawable.ic_service_active)
+            .setContentIntent(SagerNet.configureIntent(context))
+            .setAutoCancel(true)
+            .build()
+        if (!NotificationManagerCompat.from(context).post((EXPIRY_NOTIFICATION_ID_BASE + group.id).toInt(), notification)) return
+        subscription.expiryNotifiedAt = nowSeconds.toInt()
+        SagerDatabase.groupDao.updateGroup(group)
+    }
+
+    internal fun expiryReminderDue(expiry: Long, notifiedAt: Int, nowSeconds: Long): Boolean = expiry - nowSeconds <= EXPIRY_WARNING_SECONDS &&
+        nowSeconds < expiry + DAY_SECONDS &&
+        nowSeconds - notifiedAt >= DAY_SECONDS
+
+    /** Posts when notifications are allowed; false when the permission or channel blocks it. */
+    private fun NotificationManagerCompat.post(id: Int, notification: Notification): Boolean {
+        if (!areNotificationsEnabled()) return false
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(app, POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        return try {
+            notify(id, notification)
+            true
+        } catch (e: SecurityException) {
+            Logs.w("notification skipped", e)
+            false
+        }
+    }
 
     suspend fun reconfigureUpdater() {
         RemoteWorkManager.getInstance(app).cancelUniqueWork(WORK_NAME)
@@ -142,23 +198,14 @@ object SubscriptionUpdater {
                 Logs.w("subscription notification cancel skipped", e)
             }
 
+            // Expiry reminders cover every subscription, including ones that never auto-update.
+            SagerDatabase.groupDao.subscriptions().forEach { notifyExpiry(it) }
+
             return if (attempted && failed) Result.retry() else Result.success()
         }
 
         private fun notifyProgress() {
-            if (!nm.areNotificationsEnabled()) return
-            if (
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(applicationContext, POST_NOTIFICATIONS) !=
-                PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
-            try {
-                nm.notify(2, notification.build())
-            } catch (e: SecurityException) {
-                Logs.w("subscription notification update skipped", e)
-            }
+            nm.post(2, notification.build())
         }
     }
 }

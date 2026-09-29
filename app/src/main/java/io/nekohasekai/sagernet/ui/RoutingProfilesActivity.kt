@@ -63,6 +63,8 @@ class RoutingProfilesActivity : ThemedActivity() {
 
             R.id.action_import_file -> importFile.launch("*/*")
 
+            R.id.action_import_clipboard -> importText(SagerNet.getClipboardText())
+
             else -> return super.onOptionsItemSelected(item)
         }
         return true
@@ -71,11 +73,21 @@ class RoutingProfilesActivity : ThemedActivity() {
     private val importFile = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@registerForActivityResult
         runOnDefaultDispatcher {
-            val imported = try {
+            val text = try {
                 contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?.let(RoutingProfiles::import)
             } catch (e: Exception) {
                 Logs.w(e)
+                null
+            }
+            importText(text.orEmpty())
+        }
+    }
+
+    // Accepts export JSON and sn://routing/ links alike.
+    private fun importText(text: String) {
+        runOnDefaultDispatcher {
+            val imported = runCatching { RoutingProfiles.import(text) }.getOrElse {
+                Logs.w(it)
                 null
             }
             onMainDispatcher {
@@ -94,8 +106,9 @@ class RoutingProfilesActivity : ThemedActivity() {
         uri ?: return@registerForActivityResult
         runOnDefaultDispatcher {
             try {
+                val current = RoutingProfiles.exportable(profile.id) ?: profile
                 contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
-                    it.write(profile.toExportJson().toString(2))
+                    it.write(current.toExportJson().toString(2))
                 }
             } catch (e: Exception) {
                 onMainDispatcher { snackbar(e.readableMessage).show() }
@@ -138,6 +151,13 @@ class RoutingProfilesActivity : ThemedActivity() {
                     R.id.action_rename -> askName(getString(R.string.routing_profile_rename), profile.name) { name ->
                         RoutingProfiles.rename(profile.id, name)
                         adapter.reload()
+                    }
+
+                    R.id.action_export_clipboard -> runOnDefaultDispatcher {
+                        val link = (RoutingProfiles.exportable(profile.id) ?: profile).toLink()
+                        onMainDispatcher {
+                            snackbar(if (SagerNet.trySetPrimaryClip(link)) R.string.action_export_msg else R.string.action_export_err).show()
+                        }
                     }
 
                     R.id.action_export -> {
