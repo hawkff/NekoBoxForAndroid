@@ -4,6 +4,8 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.ui.BackupFormatV2
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
@@ -218,7 +220,11 @@ object RoutingProfiles {
     // of leaving an orphan. Group ids are never reused, so this grows by one entry per deletion.
     private val deletedSources = HashSet<String>()
 
-    suspend fun store(candidate: Profile): Profile {
+    // Serializes the live apply of refreshed active profiles, so two refreshes landing together
+    // leave the live rules matching the stored profile, in store order.
+    private val applyLock = Mutex()
+
+    suspend fun store(candidate: Profile): Profile = applyLock.withLock {
         val (stored, refreshedActive) = mutate { profiles ->
             if (candidate.source.isNotEmpty() && candidate.source in deletedSources) return@mutate candidate to false
             val existing = profiles.firstOrNull {
@@ -235,7 +241,7 @@ object RoutingProfiles {
             }
         }
         if (refreshedActive) applyLive(stored.content)
-        return stored
+        stored
     }
 
     /** Removes the profiles a deleted subscription delivered; an active one is deactivated, live state stays. */
