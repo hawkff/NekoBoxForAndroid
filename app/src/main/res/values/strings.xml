@@ -378,6 +378,18 @@
         <item quantity="other">%d lines</item>
     </plurals>
     <string name="not_set">Not set</string>
+    <!-- import preview -->
+    <string name="import_preview_title">Import preview</string>
+    <string name="import_preview_confirm">Import</string>
+    <string name="import_preview_accepted">Accepted: %d nodes</string>
+    <string name="import_preview_skipped_builtin">Skipped: %d built-in or group outbounds</string>
+    <string name="import_preview_skipped_unparsed">Skipped: %d entries that are unsupported or did not parse</string>
+    <string name="import_preview_dropped">Not imported: %s. Only nodes are imported, so the result will not behave like the source configuration.</string>
+    <string name="import_section_proxy_groups">proxy groups</string>
+    <string name="import_section_rules">routing rules</string>
+    <string name="import_section_rule_providers">rule providers</string>
+    <string name="import_section_dns">DNS settings</string>
+    <string name="import_section_inbounds">inbounds</string>
     <!-- connection diagnostics -->
     <string name="menu_connections">Connections</string>
     <string name="connections_show_closed">Show closed connections</string>
