@@ -83,6 +83,7 @@ object Key {
     const val NETWORK_AUTOMATION = "networkAutomation"
     const val NETWORK_AUTOMATION_RULES = "networkAutomationRules"
     const val NETWORK_AUTOMATION_PAUSED = "networkAutomationPaused"
+    const val CONNECTION_DIAGNOSTICS = "connectionDiagnostics"
     const val RULES_UPDATE_INTERVAL = "rulesUpdateInterval"
 
     // Protocol Settings

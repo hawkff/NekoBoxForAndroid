@@ -108,4 +108,33 @@ class SagerDatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrate13To14_preservesGroupsAndDefaultsAutoSelectOff() {
+        helper.createDatabase(TEST_DB, 13).use { db ->
+            val values = ContentValues().apply {
+                put("id", 5L)
+                put("userOrder", 1L)
+                put("ungrouped", 0)
+                put("name", "selector group")
+                put("type", 0)
+                put("order", 0)
+                put("isSelector", 1)
+                put("frontProxy", -1L)
+                put("landingProxy", -1L)
+            }
+            db.insert("proxy_groups", android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE, values)
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB, 14, true).use { db ->
+            db.query("SELECT id, name, isSelector, autoSelect FROM proxy_groups").use { cursor ->
+                assertEquals("row count after 13->14 migration", 1, cursor.count)
+                assertTrue(cursor.moveToFirst())
+                assertEquals(5L, cursor.getLong(cursor.getColumnIndexOrThrow("id")))
+                assertEquals("selector group", cursor.getString(cursor.getColumnIndexOrThrow("name")))
+                assertEquals(1, cursor.getInt(cursor.getColumnIndexOrThrow("isSelector")))
+                assertEquals(0, cursor.getInt(cursor.getColumnIndexOrThrow("autoSelect")))
+            }
+        }
+    }
 }

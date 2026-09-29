@@ -177,6 +177,8 @@ class BaseService {
             }
         }
 
+        override fun connections(includeClosed: Boolean): String = data?.proxy?.takeIf { it.isInitialized() }?.box?.connections(includeClosed) ?: "[]"
+
         fun stateChanged(s: State, msg: String?) = launch {
             val profileName = profileName
             broadcast { it.stateChanged(s.ordinal, profileName, msg) }

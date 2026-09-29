@@ -206,6 +206,8 @@ class TrafficLooper(
                     items = idMap.values.toList(),
                 )
                 proxy.box.setV2rayStats(tags.joinToString("\n"))
+                // ponytail: fixed cap; make it a setting if anyone needs a longer history.
+                proxy.box.setConnectionHistory(if (DataStore.connectionDiagnostics) 300 else 0)
             }
 
             // Apply any selector switches posted from the JNI callback, on THIS coroutine, so
