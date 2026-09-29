@@ -378,6 +378,24 @@
         <item quantity="other">%d lines</item>
     </plurals>
     <string name="not_set">Not set</string>
+    <!-- network automation -->
+    <string name="network_automation">Network automation</string>
+    <string name="network_automation_summary">Connect, switch profile or disconnect when the network changes</string>
+    <string name="network_automation_rules">Network rules</string>
+    <string name="network_automation_explanation">Rules run when the underlying network changes while the app or the service is alive. A Wi-Fi name rule beats a Wi-Fi rule, which beats a mobile data rule. Stopping the service yourself pauses connect rules until you start it again. Wi-Fi name rules need the location permission, and some Android versions hide the name while the app is in the background.</string>
+    <string name="network_rule_add">Add rule</string>
+    <string name="network_rule_network">Network</string>
+    <string name="network_rule_mobile">Mobile data</string>
+    <string name="network_rule_wifi">Any Wi-Fi</string>
+    <string name="network_rule_ssid">Wi-Fi with name</string>
+    <string name="network_rule_ssid_hint">Network name (SSID)</string>
+    <string name="network_rule_wifi_named">Wi-Fi “%s”</string>
+    <string name="network_rule_action">Action</string>
+    <string name="network_rule_connect_current">Connect with the selected profile</string>
+    <string name="network_rule_connect_profile">Connect with a specific profile…</string>
+    <string name="network_rule_connect_named">Connect with %s</string>
+    <string name="network_rule_disconnect">Disconnect (trusted network)</string>
+    <string name="network_rule_ssid_permission">Without the location permission Android hides the Wi-Fi name, so this rule cannot match.</string>
     <!-- routing profiles -->
     <string name="routing_profiles">Routing profiles</string>
     <string name="routing_profile_save_current">Save current as profile</string>

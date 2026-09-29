@@ -15,8 +15,8 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RoutingProfiles
-import io.nekohasekai.sagernet.databinding.LayoutRoutingProfileItemBinding
 import io.nekohasekai.sagernet.databinding.LayoutRoutingProfilesBinding
+import io.nekohasekai.sagernet.databinding.LayoutTwoLineItemBinding
 import io.nekohasekai.sagernet.ktx.FixedLinearLayoutManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
@@ -170,18 +170,18 @@ class RoutingProfilesActivity : ThemedActivity() {
             notifyDataSetChanged()
         }
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = ProfileHolder(LayoutRoutingProfileItemBinding.inflate(layoutInflater, parent, false))
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = ProfileHolder(LayoutTwoLineItemBinding.inflate(layoutInflater, parent, false))
 
         override fun getItemCount() = profiles.size
 
         override fun onBindViewHolder(holder: ProfileHolder, position: Int) = holder.bind(profiles[position])
     }
 
-    inner class ProfileHolder(private val binding: LayoutRoutingProfileItemBinding) : RecyclerView.ViewHolder(binding.root) {
+    inner class ProfileHolder(private val binding: LayoutTwoLineItemBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(profile: RoutingProfiles.Profile) {
-            binding.profileName.text = profile.name
+            binding.title.text = profile.name
             val rules = resources.getQuantityString(R.plurals.routing_profile_rules, profile.ruleCount, profile.ruleCount)
-            binding.profileSummary.text = if (profile.id == RoutingProfiles.activeId) {
+            binding.summary.text = if (profile.id == RoutingProfiles.activeId) {
                 getString(R.string.routing_profile_active, rules)
             } else {
                 rules

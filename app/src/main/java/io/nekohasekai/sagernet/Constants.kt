@@ -80,6 +80,9 @@ object Key {
     const val RULES_GEOIP_URL = "rulesGeoipUrl"
     const val ROUTING_PROFILES = "routingProfiles"
     const val ROUTING_PROFILE_ACTIVE = "routingProfileActive"
+    const val NETWORK_AUTOMATION = "networkAutomation"
+    const val NETWORK_AUTOMATION_RULES = "networkAutomationRules"
+    const val NETWORK_AUTOMATION_PAUSED = "networkAutomationPaused"
     const val RULES_UPDATE_INTERVAL = "rulesUpdateInterval"
 
     // Protocol Settings
@@ -254,6 +257,9 @@ object Action {
     // so the :bg process does not depend on the UI's async write-through DB commit having landed
     // (see RoomPreferenceDataStore cached mode). -1 / absent => read selectedProxy from the store.
     const val EXTRA_PROFILE_ID = "io.nekohasekai.sagernet.EXTRA_PROFILE_ID"
+
+    // Boolean extra on CLOSE: the stop came from network automation, not from the user.
+    const val EXTRA_AUTOMATED = "io.nekohasekai.sagernet.EXTRA_AUTOMATED"
 
     // const val SWITCH_WAKE_LOCK = "io.nekohasekai.sagernet.SWITCH_WAKELOCK"
     const val RESET_UPSTREAM_CONNECTIONS = "moe.nb4a.RESET_UPSTREAM_CONNECTIONS"
