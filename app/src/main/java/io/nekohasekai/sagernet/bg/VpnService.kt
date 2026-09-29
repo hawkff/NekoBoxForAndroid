@@ -56,12 +56,14 @@ class VpnService :
             if (data.holdTun) {
                 // Kill switch: the interface stays up with nobody reading it, so traffic drops until
                 // the next core replaces it (startVpn) or the user stops. A failure ahead of the
-                // core opening the tun has to block too, hence the bare interface.
+                // core opening the tun has to block too, hence the bare interface. Without any
+                // interface there is nothing that blocks, and the service must not claim otherwise.
                 if (conn == null) {
                     conn = runCatching { tunBuilder(needBypassRootUid = false).establish() }
                         .onFailure { Logs.w("kill switch could not establish a bare tun", it) }
                         .getOrNull()
                 }
+                if (conn == null) data.holdTun = false
             } else {
                 conn?.close()
                 conn = null

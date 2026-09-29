@@ -58,10 +58,11 @@ object SubscriptionUpdater {
     private const val EXPIRY_NOTIFICATION_ID_BASE = 1000
     private const val EXPIRY_WARNING_SECONDS = 3 * 24 * 3600L
     private const val DAY_SECONDS = 24 * 3600L
+    private const val DAY_MINUTES = 24 * 60L
 
     /**
-     * Reminds about a subscription whose `expire=` is within three days or passed less than a day
-     * ago, at most once per day. Runs from the periodic worker and after every successful update.
+     * Reminds about a subscription whose `expire=` is within three days, once a day, and once more
+     * after it passed. Runs from the periodic worker and after every successful update.
      */
     fun notifyExpiry(group: ProxyGroup, nowSeconds: Long = System.currentTimeMillis() / 1000L) {
         val subscription = group.subscription ?: return
@@ -83,12 +84,20 @@ object SubscriptionUpdater {
             .build()
         if (!NotificationManagerCompat.from(context).post((EXPIRY_NOTIFICATION_ID_BASE + group.id).toInt(), notification)) return
         subscription.expiryNotifiedAt = nowSeconds.toInt()
-        SagerDatabase.groupDao.updateGroup(group)
+        // Write the stamp onto the current row so a concurrent group edit or update is kept.
+        val stored = SagerDatabase.groupDao.getById(group.id) ?: return
+        stored.subscription?.expiryNotifiedAt = nowSeconds.toInt()
+        SagerDatabase.groupDao.updateGroup(stored)
     }
 
-    internal fun expiryReminderDue(expiry: Long, notifiedAt: Int, nowSeconds: Long): Boolean = expiry - nowSeconds <= EXPIRY_WARNING_SECONDS &&
-        nowSeconds < expiry + DAY_SECONDS &&
-        nowSeconds - notifiedAt >= DAY_SECONDS
+    internal fun expiryReminderDue(expiry: Long, notifiedAt: Int, nowSeconds: Long): Boolean = when {
+        // One reminder after expiry, whenever the worker next runs.
+        nowSeconds >= expiry -> notifiedAt < expiry
+
+        expiry - nowSeconds <= EXPIRY_WARNING_SECONDS -> nowSeconds - notifiedAt >= DAY_SECONDS
+
+        else -> false
+    }
 
     /** Posts when notifications are allowed; false when the permission or channel blocks it. */
     private fun NotificationManagerCompat.post(id: Int, notification: Notification): Boolean {
@@ -111,19 +120,18 @@ object SubscriptionUpdater {
     suspend fun reconfigureUpdater() {
         RemoteWorkManager.getInstance(app).cancelUniqueWork(WORK_NAME)
 
-        val subscriptions = SagerDatabase.groupDao.subscriptions()
-            .mapNotNull { group -> group.subscription?.let { group to it } }
-            .filter { (_, sub) -> sub.autoUpdate!! }
-        if (subscriptions.isEmpty()) return
+        val all = SagerDatabase.groupDao.subscriptions().mapNotNull { it.subscription }
+        val subscriptions = all.filter { it.autoUpdate!! }
 
+        // Without auto-updating subscriptions the worker still runs daily for expiry reminders.
         val schedule = computeSubscriptionWorkSchedule(
-            subscriptions.map { (_, sub) ->
+            subscriptions.map { sub ->
                 SubscriptionScheduleInput(
                     lastUpdated = sub.lastUpdated ?: 0,
                     autoUpdateDelay = sub.autoUpdateDelay ?: 1440,
                 )
             },
-        ) ?: return
+        ) ?: if (all.any { it.expiry() != null }) SubscriptionWorkSchedule(DAY_MINUTES, 0L) else return
 
         // main process
         RemoteWorkManager.getInstance(app).enqueueUniquePeriodicWork(

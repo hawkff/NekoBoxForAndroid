@@ -117,7 +117,7 @@ object NetworkAutomation {
             Action.CONNECT -> if (serviceRunning) {
                 if (rule.profileId > 0 && rule.profileId != DataStore.currentProfile) SagerNet.reloadService(rule.profileId)
             } else {
-                runOnDefaultDispatcher { connectUnlessPaused(rule) }
+                runOnDefaultDispatcher { connectUnlessPaused(rule, snapshot) }
             }
         }
     }
@@ -125,8 +125,10 @@ object NetworkAutomation {
     // A user stop records the pause in the service process, and this process's settings snapshot
     // learns about it asynchronously. Read the database before starting anything, so a network
     // event that lands right after the stop cannot revive the service.
-    private suspend fun connectUnlessPaused(rule: Rule) {
+    private suspend fun connectUnlessPaused(rule: Rule, snapshot: Snapshot) {
         DataStore.configurationStore.refreshSuspend()
+        // A newer network event was evaluated meanwhile; its own task decides.
+        if (lastEvaluated != snapshot) return
         if (DataStore.automationPaused) {
             // Not acted on: forget the snapshot so the same network is re-evaluated once the user
             // starts the service again and the pause lifts.

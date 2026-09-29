@@ -10,15 +10,16 @@ import org.junit.Test
 class SubscriptionUpdaterScheduleTest {
 
     @Test
-    fun expiryReminder_isDailyInsideTheLastThreeDaysAndOneDayPast() {
+    fun expiryReminder_isDailyInsideTheLastThreeDaysAndOnceAfterExpiry() {
         val day = 24 * 3600L
         val expiry = 100 * day
         assertFalse(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = 0, nowSeconds = expiry - 4 * day))
         assertTrue(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = 0, nowSeconds = expiry - 3 * day))
         assertFalse(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = (expiry - 3 * day).toInt(), nowSeconds = expiry - 2 * day - 1))
         assertTrue(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = (expiry - 3 * day).toInt(), nowSeconds = expiry - 2 * day))
-        assertTrue(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = 0, nowSeconds = expiry + day - 1))
-        assertFalse(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = 0, nowSeconds = expiry + day))
+        // A reminder an hour before expiry does not swallow the one after it, however late the worker runs.
+        assertTrue(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = (expiry - 3600).toInt(), nowSeconds = expiry + 5 * day))
+        assertFalse(SubscriptionUpdater.expiryReminderDue(expiry, notifiedAt = (expiry + 10).toInt(), nowSeconds = expiry + 5 * day))
     }
 
     @Test

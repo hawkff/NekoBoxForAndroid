@@ -79,22 +79,43 @@ class RoutingProfilesActivity : ThemedActivity() {
                 Logs.w(e)
                 null
             }
-            importText(text.orEmpty())
+            onMainDispatcher { importText(text.orEmpty()) }
         }
     }
 
-    // Accepts export JSON and sn://routing/ links alike.
+    // Accepts export JSON and sn://routing/ links alike. Replacing one of the user's profiles
+    // (and applying it live when that profile is active) needs a confirmation first.
     private fun importText(text: String) {
+        val candidate = RoutingProfiles.parse(text)
+        if (candidate == null) {
+            snackbar(R.string.routing_profile_import_invalid).show()
+            return
+        }
+        val replaced = RoutingProfiles.replacementFor(candidate)
+        if (replaced == null) {
+            store(candidate)
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.confirm)
+            .setMessage(
+                getString(
+                    if (replaced.id == RoutingProfiles.activeId) R.string.routing_profile_replace_active_message else R.string.routing_profile_replace_message,
+                    replaced.name,
+                ),
+            )
+            .setPositiveButton(R.string.yes) { _, _ -> store(candidate) }
+            .setNegativeButton(R.string.no, null)
+            .show()
+    }
+
+    private fun store(candidate: RoutingProfiles.Profile) {
         runOnDefaultDispatcher {
-            val imported = runCatching { RoutingProfiles.import(text) }.getOrElse {
-                Logs.w(it)
-                null
-            }
+            val stored = runCatching { RoutingProfiles.store(candidate) }.onFailure { Logs.w(it) }.getOrNull()
             onMainDispatcher {
-                if (imported == null) {
-                    snackbar(R.string.routing_profile_import_invalid).show()
-                } else {
-                    adapter.reload()
+                adapter.reload()
+                if (stored?.id == RoutingProfiles.activeId && DataStore.serviceState.started) {
+                    snackbar(R.string.need_reload).setAction(R.string.apply) { SagerNet.reloadService() }.show()
                 }
             }
         }

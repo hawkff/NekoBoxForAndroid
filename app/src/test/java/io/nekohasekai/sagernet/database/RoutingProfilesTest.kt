@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -117,6 +118,15 @@ class RoutingProfilesTest {
         assertEquals("Renamed", RoutingProfiles.list().first { it.id == provided.id }.name)
         RoutingProfiles.import(RoutingProfiles.Profile(0L, "Renamed", active.content).toLink(), RoutingProfiles.subscriptionSource(8L))
         assertEquals(4, RoutingProfiles.list().size)
+        // Replacement lookup mirrors store: user imports by name, subscriptions by source.
+        assertEquals(active.id, RoutingProfiles.replacementFor(RoutingProfiles.Profile(0L, "Provider", newer))!!.id)
+        assertEquals(provided.id, RoutingProfiles.replacementFor(RoutingProfiles.Profile(0L, "Whatever", newer, source))!!.id)
+        assertNull(RoutingProfiles.replacementFor(RoutingProfiles.Profile(0L, "Unknown", newer)))
+        // A deleted subscription takes its profiles along; the user's stay.
+        RoutingProfiles.deleteBySource(source)
+        assertEquals(3, RoutingProfiles.list().size)
+        assertTrue(RoutingProfiles.list().none { it.source == source })
+        assertTrue(RoutingProfiles.list().any { it.id == active.id } && RoutingProfiles.list().any { it.id == other.id })
 
         // Exporting the active profile carries edits made since the last switch; others export as stored.
         SagerDatabase.rulesDao.insert(listOf(RuleEntity(name = "newest", domains = "newest.example")))

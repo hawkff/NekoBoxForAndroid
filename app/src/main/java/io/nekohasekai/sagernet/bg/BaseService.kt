@@ -362,8 +362,8 @@ class BaseService {
             data.holdTun = hold
             // Blocked: the failure case. The service stays in the foreground with the tun held and
             // no core, reports Connecting (stoppable, reload-able) and retries with backoff.
-            val blocked = hold && !restart
-            if (!blocked) {
+            val mayBlock = hold && !restart
+            if (!mayBlock) {
                 data.notification?.destroy()
                 data.notification = null
             }
@@ -376,12 +376,19 @@ class BaseService {
                 // we use a coroutineScope here to allow clean-up in parallel
                 coroutineScope {
                     killProcesses()
+                    data.proxy = null
+                }
+                // VpnService drops the hold when it ended up without an interface: then nothing
+                // blocks, and the service stops normally instead of claiming protection.
+                val blocked = mayBlock && data.holdTun
+                if (!blocked) {
                     val data = data
-                    if (data.closeReceiverRegistered && !blocked) {
+                    if (data.closeReceiverRegistered) {
                         unregisterReceiver(data.receiver)
                         data.closeReceiverRegistered = false
                     }
-                    data.proxy = null
+                    data.notification?.destroy()
+                    data.notification = null
                 }
 
                 if (blocked) {

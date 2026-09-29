@@ -4,6 +4,8 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.ui.BackupFormatV2
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
@@ -195,7 +197,15 @@ object RoutingProfiles {
      */
     suspend fun import(text: String, source: String = ""): Profile? = parse(text, source)?.let { store(it) }
 
-    suspend fun store(candidate: Profile): Profile {
+    /** The stored profile [candidate] would refresh, or null when it would be added. */
+    fun replacementFor(candidate: Profile): Profile? = list().firstOrNull {
+        it.source == candidate.source && (candidate.source.isNotEmpty() || it.name == candidate.name)
+    }
+
+    // Subscriptions update concurrently and each store rewrites the whole list.
+    private val storeLock = Mutex()
+
+    suspend fun store(candidate: Profile): Profile = storeLock.withLock {
         val profiles = list()
         val existing = profiles.firstOrNull {
             it.source == candidate.source && (candidate.source.isNotEmpty() || it.name == candidate.name)
@@ -203,12 +213,18 @@ object RoutingProfiles {
         if (existing == null) {
             val profile = Profile((profiles.maxOfOrNull { it.id } ?: 0L) + 1, candidate.name, candidate.content, candidate.source)
             save(profiles + profile)
-            return profile
+            return@withLock profile
         }
         existing.name = candidate.name
         existing.content = candidate.content
         save(profiles)
         if (existing.id == activeId) applyLive(existing.content)
-        return existing
+        existing
+    }
+
+    /** Removes the profiles a deleted subscription delivered; an active one is deactivated, live state stays. */
+    fun deleteBySource(source: String) {
+        if (source.isEmpty()) return
+        list().filter { it.source == source }.forEach { delete(it.id) }
     }
 }

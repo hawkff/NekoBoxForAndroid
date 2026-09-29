@@ -430,6 +430,8 @@
     <string name="routing_profile_active">Active · %s</string>
     <string name="routing_profile_delete_message">Delete the routing profile “%s”? Rules and settings currently in use stay as they are.</string>
     <string name="routing_profile_import_invalid">Not an exported routing profile or sn://routing/ link.</string>
+    <string name="routing_profile_replace_message">Replace the routing profile “%s” with the imported one?</string>
+    <string name="routing_profile_replace_active_message">Replace the active routing profile “%s” with the imported one? Its rules and settings apply right away.</string>
     <string name="routing_profile_import_message">Import the routing profile “%1$s” (%2$d rules)? It is added to your routing profiles without being activated; a profile with the same name is replaced.</string>
     <plurals name="routing_profile_rules">
         <item quantity="one">%d rule</item>

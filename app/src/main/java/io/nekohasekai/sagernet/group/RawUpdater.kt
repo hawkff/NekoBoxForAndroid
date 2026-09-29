@@ -147,7 +147,8 @@ object RawUpdater : GroupUpdater() {
         val content = readSubscriptionContent(text)
         // Header values win over preamble lines, and a fetch that omits a key clears it.
         val meta = content.meta + httpMeta
-        val updateIntervalMinutes = meta["profile-update-interval"]?.toIntOrNull()?.takeIf { it > 0 }?.times(60)
+        val updateIntervalMinutes = meta["profile-update-interval"]?.toIntOrNull()?.takeIf { it > 0 }
+            ?.coerceAtMost(MAX_UPDATE_INTERVAL_HOURS)?.times(60)
         var proxies = parseRawContent(content.body)?.takeIf { it.isNotEmpty() }
             ?: error(app.getString(R.string.no_proxies_found_in_subscription))
 
@@ -309,8 +310,10 @@ object RawUpdater : GroupUpdater() {
             }
             providerUpdateInterval = updateIntervalMinutes ?: 0
         }
+        // The worker also runs for expiry reminders, so an expiry appearing or vanishing reschedules.
         val scheduleChanged = updatedSubscription.autoUpdate != subscription.autoUpdate ||
-            updatedSubscription.autoUpdateDelay != subscription.autoUpdateDelay
+            updatedSubscription.autoUpdateDelay != subscription.autoUpdateDelay ||
+            (updatedSubscription.expiry() != null) != (subscription.expiry() != null)
         val updatedGroup = proxyGroup.copy(subscription = updatedSubscription)
         if (updatedGroup.name?.startsWith("Subscription #") == true && remoteName != null) {
             updatedGroup.name = remoteName
@@ -384,6 +387,7 @@ object RawUpdater : GroupUpdater() {
     )
 
     private const val MAX_ANNOUNCE_CHARS = 200
+    private const val MAX_UPDATE_INTERVAL_HOURS = 24 * 365
 
     private fun decodeSubscriptionBase64(value: String): String? = try {
         val encoded = value.filterNot { it.isWhitespace() }
