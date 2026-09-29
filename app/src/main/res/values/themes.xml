@@ -107,6 +107,8 @@
         <item name="fabConnectedColor">?attr/statusConnectedColor</item>
         <item name="fabColorBackground">?colorPrimary</item>
         <item name="routeProxyColor">@color/color_route_proxy</item>
+        <item name="routeDirectColor">?attr/testAvailableColor</item>
+        <item name="routeBlockColor">?attr/testFailColor</item>
         <item name="navSelectedColor">?attr/colorPrimary</item>
         <item name="itemShapeFillColor">?colorPrimary</item>
     </style>
