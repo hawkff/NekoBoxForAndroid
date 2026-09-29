@@ -378,6 +378,18 @@
         <item quantity="other">%d lines</item>
     </plurals>
     <string name="not_set">Not set</string>
+    <!-- routing profiles -->
+    <string name="routing_profiles">Routing profiles</string>
+    <string name="routing_profile_save_current">Save current as profile</string>
+    <string name="routing_profile_switch">Switch to this profile</string>
+    <string name="routing_profile_rename">Rename profile</string>
+    <string name="routing_profile_active">Active · %s</string>
+    <string name="routing_profile_delete_message">Delete the routing profile “%s”? Rules and settings currently in use stay as they are.</string>
+    <string name="routing_profile_import_invalid">The file is not an exported routing profile.</string>
+    <plurals name="routing_profile_rules">
+        <item quantity="one">%d rule</item>
+        <item quantity="other">%d rules</item>
+    </plurals>
     <string name="night_mode">Night Mode</string>
     <string name="language">Language</string>
     <string name="follow_system">Follow System</string>

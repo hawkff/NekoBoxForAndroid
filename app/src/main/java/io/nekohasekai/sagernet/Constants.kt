@@ -78,6 +78,8 @@ object Key {
 
     const val RULES_GEOSITE_URL = "rulesGeositeUrl"
     const val RULES_GEOIP_URL = "rulesGeoipUrl"
+    const val ROUTING_PROFILES = "routingProfiles"
+    const val ROUTING_PROFILE_ACTIVE = "routingProfileActive"
     const val RULES_UPDATE_INTERVAL = "rulesUpdateInterval"
 
     // Protocol Settings
