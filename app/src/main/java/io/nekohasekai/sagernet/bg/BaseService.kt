@@ -238,8 +238,10 @@ class BaseService {
                     }
                     // Compute the in-place selector decision here (off the main thread) so
                     // reloadInner() does no DAO reads on the UI thread (Plan 027). null tag =>
-                    // no fast-path (fall through to the state machine).
-                    val selectorTag = resolveSelectorReloadTag()
+                    // no fast-path (fall through to the state machine). Only a profile switch
+                    // carries an id; a reload without one comes from a settings change, and the
+                    // in-place select would leave DNS, rules and app routing as they were.
+                    val selectorTag = if (profileId > 0L) resolveSelectorReloadTag() else null
                     onMainDispatcher { reloadInner(reloadStopGeneration, selectorTag) }
                 } catch (e: CancellationException) {
                     throw e
@@ -350,15 +352,19 @@ class BaseService {
             DataStore.vpnService = null
             DataStore.mixedInboundAuthed = false
 
-            // A teardown already in progress merges this request (explicit stop cancels a
-            // pending restart; see ServiceStopGate.onStopRequested) and we must return.
-            if (data.stopGate.onStopRequested(restart, data.state == State.Stopping)) return
-            // Job.cancel() is the member; the wildcard import also brings the extension into scope.
-            //noinspection MemberExtensionConflict
-            data.retryJob?.cancel()
             // Kill switch: a restart or a failure (every stop that carries a message) keeps the VPN
             // interface up so nothing leaks while the core is down. An explicit stop releases it.
             val hold = this is VpnService && DataStore.killSwitch && (restart || msg != null)
+            // A teardown already in progress merges this request (explicit stop cancels a
+            // pending restart; see ServiceStopGate.onStopRequested) and we must return. An
+            // explicit stop also releases the hold, so that teardown ends stopped, not blocking.
+            if (data.stopGate.onStopRequested(restart, data.state == State.Stopping)) {
+                if (!hold) data.holdTun = false
+                return
+            }
+            // Job.cancel() is the member; the wildcard import also brings the extension into scope.
+            //noinspection MemberExtensionConflict
+            data.retryJob?.cancel()
             data.holdTun = hold
             // Blocked: the failure case. The service stays in the foreground with the tun held and
             // no core, reports Connecting (stoppable, reload-able) and retries with backoff.
@@ -378,6 +384,9 @@ class BaseService {
                     killProcesses()
                     data.proxy = null
                 }
+                // A stop merged after the teardown kept the tun released the hold: a second pass
+                // closes the tun and unregisters the network listener.
+                if (hold && !data.holdTun) killProcesses()
                 // VpnService drops the hold when it ended up without an interface: then nothing
                 // blocks, and the service stops normally instead of claiming protection.
                 val blocked = mayBlock && data.holdTun
@@ -633,7 +642,8 @@ class BaseService {
                     Toast.makeText(this@Interface, e.readableMessage, Toast.LENGTH_SHORT).show()
                     Logs.w(e)
                     data.binder.missingPlugin(e.plugin)
-                    stopRunner(false, null)
+                    // Carries a message so the kill switch treats it as a failure and holds the tun.
+                    stopRunner(false, e.readableMessage)
                 } catch (exc: Throwable) {
                     if (exc.javaClass.name.endsWith("proxyerror")) {
                         // error from golang

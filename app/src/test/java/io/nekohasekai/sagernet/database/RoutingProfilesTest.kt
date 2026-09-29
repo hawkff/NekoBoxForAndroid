@@ -71,6 +71,11 @@ class RoutingProfilesTest {
 
         assertNull(RoutingProfiles.import("""{"rules": []}"""))
         assertNull(RoutingProfiles.import("not json"))
+        // Malformed content is refused whole rather than read as empty rules or settings.
+        assertNull(RoutingProfiles.import("""{"routingProfile": 1, "name": "Copy", "content": {}}"""))
+        assertNull(RoutingProfiles.import("""{"routingProfile": 1, "name": "Copy", "content": {"rules": "x", "settings": []}}"""))
+        assertNull(RoutingProfiles.import("""{"routingProfile": 1, "name": "Copy", "content": {"rules": [{"id": 1}], "settings": []}}"""))
+        assertEquals(1, RoutingProfiles.list().first { it.id == imported.id }.ruleCount)
         assertNull(RoutingProfiles.import(RoutingProfiles.LINK_PREFIX + "!!!"))
 
         RoutingProfiles.delete(original.id)
