@@ -99,6 +99,7 @@ object NetworkAutomation {
         }
     }
 
+    @Volatile
     private var lastEvaluated: Snapshot? = null
 
     /** Entry point for the default-network listeners. [serviceRunning] is the caller's process view. */
@@ -113,8 +114,12 @@ object NetworkAutomation {
             Action.DISCONNECT -> if (serviceRunning) SagerNet.stopService(byUser = false)
 
             Action.CONNECT -> when {
-                DataStore.automationPaused -> Unit
+                // Not acted on: forget the snapshot so the same network is re-evaluated once
+                // the user starts the service again and the pause lifts.
+                DataStore.automationPaused -> lastEvaluated = null
+
                 !serviceRunning -> SagerNet.startService(if (rule.profileId > 0) rule.profileId else DataStore.selectedProxy)
+
                 rule.profileId > 0 && rule.profileId != DataStore.currentProfile -> SagerNet.reloadService(rule.profileId)
             }
         }

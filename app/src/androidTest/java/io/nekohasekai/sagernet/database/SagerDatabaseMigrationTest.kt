@@ -112,18 +112,11 @@ class SagerDatabaseMigrationTest {
     @Test
     fun migrate13To14_preservesGroupsAndDefaultsAutoSelectOff() {
         helper.createDatabase(TEST_DB, 13).use { db ->
-            val values = ContentValues().apply {
-                put("id", 5L)
-                put("userOrder", 1L)
-                put("ungrouped", 0)
-                put("name", "selector group")
-                put("type", 0)
-                put("order", 0)
-                put("isSelector", 1)
-                put("frontProxy", -1L)
-                put("landingProxy", -1L)
-            }
-            db.insert("proxy_groups", android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE, values)
+            // `order` is an SQL keyword, so ContentValues cannot be used for this table.
+            db.execSQL(
+                "INSERT INTO proxy_groups (id, userOrder, ungrouped, name, type, `order`, isSelector, frontProxy, landingProxy) " +
+                    "VALUES (5, 1, 0, 'selector group', 0, 0, 1, -1, -1)",
+            )
         }
 
         helper.runMigrationsAndValidate(TEST_DB, 14, true).use { db ->

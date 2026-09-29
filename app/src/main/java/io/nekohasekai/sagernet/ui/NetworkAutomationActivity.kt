@@ -157,6 +157,8 @@ class NetworkAutomationActivity : ThemedActivity() {
             notifyItemRemoved(index)
         }
 
+        fun ruleAt(index: Int) = rules.getOrNull(index)
+
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = RuleHolder(LayoutTwoLineItemBinding.inflate(layoutInflater, parent, false))
 
         override fun getItemCount() = rules.size
@@ -177,7 +179,12 @@ class NetworkAutomationActivity : ThemedActivity() {
                 else -> getString(R.string.network_rule_connect_named, "…").also {
                     runOnDefaultDispatcher {
                         val name = ProfileManager.getProfile(rule.profileId)?.displayName() ?: getString(R.string.error_title)
-                        onMainDispatcher { binding.summary.text = getString(R.string.network_rule_connect_named, name) }
+                        onMainDispatcher {
+                            // The holder may have been recycled for another rule meanwhile.
+                            if (adapter.ruleAt(bindingAdapterPosition) == rule) {
+                                binding.summary.text = getString(R.string.network_rule_connect_named, name)
+                            }
+                        }
                     }
                 }
             }

@@ -110,8 +110,10 @@ object RoutingProfiles {
             }
         }
         store.awaitWrites()
-        SagerDatabase.rulesDao.reset()
-        SagerDatabase.rulesDao.insert(rules.map { it.apply { id = 0L } })
+        SagerDatabase.instance.runInTransaction {
+            SagerDatabase.rulesDao.reset()
+            SagerDatabase.rulesDao.insert(rules.map { it.apply { id = 0L } })
+        }
         // The route list and the running service re-read the rules table on this callback.
         ProfileManager.ruleIterator { onCleared() }
     }
