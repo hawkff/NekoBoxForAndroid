@@ -654,6 +654,7 @@
     <string name="protection_notes_title">How these settings interact</string>
     <string name="protection_notes">Both VPN settings are enforced by Android, not by this app, and only apply in VPN service mode. With Block connections without VPN on, apps excluded from the tunnel in Proxied apps bypass mode lose connectivity instead of reaching the network directly. A running service is not proof of protection: use the connection test after every start and reconnect.</string>
     <string name="auto_select">Automatic selection</string>
+    <string name="auto_select_active">Automatic selection is on for this group. Turn it off in the group settings to pick a member.</string>
     <string name="auto_select_sum">Route through the member with the lowest connection-test latency and switch when it fails or a faster one recovers. Manual selection within this group is off while enabled.</string>
     <string name="front_proxy">Front proxy</string>
     <string name="landing_proxy">Landing Proxy</string>

@@ -347,7 +347,16 @@ class GroupSettingsActivity(
             if (!keepUserInfo) {
                 entity.subscription?.subscriptionUserinfo = ""
             }
+            val previousMode = Triple(entity.isSelector, entity.autoSelect, entity.frontProxy to entity.landingProxy)
             GroupManager.updateGroup(entity.apply { serialize() })
+            val currentMode = Triple(entity.isSelector, entity.autoSelect, entity.frontProxy to entity.landingProxy)
+            // The running config bakes in the group's selection mode and chain, so apply changes
+            // to it right away instead of leaving the old mode active until the next restart.
+            if (previousMode != currentMode && DataStore.serviceState.started &&
+                SagerDatabase.proxyDao.getById(DataStore.currentProfile)?.groupId == entity.id
+            ) {
+                SagerNet.reloadService()
+            }
         }
 
         finish()

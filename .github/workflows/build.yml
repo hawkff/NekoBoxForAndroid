@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'nb4a.properties'
+      - 'gradle.properties'
 permissions:
   contents: read
 jobs:
