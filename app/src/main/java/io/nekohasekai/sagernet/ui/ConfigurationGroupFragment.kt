@@ -1156,7 +1156,8 @@ class ConfigurationGroupFragment : Fragment() {
         // While urltest drives the running group, a manual pick inside it has nothing to act on.
         private fun runningGroupSelectsAutomatically(groupId: Long): Boolean {
             val running = SagerDatabase.proxyDao.getById(DataStore.currentProfile) ?: return false
-            return running.groupId == groupId && SagerDatabase.groupDao.getById(groupId)?.autoSelect == true
+            val group = SagerDatabase.groupDao.getById(groupId) ?: return false
+            return running.groupId == groupId && group.isSelector && group.autoSelect
         }
 
         private fun applySelected(selected: Boolean) {

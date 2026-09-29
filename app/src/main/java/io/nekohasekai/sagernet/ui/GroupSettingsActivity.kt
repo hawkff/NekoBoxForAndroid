@@ -76,7 +76,8 @@ class GroupSettingsActivity(
         type = DataStore.groupType
         order = DataStore.groupOrder
         isSelector = DataStore.groupIsSelector
-        autoSelect = DataStore.groupAutoSelect
+        // The switch is only disabled, not cleared, when the selector is turned off.
+        autoSelect = isSelector && DataStore.groupAutoSelect
 
         frontProxy =
             if (DataStore.frontProxyTmp == OutboundPreference.VALUE_SELECT_PROFILE.toInt()) {
