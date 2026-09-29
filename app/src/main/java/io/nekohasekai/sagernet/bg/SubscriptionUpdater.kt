@@ -34,15 +34,22 @@ internal data class SubscriptionScheduleInput(
     val autoUpdateDelay: Int,
 )
 
+/**
+ * [remindsExpiry] caps the period at a day: expiry reminders need a daily run even when no
+ * subscription auto-updates or every interval is longer. The update loop still honors each
+ * subscription's own interval.
+ */
 internal fun computeSubscriptionWorkSchedule(
     subscriptions: List<SubscriptionScheduleInput>,
     nowSeconds: Long = System.currentTimeMillis() / 1000L,
+    remindsExpiry: Boolean = false,
 ): SubscriptionWorkSchedule? {
-    if (subscriptions.isEmpty()) return null
+    if (subscriptions.isEmpty()) return if (remindsExpiry) SubscriptionWorkSchedule(24 * 60L, 0L) else null
 
     val intervalMinutes = subscriptions
         .minOf { it.autoUpdateDelay.toLong() }
         .coerceAtLeast(15L)
+        .let { if (remindsExpiry) it.coerceAtMost(24 * 60L) else it }
     val initialDelaySeconds = subscriptions.minOf { subscription ->
         val dueAt = subscription.lastUpdated.toLong() +
             subscription.autoUpdateDelay.toLong().coerceAtLeast(15L) * 60L
@@ -58,7 +65,6 @@ object SubscriptionUpdater {
     private const val EXPIRY_NOTIFICATION_ID_BASE = 1000
     private const val EXPIRY_WARNING_SECONDS = 3 * 24 * 3600L
     private const val DAY_SECONDS = 24 * 3600L
-    private const val DAY_MINUTES = 24 * 60L
 
     /**
      * Reminds about a subscription whose `expire=` is within three days, once a day, and once more
@@ -123,7 +129,6 @@ object SubscriptionUpdater {
         val all = SagerDatabase.groupDao.subscriptions().mapNotNull { it.subscription }
         val subscriptions = all.filter { it.autoUpdate!! }
 
-        // Without auto-updating subscriptions the worker still runs daily for expiry reminders.
         val schedule = computeSubscriptionWorkSchedule(
             subscriptions.map { sub ->
                 SubscriptionScheduleInput(
@@ -131,7 +136,8 @@ object SubscriptionUpdater {
                     autoUpdateDelay = sub.autoUpdateDelay ?: 1440,
                 )
             },
-        ) ?: if (all.any { it.expiry() != null }) SubscriptionWorkSchedule(DAY_MINUTES, 0L) else return
+            remindsExpiry = all.any { it.expiry() != null },
+        ) ?: return
 
         // main process
         RemoteWorkManager.getInstance(app).enqueueUniquePeriodicWork(

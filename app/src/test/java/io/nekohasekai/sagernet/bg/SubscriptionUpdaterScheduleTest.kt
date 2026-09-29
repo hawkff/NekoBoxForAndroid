@@ -23,6 +23,17 @@ class SubscriptionUpdaterScheduleTest {
     }
 
     @Test
+    fun expiryReminders_capThePeriodAtADayAndScheduleWithoutAutoUpdate() {
+        assertNull(computeSubscriptionWorkSchedule(emptyList(), nowSeconds = 0))
+        assertEquals(SubscriptionWorkSchedule(24 * 60L, 0L), computeSubscriptionWorkSchedule(emptyList(), nowSeconds = 0, remindsExpiry = true))
+        val weekly = listOf(SubscriptionScheduleInput(lastUpdated = 0, autoUpdateDelay = 7 * 24 * 60))
+        assertEquals(7 * 24 * 60L, computeSubscriptionWorkSchedule(weekly, nowSeconds = 0)!!.intervalMinutes)
+        assertEquals(24 * 60L, computeSubscriptionWorkSchedule(weekly, nowSeconds = 0, remindsExpiry = true)!!.intervalMinutes)
+        val hourly = listOf(SubscriptionScheduleInput(lastUpdated = 0, autoUpdateDelay = 60))
+        assertEquals(60L, computeSubscriptionWorkSchedule(hourly, nowSeconds = 0, remindsExpiry = true)!!.intervalMinutes)
+    }
+
+    @Test
     fun expiry_comesFromUserinfo() {
         assertEquals(1790951622L, SubscriptionBean().apply { subscriptionUserinfo = "upload=0; download=2; total=0; expire=1790951622" }.expiry())
         assertNull(SubscriptionBean().apply { subscriptionUserinfo = "upload=0; download=2" }.expiry())

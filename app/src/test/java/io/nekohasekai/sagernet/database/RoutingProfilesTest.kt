@@ -127,6 +127,9 @@ class RoutingProfilesTest {
         assertEquals(3, RoutingProfiles.list().size)
         assertTrue(RoutingProfiles.list().none { it.source == source })
         assertTrue(RoutingProfiles.list().any { it.id == active.id } && RoutingProfiles.list().any { it.id == other.id })
+        // A late store from the deleted subscription's update is dropped.
+        RoutingProfiles.import(RoutingProfiles.Profile(0L, "Late", newer).toLink(), source)
+        assertEquals(3, RoutingProfiles.list().size)
 
         // Exporting the active profile carries edits made since the last switch; others export as stored.
         SagerDatabase.rulesDao.insert(listOf(RuleEntity(name = "newest", domains = "newest.example")))

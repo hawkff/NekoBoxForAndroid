@@ -4,8 +4,6 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.ui.BackupFormatV2
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
@@ -95,6 +93,19 @@ object RoutingProfiles {
         )
     }
 
+    // Every mutation is a read-modify-write of the whole list. Concurrent subscription updates
+    // and a subscription delete racing one of them go through this lock; the main-thread
+    // rename/delete below are the only writers outside it and never run concurrently with each
+    // other.
+    private val listLock = Any()
+
+    private fun <T> mutate(block: (MutableList<Profile>) -> T): T = synchronized(listLock) {
+        val profiles = list().toMutableList()
+        val result = block(profiles)
+        save(profiles)
+        result
+    }
+
     /** Snapshot of the live rules and profile settings. */
     suspend fun captureLive(): JSONObject {
         DataStore.configurationStore.awaitWrites()
@@ -133,19 +144,20 @@ object RoutingProfiles {
 
     /** Store the live state as a new profile and make it the active one. */
     suspend fun saveLiveAs(name: String): Profile {
-        val profiles = list()
-        val profile = Profile((profiles.maxOfOrNull { it.id } ?: 0L) + 1, name, captureLive())
-        save(profiles + profile)
+        val content = captureLive()
+        val profile = mutate { profiles ->
+            Profile((profiles.maxOfOrNull { it.id } ?: 0L) + 1, name, content).also { profiles += it }
+        }
         activeId = profile.id
         return profile
     }
 
     /** Persist the live state into the active profile, if there is one. */
     suspend fun syncActive() {
-        val profiles = list()
-        val active = profiles.firstOrNull { it.id == activeId } ?: return
-        active.content = captureLive()
-        save(profiles)
+        val id = activeId
+        if (list().none { it.id == id }) return
+        val content = captureLive()
+        mutate { profiles -> profiles.firstOrNull { it.id == id }?.content = content }
     }
 
     /** The profile as the user sees it: the active one carries the live edits made since the last switch. */
@@ -163,11 +175,11 @@ object RoutingProfiles {
     }
 
     fun rename(id: Long, name: String) {
-        save(list().onEach { if (it.id == id) it.name = name })
+        mutate { profiles -> profiles.forEach { if (it.id == id) it.name = name } }
     }
 
     fun delete(id: Long) {
-        save(list().filterNot { it.id == id })
+        mutate { profiles -> profiles.removeAll { it.id == id } }
         if (activeId == id) activeId = 0L
     }
 
@@ -202,29 +214,39 @@ object RoutingProfiles {
         it.source == candidate.source && (candidate.source.isNotEmpty() || it.name == candidate.name)
     }
 
-    // Subscriptions update concurrently and each store rewrites the whole list.
-    private val storeLock = Mutex()
+    // Sources whose subscription is gone; a store that finishes after the delete is dropped instead
+    // of leaving an orphan. Group ids are never reused, so this grows by one entry per deletion.
+    private val deletedSources = HashSet<String>()
 
-    suspend fun store(candidate: Profile): Profile = storeLock.withLock {
-        val profiles = list()
-        val existing = profiles.firstOrNull {
-            it.source == candidate.source && (candidate.source.isNotEmpty() || it.name == candidate.name)
+    suspend fun store(candidate: Profile): Profile {
+        val (stored, refreshedActive) = mutate { profiles ->
+            if (candidate.source.isNotEmpty() && candidate.source in deletedSources) return@mutate candidate to false
+            val existing = profiles.firstOrNull {
+                it.source == candidate.source && (candidate.source.isNotEmpty() || it.name == candidate.name)
+            }
+            if (existing == null) {
+                val profile = Profile((profiles.maxOfOrNull { it.id } ?: 0L) + 1, candidate.name, candidate.content, candidate.source)
+                profiles += profile
+                profile to false
+            } else {
+                existing.name = candidate.name
+                existing.content = candidate.content
+                existing to (existing.id == activeId)
+            }
         }
-        if (existing == null) {
-            val profile = Profile((profiles.maxOfOrNull { it.id } ?: 0L) + 1, candidate.name, candidate.content, candidate.source)
-            save(profiles + profile)
-            return@withLock profile
-        }
-        existing.name = candidate.name
-        existing.content = candidate.content
-        save(profiles)
-        if (existing.id == activeId) applyLive(existing.content)
-        existing
+        if (refreshedActive) applyLive(stored.content)
+        return stored
     }
 
     /** Removes the profiles a deleted subscription delivered; an active one is deactivated, live state stays. */
     fun deleteBySource(source: String) {
         if (source.isEmpty()) return
-        list().filter { it.source == source }.forEach { delete(it.id) }
+        val removed = mutate { profiles ->
+            deletedSources += source
+            val removed = profiles.filter { it.source == source }
+            profiles.removeAll(removed)
+            removed
+        }
+        if (removed.any { it.id == activeId }) activeId = 0L
     }
 }
