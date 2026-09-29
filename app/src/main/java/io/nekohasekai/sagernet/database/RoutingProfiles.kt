@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.database
 
 import io.nekohasekai.sagernet.Key
-import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.ui.BackupFormatV2
 import kotlinx.coroutines.sync.Mutex
@@ -122,22 +121,28 @@ object RoutingProfiles {
             .put("settings", BackupFormatV2.encodeSettings(settings))
     }
 
+    /**
+     * Typed value of every profile setting in [settings], in [SETTING_KEYS] order; null for a key that is
+     * absent or of an unknown type. A truncated value throws here, so callers see it before any write.
+     */
+    private fun settingValues(settings: JSONArray): List<Pair<String, Any?>> {
+        val pairs = BackupFormatV2.decodeSettings(settings).associateBy { it.key }
+        return SETTING_KEYS.map { key -> key to pairs[key]?.let { it.boolean ?: it.float ?: it.long ?: it.string ?: it.stringSet } }
+    }
+
     /** Replace the live rules and profile settings with [content]. Keys absent in it return to defaults. */
     suspend fun applyLive(content: JSONObject) {
-        val rules = BackupFormatV2.decodeRules(content.getJSONArray("rules"))
-        val settings = BackupFormatV2.decodeSettings(content.getJSONArray("settings"))
-            .filter { it.key in SETTING_KEYS }
-            .associateBy { it.key }
+        val rules = BackupFormatV2.decodeRules(content.optJSONArray("rules") ?: JSONArray())
+        val settings = settingValues(content.optJSONArray("settings") ?: JSONArray())
         val store = DataStore.configurationStore
-        for (key in SETTING_KEYS) {
-            val pair = settings[key]
-            when {
-                pair == null -> store.remove(key)
-                pair.valueType == KeyValuePair.TYPE_BOOLEAN -> store.putBoolean(key, pair.boolean!!)
-                pair.valueType == KeyValuePair.TYPE_STRING -> store.putString(key, pair.string)
-                pair.valueType == KeyValuePair.TYPE_STRING_SET -> store.putStringSet(key, pair.stringSet?.toMutableSet())
-                pair.valueType == KeyValuePair.TYPE_FLOAT -> store.putFloat(key, pair.float!!)
-                else -> pair.long?.let { store.putLong(key, it) } ?: store.remove(key)
+        for ((key, value) in settings) {
+            when (value) {
+                null -> store.remove(key)
+                is Boolean -> store.putBoolean(key, value)
+                is Float -> store.putFloat(key, value)
+                is Long -> store.putLong(key, value)
+                is String -> store.putString(key, value)
+                is Set<*> -> store.putStringSet(key, value.filterIsInstance<String>().toMutableSet())
             }
         }
         store.awaitWrites()
@@ -207,10 +212,11 @@ object RoutingProfiles {
         val json = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
         if (json.optInt("routingProfile", 0) != FORMAT) return null
         val content = json.optJSONObject("content") ?: return null
-        // Decode here so malformed content is refused before it can replace a stored profile or the live rules.
+        // Decode here, typed values included, so malformed content is refused before it can replace a
+        // stored profile or the live rules and settings.
         val decodes = runCatching {
             BackupFormatV2.decodeRules(content.getJSONArray("rules"))
-            BackupFormatV2.decodeSettings(content.getJSONArray("settings"))
+            settingValues(content.getJSONArray("settings"))
         }.isSuccess
         if (!decodes) return null
         return Profile(0L, json.optString("name").ifBlank { "Imported" }, content, source)
