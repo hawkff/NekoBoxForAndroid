@@ -17,6 +17,10 @@
     <color name="color_route_proxy">#42A5F5</color>   <!-- 代理：浅蓝 -->
     <color name="color_route_config">#AB47BC</color>  <!-- 配置：浅紫 -->
 
+    <!-- Connection-test result text on the dark surface. -->
+    <color name="test_available">@color/material_green_400</color>
+    <color name="test_fail">@color/material_red_400</color>
+
     <!-- Elevated-card tonal surface colors (dark: #121212 base + ~11% primary tint). -->
     <color name="card_elevated_pink">#2A131B</color>
     <color name="card_elevated_pink_ssr">#2C1D21</color>

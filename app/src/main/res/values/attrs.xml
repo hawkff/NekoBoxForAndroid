@@ -22,7 +22,10 @@
     <!-- "Connecting…" in-progress status text. Default on-primary; Dracula = yellow
          (on-primary resolved to dark on Dracula's light-purple primary). -->
     <attr name="statusConnectingColor" format="color" />
-    <!-- Connection-test failure color. Default Material red; Dracula = #ff5555. -->
+    <!-- Connection-test result colors as text on the surface. Defaults are day/night
+         Material tones that pass 4.5:1 on the light surface and the selected card;
+         the dark schemes use their own green/red. -->
+    <attr name="testAvailableColor" format="color" />
     <attr name="testFailColor" format="color" />
     <!-- Bottom-bar speed text (arrows + rate). Default on-primary; Dracula = yellow. -->
     <attr name="speedTextColor" format="color" />
