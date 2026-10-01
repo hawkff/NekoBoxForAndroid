@@ -22,6 +22,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.databinding.LayoutAddEntityBinding
 import io.nekohasekai.sagernet.databinding.LayoutProfileBinding
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
@@ -74,12 +75,17 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
 
     private fun hintText(hops: List<ProxyEntity>): String {
         val listed = hops.lastOrNull() ?: return getString(R.string.chain_hint_empty)
-        // A nested chain reaches the destination through its own last hop.
-        val exit = runCatching { chainHops(listed).last() }.getOrDefault(listed)
+        // The group's front proxy is dialed first and its landing proxy last, as in the config
+        // builder; otherwise a nested chain reaches the destination through its own last hop.
+        val group = SagerDatabase.groupDao.getById(DataStore.editingGroup)
+        val front = group?.frontProxy?.let { SagerDatabase.proxyDao.getById(it) }
+        val landing = group?.landingProxy?.let { SagerDatabase.proxyDao.getById(it) }
+        val exit = landing ?: runCatching { chainHops(listed).last() }.getOrDefault(listed)
         val exitName = exit.displayName()
         val bean = exit.requireBean()
+        val order = listOfNotNull(front) + hops + listOfNotNull(landing)
         return listOf(
-            getString(R.string.chain_hint_order, hops.joinToString(" \u2192 ") { it.displayName() }),
+            getString(R.string.chain_hint_order, order.joinToString(" \u2192 ") { it.displayName() }),
             if (DataStore.resolveDestination) {
                 getString(R.string.chain_hint_dns_direct)
             } else {

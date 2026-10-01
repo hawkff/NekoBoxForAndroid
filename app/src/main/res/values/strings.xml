@@ -300,6 +300,7 @@
     <string name="share_connection">Share connection</string>
     <string name="share_connection_off">Sharing is off</string>
     <string name="share_connection_waiting">Sharing starts once the service is running</string>
+    <string name="share_connection_unsupported">%s is a full custom config: it is passed to the core as is, so no shared listener is generated. Select another profile to share.</string>
     <string name="share_connection_on">Sharing %1$s on port %2$d</string>
     <string name="share_connection_notification">sharing on port %d</string>
     <string name="share_connection_scope">Listens on every IPv4 network of this device, including Wi-Fi and hotspot. Anyone on those networks who has the credentials can route traffic through this proxy.</string>

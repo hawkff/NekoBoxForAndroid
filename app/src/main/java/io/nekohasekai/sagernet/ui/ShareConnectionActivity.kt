@@ -136,17 +136,20 @@ class ShareConnectionActivity :
         }
         addresses.forEach { (label, address) -> binding.shareAddresses.addView(addressRow(label, address, port)) }
         runOnDefaultDispatcher {
+            val connected = DataStore.serviceState.connected
+            val profile = ProfileManager.getProfile(if (connected) DataStore.currentProfile else DataStore.selectedProxy)
+            // A full custom config is handed to the core verbatim, so no shared listener is generated.
+            val shareable = profile?.configBean?.type != 0
             val status = when {
+                !shareable -> getString(R.string.share_connection_unsupported, profile?.displayName() ?: "")
                 !sharing -> getString(R.string.share_connection_off)
-
-                !DataStore.serviceState.connected -> getString(R.string.share_connection_waiting)
-
-                else -> {
-                    val profile = ProfileManager.getProfile(DataStore.currentProfile)
-                    getString(R.string.share_connection_on, profile?.displayName() ?: "", port)
-                }
+                !connected -> getString(R.string.share_connection_waiting)
+                else -> getString(R.string.share_connection_on, profile?.displayName() ?: "", port)
             }
-            onMainDispatcher { binding.shareStatus.text = status }
+            onMainDispatcher {
+                binding.shareStatus.text = status
+                binding.shareSwitch.isEnabled = shareable
+            }
         }
     }
 
