@@ -50,6 +50,7 @@ import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
 import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.internal.chainContains
+import io.nekohasekai.sagernet.fmt.internal.chainHops
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.ImportPreview
 import io.nekohasekai.sagernet.group.RawUpdater
@@ -481,13 +482,18 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    // The profile the exit is added to, captured when the picker opens: a selector update
+    // while the picker is up must not redirect the new chain to another profile.
+    private var exitProxyBaseId = 0L
+
     private val selectExitProxy =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { (resultCode, data) ->
             if (resultCode != Activity.RESULT_OK) return@registerForActivityResult
             val exitId = data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+            val baseId = exitProxyBaseId.takeIf { it > 0L } ?: DataStore.selectedProxy
             runOnDefaultDispatcher {
                 try {
-                    val chain = addExitProxy(DataStore.selectedProxy, exitId)
+                    val chain = addExitProxy(baseId, exitId)
                     onMainDispatcher { snackbar(getString(R.string.exit_proxy_added, chain.displayName())).show() }
                 } catch (e: IllegalArgumentException) {
                     onMainDispatcher { snackbar(e.readableMessage).show() }
@@ -501,11 +507,12 @@ class ConfigurationFragment @JvmOverloads constructor(
         val base = requireNotNull(ProfileManager.getProfile(baseId)) { getString(R.string.profile_empty) }
         val exit = requireNotNull(ProfileManager.getProfile(exitId)) { getString(R.string.profile_empty) }
         require(!chainContains(exit, base.id)) { getString(R.string.circular_reference_sum) }
-        val baseHops = base.chainBean?.proxies ?: listOf(base.id)
-        require(baseHops.isNotEmpty()) { getString(R.string.chain_no_hops, base.displayName()) }
+        // Resolve both sides now, so a chain without hops or with a deleted hop fails here
+        // with its message instead of stopping the service on reload.
+        val hops = chainHops(base) + chainHops(exit)
         val bean = ChainBean().apply {
             name = "${base.displayName()} \u2192 ${exit.displayName()}"
-            proxies = baseHops + exit.id
+            proxies = hops.map { it.id }
             initializeDefaultValues()
         }
         // Subscription groups are overwritten on update; keep the chain in a basic group.
@@ -697,7 +704,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_add_exit_proxy -> {
-                if (DataStore.selectedProxy <= 0L) {
+                exitProxyBaseId = DataStore.selectedProxy
+                if (exitProxyBaseId <= 0L) {
                     snackbar(R.string.profile_empty).show()
                 } else {
                     selectExitProxy.launch(Intent(requireActivity(), ProfileSelectActivity::class.java))

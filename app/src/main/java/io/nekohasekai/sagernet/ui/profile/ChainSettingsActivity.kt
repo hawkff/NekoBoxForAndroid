@@ -58,14 +58,17 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
     lateinit var configurationAdapter: ProxiesAdapter
     lateinit var layoutManager: LinearLayoutManager
     private lateinit var chainHint: TextView
+    private var hintGeneration = 0
 
     // Hop order plus the two things chaining does not change by itself: which side resolves
-    // destination names and whether UDP survives the exit hop.
+    // destination names and whether UDP survives the exit hop. Only the latest edit may write
+    // the hint; an older lookup that finishes late is dropped.
     private fun updateHint() {
         val hops = proxyList.toList()
+        val generation = ++hintGeneration
         runOnDefaultDispatcher {
             val text = hintText(hops)
-            onMainDispatcher { chainHint.text = text }
+            onMainDispatcher { if (generation == hintGeneration) chainHint.text = text }
         }
     }
 

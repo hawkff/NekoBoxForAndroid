@@ -18,6 +18,7 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.databinding.LayoutShareConnectionBinding
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.socks.toUri
+import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.widget.QRCodeDialog
@@ -89,10 +90,17 @@ class ShareConnectionActivity :
     // the service process reads it.
     private fun applyToService(startIfStopped: Boolean) {
         runOnDefaultDispatcher {
-            DataStore.configurationStore.awaitWrites()
-            when {
-                DataStore.serviceState.canStop -> SagerNet.reloadService()
-                startIfStopped -> onMainDispatcher { connect.launch(null) }
+            try {
+                DataStore.configurationStore.awaitWrites()
+                when {
+                    DataStore.serviceState.canStop -> SagerNet.reloadService()
+
+                    // The switch may have been turned off again while the write was pending.
+                    startIfStopped && DataStore.allowAccess -> onMainDispatcher { connect.launch(null) }
+                }
+            } catch (e: Exception) {
+                Logs.w(e)
+                onMainDispatcher { snackbar(R.string.service_failed).show() }
             }
         }
     }
