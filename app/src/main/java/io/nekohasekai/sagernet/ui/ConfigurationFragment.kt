@@ -733,11 +733,15 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             R.id.action_update_subscription -> {
-                // Capture the cached selection before dispatch; database reads stay off-main.
-                val groupId = DataStore.configurationStore.getLong(Key.PROFILE_GROUP) ?: return true
+                // An unset selection uses the default group; never follow a later tab switch.
+                val groupId = DataStore.configurationStore.getLong(Key.PROFILE_GROUP)?.takeIf { it > 0L }
                 runOnLifecycleDispatcher {
-                    val group = SagerDatabase.groupDao.getById(groupId) ?: return@runOnLifecycleDispatcher
-                    if (group.type != GroupType.SUBSCRIPTION) {
+                    val group = if (groupId == null) {
+                        SagerDatabase.groupDao.allGroups().firstOrNull()
+                    } else {
+                        SagerDatabase.groupDao.getById(groupId)
+                    }
+                    if (group?.type != GroupType.SUBSCRIPTION) {
                         onMainDispatcher { snackbar(R.string.group_not_subscription).show() }
                     } else {
                         GroupUpdater.startUpdate(group, true)

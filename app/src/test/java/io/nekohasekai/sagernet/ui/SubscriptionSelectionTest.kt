@@ -7,6 +7,7 @@ import android.widget.PopupMenu
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
 import io.nekohasekai.sagernet.GroupType
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
@@ -48,10 +49,16 @@ class SubscriptionSelectionTest {
     }
 
     @Test
-    fun queuedUpdateKeepsTheGroupSelectedAtTheTap() = runBlocking {
+    fun queuedUpdateKeepsTheGroupSelectedAtTheTap() = verifyQueuedUpdate(hasSelection = true)
+
+    @Test
+    fun earlyUpdateUsesDefaultGroupWithoutFollowingALaterSelection() = verifyQueuedUpdate(hasSelection = false)
+
+    private fun verifyQueuedUpdate(hasSelection: Boolean) = runBlocking {
         val groups = withContext(Dispatchers.IO) {
-            List(2) {
+            List(2) { index ->
                 val group = ProxyGroup(
+                    userOrder = index + 1L,
                     type = GroupType.SUBSCRIPTION,
                     subscription = SubscriptionBean().applyDefaultValues().apply {
                         link = "http://subscription.invalid/list"
@@ -60,7 +67,11 @@ class SubscriptionSelectionTest {
                 SagerDatabase.groupDao.createGroup(group)
             }
         }
-        DataStore.selectedGroup = groups[0]
+        if (hasSelection) {
+            DataStore.selectedGroup = groups[0]
+        } else {
+            DataStore.configurationStore.remove(Key.PROFILE_GROUP)
+        }
         DataStore.configurationStore.awaitWrites()
         val previousState = DataStore.serviceState
         val previousInterface = GroupManager.userInterface
