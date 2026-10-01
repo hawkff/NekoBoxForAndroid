@@ -74,16 +74,21 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
     }
 
     private fun hintText(hops: List<ProxyEntity>): String {
-        val listed = hops.lastOrNull() ?: return getString(R.string.chain_hint_empty)
+        if (hops.isEmpty()) return getString(R.string.chain_hint_empty)
         // The group's front proxy is dialed first and its landing proxy last, as in the config
-        // builder; otherwise a nested chain reaches the destination through its own last hop.
+        // builder; a nested chain is dialed through its own hops.
         val group = SagerDatabase.groupDao.getById(DataStore.editingGroup)
         val front = group?.frontProxy?.takeIf { it > 0 }?.let { SagerDatabase.proxyDao.getById(it) }
         val landing = group?.landingProxy?.takeIf { it > 0 }?.let { SagerDatabase.proxyDao.getById(it) }
-        val exit = landing ?: runCatching { chainHops(listed).last() }.getOrDefault(listed)
+        val order = listOfNotNull(front) + hops + listOfNotNull(landing)
+        val dialed = order.flatMap { runCatching { chainHops(it) }.getOrDefault(listOf(it)) }
+        val exit = dialed.last()
         val exitName = exit.displayName()
         val bean = exit.requireBean()
-        val order = listOfNotNull(front) + hops + listOfNotNull(landing)
+        // UDP has to be carried by every hop: one TCP-only hop anywhere in the chain blocks it.
+        val tcpOnly = dialed.firstOrNull {
+            it.type == ProxyEntity.TYPE_HTTP || it.type == ProxyEntity.TYPE_SSH || it.requireBean().network() == "tcp"
+        }
         return listOf(
             getString(R.string.chain_hint_order, order.joinToString(" \u2192 ") { it.displayName() }),
             if (DataStore.resolveDestination) {
@@ -92,13 +97,9 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
                 getString(R.string.chain_hint_dns_exit, exitName)
             },
             when {
-                exit.type == ProxyEntity.TYPE_HTTP || exit.type == ProxyEntity.TYPE_SSH || bean.network() == "tcp" ->
-                    getString(R.string.chain_hint_udp_tcp_only, exitName)
-
+                tcpOnly != null -> getString(R.string.chain_hint_udp_tcp_only, tcpOnly.displayName())
                 bean is SOCKSBean && bean.sUoT == true -> getString(R.string.chain_hint_udp_uot, exitName)
-
                 bean is SOCKSBean -> getString(R.string.chain_hint_udp_socks, exitName)
-
                 else -> getString(R.string.chain_hint_udp_generic)
             },
         ).joinToString("\n")

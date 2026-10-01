@@ -99,14 +99,16 @@ class ShareConnectionActivity :
         refresh()
     }
 
-    // Binding does not announce the state. MainActivity keeps the shared value fresh, except when
-    // this screen alone is restored after the process was killed.
+    // Binding does not announce the state, and a change made before the bind completed waits for
+    // it. The same applies after the service process died and the binding came back.
     override fun onServiceConnected(service: ISagerNetService) {
-        DataStore.serviceState = try {
+        val state = try {
             BaseService.State.values()[service.state]
         } catch (_: RemoteException) {
             BaseService.State.Idle
         }
+        DataStore.serviceState = state
+        act(sync.onState(state, DataStore.allowAccess))
         refresh()
     }
 

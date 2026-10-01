@@ -63,6 +63,23 @@ class ShareServiceSyncTest {
     }
 
     @Test
+    fun toggleDuringShutdown_serviceComesBackOnItsOwn_reloadsOnceAndLaterStopSticks() {
+        assertEquals(Action.None, toggleOn(State.Stopping))
+        assertEquals(Action.None, sync.onState(State.Connecting, allowAccess = true))
+        assertEquals(Action.Reload, sync.onState(State.Connected, allowAccess = true))
+        assertEquals(Action.None, sync.onState(State.Stopped, allowAccess = true))
+    }
+
+    @Test
+    fun toggleBeforeFirstReport_resolvesOnIt() {
+        assertEquals(Action.None, toggleOn(State.Idle))
+        assertEquals(Action.Reload, sync.onState(State.Connected, allowAccess = true))
+
+        assertEquals(Action.None, toggleOn(State.Idle))
+        assertEquals(Action.Launch, sync.onState(State.Stopped, allowAccess = true))
+    }
+
+    @Test
     fun toggleDuringShutdownThenOff_doesNotLaunch() {
         assertEquals(Action.None, toggleOn(State.Stopping))
         assertEquals(Action.None, toggleOff(State.Stopping))

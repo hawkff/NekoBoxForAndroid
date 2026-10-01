@@ -5,10 +5,11 @@ import io.nekohasekai.sagernet.bg.BaseService
 /**
  * Decides how a change made on the share screen reaches the service. A running service reloads
  * at once. A stopped one is launched when sharing is switched on; the launch reads the store by
- * itself, so only a change made after it needs a reload once the service connects. A launch
- * requested while the service is still stopping waits for Stopped and happens once. A launch
- * that ends in Stopped failed and is not retried; the next toggle may launch again. Pure logic
- * so the interleavings are testable on the JVM; the activity calls it on the main thread.
+ * itself, so only a change made after it needs a reload once the service connects. A change made
+ * while the service is still stopping, or before it has reported a state, waits for the next
+ * report: Stopped launches once, Connected reloads once. A launch that ends in Stopped failed and
+ * is not retried; the next toggle may launch again. Pure logic so the interleavings are testable
+ * on the JVM; the activity calls it on the main thread.
  */
 class ShareServiceSync {
     enum class Action { None, Reload, Launch }
@@ -29,7 +30,9 @@ class ShareServiceSync {
 
             !startIfStopped || !allowAccess -> Action.None
 
-            state == BaseService.State.Stopping -> {
+            // Stopping ends in Stopped or, with the kill switch holding the tun, in Connecting.
+            // Idle is the value before the first report. Both resolve on the next report.
+            state != BaseService.State.Stopped -> {
                 deferred = true
                 Action.None
             }
@@ -43,9 +46,13 @@ class ShareServiceSync {
     /** The service reported [state]. */
     fun onState(state: BaseService.State, allowAccess: Boolean): Action = when (state) {
         BaseService.State.Connected -> {
-            val changedSinceLaunch = launchedVersion in 0 until version
+            // A launch reads the store by itself, so only a later change needs a reload. A service
+            // that came up on its own while a change waited may have read the store before the
+            // change landed; reload once rather than guess.
+            val reload = launchedVersion in 0 until version || deferred
             launchedVersion = -1
-            if (changedSinceLaunch) Action.Reload else Action.None
+            deferred = false
+            if (reload) Action.Reload else Action.None
         }
 
         BaseService.State.Stopped -> {
