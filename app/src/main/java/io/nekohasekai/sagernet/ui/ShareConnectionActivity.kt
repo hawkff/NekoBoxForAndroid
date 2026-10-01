@@ -37,8 +37,15 @@ class ShareConnectionActivity :
     private lateinit var binding: LayoutShareConnectionBinding
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHARE_CONNECTION)
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) {
-        if (it) snackbar(R.string.vpn_permission_denied).show()
+        if (it) {
+            startPending = false
+            snackbar(R.string.vpn_permission_denied).show()
+        }
     }
+
+    // A start launched here reads the sharing flag on its own; until it reports back, a toggle
+    // finds no running service to reload, so the flag is applied again once it connects.
+    private var startPending = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,7 +90,13 @@ class ShareConnectionActivity :
 
     override fun snackbarInternal(text: CharSequence): Snackbar = Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG)
 
-    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) = refresh()
+    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
+        if (startPending && state == BaseService.State.Connected) {
+            startPending = false
+            if (!DataStore.allowAccess) applyToService(startIfStopped = false)
+        }
+        refresh()
+    }
 
     override fun onServiceConnected(service: ISagerNetService) = refresh()
 
@@ -98,7 +111,10 @@ class ShareConnectionActivity :
                     DataStore.serviceState.canStop -> SagerNet.reloadService()
 
                     // The switch may have been turned off again while the write was pending.
-                    startIfStopped && DataStore.allowAccess -> onMainDispatcher { connect.launch(null) }
+                    startIfStopped && DataStore.allowAccess -> onMainDispatcher {
+                        startPending = true
+                        connect.launch(null)
+                    }
                 }
             } catch (e: Exception) {
                 Logs.w(e)
