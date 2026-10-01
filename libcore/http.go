@@ -114,14 +114,28 @@ func (c *httpClient) TrySocks5(port int32, username string, password string) {
 				}
 				break
 			}
-			_, err = socks.ClientHandshake5(socksConn, socks5.CommandConnect, metadata.ParseSocksaddr(addr), username, password)
+			stop := context.AfterFunc(ctx, func() { _ = socksConn.Close() })
+			err = socksConn.SetDeadline(time.Now().Add(defaultHTTPDialTimeout))
+			if err == nil {
+				_, err = socks.ClientHandshake5(socksConn, socks5.CommandConnect, metadata.ParseSocksaddr(addr), username, password)
+			}
+			if !stop() {
+				err = ctx.Err()
+			}
+			if err == nil {
+				err = socksConn.SetDeadline(time.Time{})
+			}
 			if err != nil {
+				_ = socksConn.Close()
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				if c.tryH3Direct {
 					return nil, errFailConnectSocks5
 				}
 				break
 			}
-			return socksConn, err
+			return socksConn, nil
 		}
 		return dialer.DialContext(ctx, network, addr)
 	}

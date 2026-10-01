@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,69 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSocksHandshakeFailureAndCancellationCloseSocket(t *testing.T) {
+	for _, cancelHandshake := range []bool{false, true} {
+		name := "rejected"
+		if cancelHandshake {
+			name = "cancelled"
+		}
+		t.Run(name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			client := NewHttpClient().(*httpClient)
+			defer client.Close()
+			client.TrySocks5(int32(listener.Addr().(*net.TCPAddr).Port), "", "")
+			client.TryH3Direct()
+			ctx, cancel := context.WithTimeout(context.Background(), raceTestTimeout)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				conn, err := client.h1h2Transport.DialContext(ctx, "tcp", "example.invalid:443")
+				if conn != nil {
+					conn.Close()
+				}
+				result <- err
+			}()
+			if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(raceTestTimeout)); err != nil {
+				t.Fatal(err)
+			}
+			conn, err := listener.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if err := conn.SetDeadline(time.Now().Add(raceTestTimeout)); err != nil {
+				t.Fatal(err)
+			}
+			var request [3]byte
+			if _, err := io.ReadFull(conn, request[:]); err != nil {
+				t.Fatal(err)
+			}
+			wantErr := errFailConnectSocks5
+			if cancelHandshake {
+				cancel()
+				wantErr = context.Canceled
+			} else if _, err := conn.Write([]byte{5, 255}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("dial error = %v, want %v", err, wantErr)
+				}
+			case <-time.After(raceTestTimeout):
+				t.Fatal("SOCKS handshake did not finish")
+			}
+			if _, err := conn.Read(request[:]); !errors.Is(err, io.EOF) {
+				t.Fatalf("failed handshake socket was not closed: %v", err)
+			}
+		})
+	}
+}
 
 const raceTestTimeout = 2 * time.Second
 
