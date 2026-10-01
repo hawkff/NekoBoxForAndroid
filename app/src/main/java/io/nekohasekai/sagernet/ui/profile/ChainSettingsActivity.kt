@@ -78,8 +78,8 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         // The group's front proxy is dialed first and its landing proxy last, as in the config
         // builder; otherwise a nested chain reaches the destination through its own last hop.
         val group = SagerDatabase.groupDao.getById(DataStore.editingGroup)
-        val front = group?.frontProxy?.let { SagerDatabase.proxyDao.getById(it) }
-        val landing = group?.landingProxy?.let { SagerDatabase.proxyDao.getById(it) }
+        val front = group?.frontProxy?.takeIf { it > 0 }?.let { SagerDatabase.proxyDao.getById(it) }
+        val landing = group?.landingProxy?.takeIf { it > 0 }?.let { SagerDatabase.proxyDao.getById(it) }
         val exit = landing ?: runCatching { chainHops(listed).last() }.getOrDefault(listed)
         val exitName = exit.displayName()
         val bean = exit.requireBean()

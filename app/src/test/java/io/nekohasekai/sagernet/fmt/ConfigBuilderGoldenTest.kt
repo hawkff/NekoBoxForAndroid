@@ -12,6 +12,7 @@ import io.nekohasekai.sagernet.fmt.internal.chainContains
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
+import moe.matsuri.nb4a.proxy.config.ConfigBean
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -205,6 +206,29 @@ class ConfigBuilderGoldenTest {
         assertTrue(assertThrows(IllegalArgumentException::class.java) { build(missing, forTest = true) }.message!!.contains("missing"))
         assertTrue(assertThrows(IllegalArgumentException::class.java) { build(empty, forTest = true) }.message!!.contains("empty"))
         assertTrue(assertThrows(IllegalArgumentException::class.java) { build(loopOuter, forTest = true) }.message!!.contains("loop"))
+
+        // A full custom config replaces the whole generated config; a custom outbound is one hop.
+        val customConfig = addProfile(
+            group,
+            ConfigBean().apply {
+                name = "custom-config"
+                type = 0
+                config = "{}"
+            },
+        )
+        val customOutbound = addProfile(
+            group,
+            ConfigBean().apply {
+                name = "custom-outbound"
+                type = 1
+                config = """{"type":"socks","server":"192.0.2.29","server_port":1080}"""
+            },
+        )
+        val customConfigHop = addChain(group, "custom-config-hop", hop.id, customConfig.id)
+        assertTrue(assertThrows(IllegalArgumentException::class.java) { build(customConfigHop, forTest = true) }.message!!.contains("custom-config"))
+        val customOutboundHop = addChain(group, "custom-outbound-hop", hop.id, customOutbound.id)
+        assertTrue(build(customOutboundHop, forTest = true).config.contains("192.0.2.29"))
+
         assertTrue(ConfigBuilderTestEnv.io { chainContains(loopOuter, hop.id) })
         assertTrue(ConfigBuilderTestEnv.io { chainContains(loopInner, loopOuter.id) })
         assertFalse(ConfigBuilderTestEnv.io { chainContains(hop, loopOuter.id) })

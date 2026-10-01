@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.os.Bundle
+import android.os.RemoteException
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -36,18 +37,13 @@ class ShareConnectionActivity :
 
     private lateinit var binding: LayoutShareConnectionBinding
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHARE_CONNECTION)
+    private val sync = ShareServiceSync()
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) {
         if (it) {
-            startedVersion = -1
+            sync.onLaunchFailed()
             snackbar(R.string.vpn_permission_denied).show()
         }
     }
-
-    // Every change made here bumps the version. A start launched here reads the store on its
-    // own; until it reports back there is no running service to reload, so the version it was
-    // launched with is kept and a reload follows once it connects if anything changed since.
-    private var applyVersion = 0
-    private var startedVersion = -1
     private var refreshVersion = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,43 +87,49 @@ class ShareConnectionActivity :
         super.onDestroy()
     }
 
+    override fun onSupportNavigateUp(): Boolean {
+        if (!super.onSupportNavigateUp()) finish()
+        return true
+    }
+
     override fun snackbarInternal(text: CharSequence): Snackbar = Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG)
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        if (startedVersion >= 0 && state == BaseService.State.Connected) {
-            val started = startedVersion
-            startedVersion = -1
-            if (applyVersion != started) SagerNet.reloadService()
-        }
+        act(sync.onState(state, DataStore.allowAccess))
         refresh()
     }
 
-    override fun onServiceConnected(service: ISagerNetService) = refresh()
+    // Binding does not announce the state. MainActivity keeps the shared value fresh, except when
+    // this screen alone is restored after the process was killed.
+    override fun onServiceConnected(service: ISagerNetService) {
+        DataStore.serviceState = try {
+            BaseService.State.values()[service.state]
+        } catch (_: RemoteException) {
+            BaseService.State.Idle
+        }
+        refresh()
+    }
 
     // The inbound is generated at start: a running service reloads, a stopped one starts when
     // sharing is switched on. The flag lives in the cached store, so wait for the write before
     // the service process reads it.
     private fun applyToService(startIfStopped: Boolean) {
-        val version = ++applyVersion
         runOnDefaultDispatcher {
             try {
                 DataStore.configurationStore.awaitWrites()
-                onMainDispatcher {
-                    when {
-                        DataStore.serviceState.canStop -> SagerNet.reloadService()
-
-                        // The switch may have been turned off again while the write was pending,
-                        // and a start already in flight picks the change up when it connects.
-                        startIfStopped && DataStore.allowAccess && startedVersion < 0 -> {
-                            startedVersion = version
-                            connect.launch(null)
-                        }
-                    }
-                }
+                onMainDispatcher { act(sync.onChange(DataStore.serviceState, startIfStopped, DataStore.allowAccess)) }
             } catch (e: Exception) {
                 Logs.w(e)
                 onMainDispatcher { snackbar(R.string.service_failed).show() }
             }
+        }
+    }
+
+    private fun act(action: ShareServiceSync.Action) {
+        when (action) {
+            ShareServiceSync.Action.Reload -> SagerNet.reloadService()
+            ShareServiceSync.Action.Launch -> connect.launch(null)
+            ShareServiceSync.Action.None -> Unit
         }
     }
 
@@ -156,7 +158,7 @@ class ShareConnectionActivity :
                 !shareable -> getString(R.string.share_connection_unsupported, profile.displayName())
                 !sharing -> getString(R.string.share_connection_off)
                 !connected -> getString(R.string.share_connection_waiting)
-                else -> getString(R.string.share_connection_on, profile?.displayName() ?: "", port)
+                else -> getString(R.string.share_connection_on, profile.displayName(), port)
             }
             onMainDispatcher {
                 if (version != refreshVersion) return@onMainDispatcher

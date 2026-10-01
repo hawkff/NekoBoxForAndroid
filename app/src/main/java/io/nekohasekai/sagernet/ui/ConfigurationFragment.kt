@@ -528,9 +528,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             proxies = listOf(base.id, exit.id)
             initializeDefaultValues()
         }
-        // Subscription groups are overwritten on update; keep the chain in a basic group.
-        val groupId = SagerDatabase.groupDao.getById(base.groupId)?.takeIf { it.type == GroupType.BASIC }?.id
-            ?: DataStore.selectedGroupForImport()
+        // Subscription groups are overwritten on update, and a group that picks its member by
+        // URL test would treat the chain as one more candidate: keep it where the selection is
+        // what gets dialed.
+        fun ProxyGroup.usesSelection() = type == GroupType.BASIC && !(isSelector && autoSelect)
+        val groupId = SagerDatabase.groupDao.getById(base.groupId)?.takeIf { it.usesSelection() }?.id
+            ?: SagerDatabase.groupDao.allGroups().firstOrNull { it.usesSelection() }?.id
+            ?: SagerDatabase.groupDao.createGroup(ProxyGroup(ungrouped = true))
         val chain = ProfileManager.createProfile(groupId, bean)
         val previous = DataStore.selectedProxy
         DataStore.selectedProxy = chain.id
