@@ -103,6 +103,8 @@ func (c *httpClient) RestrictedTLS() {
 	// })
 }
 
+// TrySocks5 prefers the local SOCKS proxy, with direct fallback for other SOCKS failures.
+// Handshake timeouts and cancellations fail the request without direct fallback.
 func (c *httpClient) TrySocks5(port int32, username string, password string) {
 	dialer := &net.Dialer{Timeout: defaultHTTPDialTimeout}
 	c.h1h2Transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -129,6 +131,9 @@ func (c *httpClient) TrySocks5(port int32, username string, password string) {
 				_ = socksConn.Close()
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
+				}
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					return nil, err
 				}
 				if c.tryH3Direct {
 					return nil, errFailConnectSocks5
