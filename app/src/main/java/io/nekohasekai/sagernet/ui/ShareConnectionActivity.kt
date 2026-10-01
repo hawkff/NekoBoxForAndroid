@@ -54,16 +54,18 @@ class ShareConnectionActivity :
         binding.shareSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked == DataStore.allowAccess) return@setOnCheckedChangeListener
             DataStore.allowAccess = checked
-            applyToService(startIfStopped = checked)
+            // refresh() reads shareSecret and so creates it on first use; that write must be
+            // queued before applyToService() waits for writes and the service reads the store.
             refresh()
+            applyToService(startIfStopped = checked)
         }
         binding.shareCopyCredentials.setOnClickListener {
             copy("${Key.SHARE_USERNAME}:${DataStore.shareSecret}")
         }
         binding.shareRegenerate.setOnClickListener {
             DataStore.regenerateShareSecret()
-            applyToService(startIfStopped = false)
             refresh()
+            applyToService(startIfStopped = false)
             snackbar(R.string.share_connection_regenerated).show()
         }
         connection.connect(this, this)

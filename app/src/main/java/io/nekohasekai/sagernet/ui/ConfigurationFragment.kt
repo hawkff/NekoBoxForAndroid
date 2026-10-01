@@ -495,24 +495,27 @@ class ConfigurationFragment @JvmOverloads constructor(
                 try {
                     val chain = addExitProxy(baseId, exitId)
                     onMainDispatcher { snackbar(getString(R.string.exit_proxy_added, chain.displayName())).show() }
-                } catch (e: IllegalArgumentException) {
+                } catch (e: Exception) {
+                    Logs.w(e)
                     onMainDispatcher { snackbar(e.readableMessage).show() }
                 }
             }
         }
 
     // A running connection cannot grow a hop: build a chain profile that ends at the exit,
-    // select it and reconnect. The hop order is the profile name.
+    // select it and reconnect. The hop order is the profile name. Both sides stay references,
+    // so later edits to either chain apply to this one as well.
     private suspend fun addExitProxy(baseId: Long, exitId: Long): ProxyEntity {
         val base = requireNotNull(ProfileManager.getProfile(baseId)) { getString(R.string.profile_empty) }
         val exit = requireNotNull(ProfileManager.getProfile(exitId)) { getString(R.string.profile_empty) }
         require(!chainContains(exit, base.id)) { getString(R.string.circular_reference_sum) }
         // Resolve both sides now, so a chain without hops or with a deleted hop fails here
         // with its message instead of stopping the service on reload.
-        val hops = chainHops(base) + chainHops(exit)
+        chainHops(base)
+        chainHops(exit)
         val bean = ChainBean().apply {
             name = "${base.displayName()} \u2192 ${exit.displayName()}"
-            proxies = hops.map { it.id }
+            proxies = listOf(base.id, exit.id)
             initializeDefaultValues()
         }
         // Subscription groups are overwritten on update; keep the chain in a basic group.
