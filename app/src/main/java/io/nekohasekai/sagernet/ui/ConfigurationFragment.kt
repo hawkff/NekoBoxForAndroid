@@ -123,6 +123,10 @@ class ConfigurationFragment @JvmOverloads constructor(
         fun returnProfile(profileId: Long)
     }
 
+    private companion object {
+        const val KEY_EXIT_PROXY_BASE = "exitProxyBase"
+    }
+
     lateinit var adapter: GroupPagerAdapter
     lateinit var tabLayout: TabLayout
     lateinit var groupPager: ViewPager2
@@ -207,12 +211,18 @@ class ConfigurationFragment @JvmOverloads constructor(
         setHasOptionsMenu(true)
 
         if (savedInstanceState != null) {
+            exitProxyBaseId = savedInstanceState.getLong(KEY_EXIT_PROXY_BASE, 0L)
             parentFragmentManager.beginTransaction()
                 .setReorderingAllowed(false)
                 .detach(this)
                 .attach(this)
                 .commit()
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putLong(KEY_EXIT_PROXY_BASE, exitProxyBaseId)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {

@@ -38,14 +38,17 @@ class ShareConnectionActivity :
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHARE_CONNECTION)
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) {
         if (it) {
-            startPending = false
+            startedVersion = -1
             snackbar(R.string.vpn_permission_denied).show()
         }
     }
 
-    // A start launched here reads the sharing flag on its own; until it reports back, a toggle
-    // finds no running service to reload, so the flag is applied again once it connects.
-    private var startPending = false
+    // Every change made here bumps the version. A start launched here reads the store on its
+    // own; until it reports back there is no running service to reload, so the version it was
+    // launched with is kept and a reload follows once it connects if anything changed since.
+    private var applyVersion = 0
+    private var startedVersion = -1
+    private var refreshVersion = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,9 +94,10 @@ class ShareConnectionActivity :
     override fun snackbarInternal(text: CharSequence): Snackbar = Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG)
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        if (startPending && state == BaseService.State.Connected) {
-            startPending = false
-            if (!DataStore.allowAccess) applyToService(startIfStopped = false)
+        if (startedVersion >= 0 && state == BaseService.State.Connected) {
+            val started = startedVersion
+            startedVersion = -1
+            if (applyVersion != started) SagerNet.reloadService()
         }
         refresh()
     }
@@ -104,16 +108,20 @@ class ShareConnectionActivity :
     // sharing is switched on. The flag lives in the cached store, so wait for the write before
     // the service process reads it.
     private fun applyToService(startIfStopped: Boolean) {
+        val version = ++applyVersion
         runOnDefaultDispatcher {
             try {
                 DataStore.configurationStore.awaitWrites()
-                when {
-                    DataStore.serviceState.canStop -> SagerNet.reloadService()
+                onMainDispatcher {
+                    when {
+                        DataStore.serviceState.canStop -> SagerNet.reloadService()
 
-                    // The switch may have been turned off again while the write was pending.
-                    startIfStopped && DataStore.allowAccess -> onMainDispatcher {
-                        startPending = true
-                        connect.launch(null)
+                        // The switch may have been turned off again while the write was pending,
+                        // and a start already in flight picks the change up when it connects.
+                        startIfStopped && DataStore.allowAccess && startedVersion < 0 -> {
+                            startedVersion = version
+                            connect.launch(null)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -135,6 +143,9 @@ class ShareConnectionActivity :
             binding.shareAddresses.addView(TextView(this).apply { setText(R.string.share_connection_no_address) })
         }
         addresses.forEach { (label, address) -> binding.shareAddresses.addView(addressRow(label, address, port)) }
+        // Only the latest lookup may write the status: an older one finishing late would re-enable
+        // the switch from a sharing value that has since changed.
+        val version = ++refreshVersion
         runOnDefaultDispatcher {
             val connected = DataStore.serviceState.connected
             val profile = ProfileManager.getProfile(if (connected) DataStore.currentProfile else DataStore.selectedProxy)
@@ -148,10 +159,11 @@ class ShareConnectionActivity :
                 else -> getString(R.string.share_connection_on, profile?.displayName() ?: "", port)
             }
             onMainDispatcher {
+                if (version != refreshVersion) return@onMainDispatcher
                 binding.shareStatus.text = status
                 // The switch starts disabled in the layout until this lookup has run. Turning sharing
                 // off must stay possible whatever the current profile is.
-                binding.shareSwitch.isEnabled = shareable || sharing
+                binding.shareSwitch.isEnabled = shareable || DataStore.allowAccess
             }
         }
     }
