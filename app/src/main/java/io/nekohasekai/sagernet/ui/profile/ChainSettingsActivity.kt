@@ -25,6 +25,8 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.databinding.LayoutAddEntityBinding
 import io.nekohasekai.sagernet.databinding.LayoutProfileBinding
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.internal.chainContains
+import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
@@ -54,6 +56,37 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
     lateinit var configurationList: RecyclerView
     lateinit var configurationAdapter: ProxiesAdapter
     lateinit var layoutManager: LinearLayoutManager
+    private lateinit var chainHint: TextView
+
+    // Hop order plus the two things chaining does not change by itself: which side resolves
+    // destination names and whether UDP survives the exit hop.
+    private fun updateHint() {
+        val exit = proxyList.lastOrNull()
+        if (exit == null) {
+            chainHint.text = getString(R.string.chain_hint_empty)
+            return
+        }
+        val exitName = exit.displayName()
+        val bean = exit.requireBean()
+        chainHint.text = listOf(
+            getString(R.string.chain_hint_order, proxyList.joinToString(" \u2192 ") { it.displayName() }),
+            if (DataStore.resolveDestination) {
+                getString(R.string.chain_hint_dns_direct)
+            } else {
+                getString(R.string.chain_hint_dns_exit, exitName)
+            },
+            when {
+                exit.type == ProxyEntity.TYPE_HTTP || exit.type == ProxyEntity.TYPE_SSH || bean.network() == "tcp" ->
+                    getString(R.string.chain_hint_udp_tcp_only, exitName)
+
+                bean is SOCKSBean && bean.sUoT == true -> getString(R.string.chain_hint_udp_uot, exitName)
+
+                bean is SOCKSBean -> getString(R.string.chain_hint_udp_socks, exitName)
+
+                else -> getString(R.string.chain_hint_udp_generic)
+            },
+        ).joinToString("\n")
+    }
 
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,6 +96,8 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         // ViewBinding intentionally not used here: content is set via the constructor
         // (@LayoutRes through ProfileSettingsActivity), not by inflating a binding.
         configurationList = findViewById(R.id.configuration_list)
+        chainHint = findViewById(R.id.chain_hint)
+        updateHint()
         layoutManager = FixedLinearLayoutManager(configurationList)
         configurationList.layoutManager = layoutManager
         configurationAdapter = ProxiesAdapter()
@@ -134,6 +169,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             }
             onMainDispatcher {
                 notifyDataSetChanged()
+                updateHint()
             }
         }
 
@@ -143,12 +179,14 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             proxyList[from - 1] = toMove
             notifyItemMoved(from, to)
             DataStore.dirty = true
+            updateHint()
         }
 
         fun remove(index: Int) {
             proxyList.removeAt(index - 1)
             notifyItemRemoved(index)
             DataStore.dirty = true
+            updateHint()
         }
 
         override fun getItemId(position: Int): Long = if (position == 0) 0 else proxyList[position - 1].id
@@ -172,30 +210,9 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         override fun getItemCount(): Int = proxyList.size + 1
     }
 
-    fun testProfileAllowed(profile: ProxyEntity): Boolean {
-        if (profile.id == DataStore.editingId) return false
-
-        for (entity in proxyList) {
-            if (testProfileContains(entity, profile)) return false
-        }
-
-        return true
-    }
-
-    fun testProfileContains(profile: ProxyEntity, anotherProfile: ProxyEntity): Boolean {
-        if (profile.type != 8 || anotherProfile.type != 8) return false
-        if (profile.id == anotherProfile.id) return true
-        val proxies = profile.chainBean!!.proxies
-        if (proxies!!.contains(anotherProfile.id)) return true
-        if (proxies!!.isNotEmpty()) {
-            for (entity in ProfileManager.getProfiles(proxies!!)) {
-                if (testProfileContains(entity, anotherProfile)) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
+    // A hop may not be this chain or contain it at any depth: that is the loop the config
+    // builder rejects at connect time.
+    fun testProfileAllowed(profile: ProxyEntity): Boolean = !chainContains(profile, DataStore.editingId)
 
     var replacing = 0
 
@@ -227,6 +244,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
                                 proxyList.add(profile)
                                 configurationAdapter.notifyItemInserted(proxyList.size)
                             }
+                            updateHint()
                         }
                     }
                 }

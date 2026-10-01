@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.internal.chainContains
 import io.nekohasekai.sagernet.fmt.shadowsocks.ShadowsocksBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
@@ -15,6 +16,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -163,6 +166,72 @@ class ConfigBuilderGoldenTest {
         assertTrue(detours.single().first != detours.single().second)
         assertTrue(detours.single().second in tags)
         assertResultMaps(result, chain)
+    }
+
+    @Test
+    fun nestedChain_keepsInnerHopOrder() {
+        val group = addGroup()
+        val entry = addSocks(group, "192.0.2.23", 1081, "entry")
+        val innerFirst = addSocks(group, "192.0.2.24", 1082, "inner-first")
+        val innerLast = addSocks(group, "192.0.2.25", 1083, "inner-last")
+        val inner = addChain(group, "inner", innerFirst.id, innerLast.id)
+        val outer = addChain(group, "outer", entry.id, inner.id)
+
+        val socks = objects(JSONObject(build(outer, forTest = true).config).getJSONArray("outbounds"))
+            .filter { it.optString("type") == "socks" }
+            .associateBy { it.getString("server") }
+        fun detourOf(server: String) = socks.getValue(server).optString("detour")
+        fun tagOf(server: String) = socks.getValue(server).getString("tag")
+
+        // Dial order entry -> inner-first -> inner-last: each hop detours through the one before it.
+        assertEquals(tagOf("192.0.2.24"), detourOf("192.0.2.25"))
+        assertEquals(tagOf("192.0.2.23"), detourOf("192.0.2.24"))
+        assertEquals("", detourOf("192.0.2.23"))
+    }
+
+    @Test
+    fun chainValidation_rejectsMissingHopsCyclesAndEmptyChains() {
+        val group = addGroup()
+        val hop = addSocks(group, "192.0.2.26", 1081, "hop")
+        val missing = addChain(group, "missing", hop.id, 424242L)
+        val empty = addChain(group, "empty")
+        val loopInner = addChain(group, "loop-inner", hop.id)
+        val loopOuter = addChain(group, "loop-outer", loopInner.id)
+        ConfigBuilderTestEnv.io {
+            loopInner.chainBean!!.proxies = listOf(hop.id, loopOuter.id)
+            SagerDatabase.proxyDao.updateProxy(loopInner)
+        }
+
+        assertTrue(assertThrows(IllegalArgumentException::class.java) { build(missing, forTest = true) }.message!!.contains("missing"))
+        assertTrue(assertThrows(IllegalArgumentException::class.java) { build(empty, forTest = true) }.message!!.contains("empty"))
+        assertTrue(assertThrows(IllegalArgumentException::class.java) { build(loopOuter, forTest = true) }.message!!.contains("loop"))
+        assertTrue(ConfigBuilderTestEnv.io { chainContains(loopOuter, hop.id) })
+        assertTrue(ConfigBuilderTestEnv.io { chainContains(loopInner, loopOuter.id) })
+        assertFalse(ConfigBuilderTestEnv.io { chainContains(hop, loopOuter.id) })
+    }
+
+    @Test
+    fun sharedConnection_keepsMixedInboundInVpnModeWithSeparateCredential() {
+        val profile = addSocks(addGroup(), "192.0.2.90", 1080, "shared")
+        DataStore.serviceMode = Key.MODE_VPN
+        assertTrue(objects(JSONObject(build(profile).config).getJSONArray("inbounds")).none { it.optString("type") == "mixed" })
+
+        DataStore.allowAccess = true
+        fun shareUsers() = objects(JSONObject(build(profile).config).getJSONArray("inbounds"))
+            .single { it.optString("type") == "mixed" }
+            .also { assertEquals("0.0.0.0", it.getString("listen")) }
+            .let { objects(it.getJSONArray("users")) }
+            .associate { it.getString("username") to it.getString("password") }
+
+        val users = shareUsers()
+        assertEquals(setOf(Key.MIXED_USERNAME, Key.SHARE_USERNAME), users.keys)
+        assertEquals(DataStore.shareSecret, users.getValue(Key.SHARE_USERNAME))
+        assertNotEquals(users.getValue(Key.MIXED_USERNAME), users.getValue(Key.SHARE_USERNAME))
+
+        DataStore.regenerateShareSecret()
+        val rotated = shareUsers()
+        assertNotEquals(users.getValue(Key.SHARE_USERNAME), rotated.getValue(Key.SHARE_USERNAME))
+        assertEquals(users.getValue(Key.MIXED_USERNAME), rotated.getValue(Key.MIXED_USERNAME))
     }
 
     @Test
@@ -421,6 +490,15 @@ class ConfigBuilderGoldenTest {
             serverPort = port
             protocol = 2
             this.name = name
+            initializeDefaultValues()
+        },
+    )
+
+    private fun addChain(groupId: Long, name: String, vararg hopIds: Long) = addProfile(
+        groupId,
+        ChainBean().apply {
+            this.name = name
+            proxies = hopIds.toList()
             initializeDefaultValues()
         },
     )

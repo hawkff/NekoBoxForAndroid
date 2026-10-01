@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -13,6 +14,8 @@ import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import androidx.activity.result.component1
+import androidx.activity.result.component2
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.SearchView
@@ -45,6 +48,8 @@ import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeLi
 import io.nekohasekai.sagernet.databinding.LayoutGroupListBinding
 import io.nekohasekai.sagernet.databinding.LayoutProgressListBinding
 import io.nekohasekai.sagernet.fmt.AbstractBean
+import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.internal.chainContains
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.group.ImportPreview
 import io.nekohasekai.sagernet.group.RawUpdater
@@ -476,6 +481,43 @@ class ConfigurationFragment @JvmOverloads constructor(
         }
     }
 
+    private val selectExitProxy =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { (resultCode, data) ->
+            if (resultCode != Activity.RESULT_OK) return@registerForActivityResult
+            val exitId = data?.getLongExtra(ProfileSelectActivity.EXTRA_PROFILE_ID, 0L) ?: 0L
+            runOnDefaultDispatcher {
+                try {
+                    val chain = addExitProxy(DataStore.selectedProxy, exitId)
+                    onMainDispatcher { snackbar(getString(R.string.exit_proxy_added, chain.displayName())).show() }
+                } catch (e: IllegalArgumentException) {
+                    onMainDispatcher { snackbar(e.readableMessage).show() }
+                }
+            }
+        }
+
+    // A running connection cannot grow a hop: build a chain profile that ends at the exit,
+    // select it and reconnect. The hop order is the profile name.
+    private suspend fun addExitProxy(baseId: Long, exitId: Long): ProxyEntity {
+        val base = requireNotNull(ProfileManager.getProfile(baseId)) { getString(R.string.profile_empty) }
+        val exit = requireNotNull(ProfileManager.getProfile(exitId)) { getString(R.string.profile_empty) }
+        require(!chainContains(exit, base.id)) { getString(R.string.circular_reference_sum) }
+        val bean = ChainBean().apply {
+            name = "${base.displayName()} \u2192 ${exit.displayName()}"
+            proxies = (base.chainBean?.proxies ?: listOf(base.id)) + exit.id
+            initializeDefaultValues()
+        }
+        // Subscription groups are overwritten on update; keep the chain in a basic group.
+        val groupId = SagerDatabase.groupDao.getById(base.groupId)?.takeIf { it.type == GroupType.BASIC }?.id
+            ?: DataStore.selectedGroupForImport()
+        val chain = ProfileManager.createProfile(groupId, bean)
+        val previous = DataStore.selectedProxy
+        DataStore.selectedProxy = chain.id
+        refreshProfileState()
+        ProfileManager.postUpdate(previous, noTraffic = true)
+        if (DataStore.serviceState.canStop) SagerNet.reloadService(chain.id)
+        return chain
+    }
+
     private fun deleteProfilesFromGroup(groupId: Long, profiles: List<ProxyEntity>) {
         val profileIds = profiles.map { it.id }
         runOnDefaultDispatcher {
@@ -650,6 +692,18 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             R.id.action_new_chain -> {
                 startActivity(Intent(requireActivity(), ChainSettingsActivity::class.java))
+            }
+
+            R.id.action_add_exit_proxy -> {
+                if (DataStore.selectedProxy <= 0L) {
+                    snackbar(R.string.profile_empty).show()
+                } else {
+                    selectExitProxy.launch(Intent(requireActivity(), ProfileSelectActivity::class.java))
+                }
+            }
+
+            R.id.action_share_connection -> {
+                startActivity(Intent(requireActivity(), ShareConnectionActivity::class.java))
             }
 
             R.id.action_update_subscription -> {

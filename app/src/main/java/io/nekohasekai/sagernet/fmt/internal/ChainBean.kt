@@ -3,9 +3,54 @@ package io.nekohasekai.sagernet.fmt.internal
 import android.os.Parcelable
 import com.esotericsoftware.kryo.io.ByteBufferInput
 import com.esotericsoftware.kryo.io.ByteBufferOutput
+import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.Serializable
+import io.nekohasekai.sagernet.ktx.app
 import moe.matsuri.nb4a.utils.JavaUtil
+
+typealias ProfileLookup = (List<Long>) -> List<ProxyEntity>
+
+private val databaseLookup: ProfileLookup = { SagerDatabase.proxyDao.getEntities(it) }
+
+/**
+ * Hops of [entity] in dial order: the first hop is dialed directly, the last hop reaches the
+ * destination. Nested chains are inlined in their own order. A chain without hops, a hop whose
+ * profile was deleted, or a chain that contains itself fails with a readable message instead of
+ * silently shortening the chain.
+ */
+fun chainHops(
+    entity: ProxyEntity,
+    lookup: ProfileLookup = databaseLookup,
+    visiting: MutableSet<Long> = linkedSetOf(),
+): List<ProxyEntity> {
+    val bean = entity.requireBean() as? ChainBean ?: return listOf(entity)
+    require(visiting.add(entity.id)) { app.getString(R.string.chain_circular, entity.displayName()) }
+    val ids = bean.proxies.orEmpty()
+    require(ids.isNotEmpty()) { app.getString(R.string.chain_no_hops, entity.displayName()) }
+    val byId = lookup(ids).associateBy { it.id }
+    val hops = ids.flatMap { id ->
+        val hop = requireNotNull(byId[id]) { app.getString(R.string.chain_missing_hop, entity.displayName()) }
+        chainHops(hop, lookup, visiting)
+    }
+    visiting.remove(entity.id)
+    return hops
+}
+
+/** Whether [entity] is [profileId] or contains it at any nesting depth. */
+fun chainContains(
+    entity: ProxyEntity,
+    profileId: Long,
+    lookup: ProfileLookup = databaseLookup,
+    visited: MutableSet<Long> = hashSetOf(),
+): Boolean {
+    if (entity.id == profileId) return true
+    val bean = entity.requireBean() as? ChainBean ?: return false
+    if (!visited.add(entity.id)) return false
+    return lookup(bean.proxies.orEmpty()).any { chainContains(it, profileId, lookup, visited) }
+}
 
 class ChainBean : InternalBean() {
     @JvmField
