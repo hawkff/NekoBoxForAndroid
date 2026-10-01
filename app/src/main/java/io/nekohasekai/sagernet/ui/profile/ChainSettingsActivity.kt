@@ -12,6 +12,7 @@ import android.widget.TextView
 import androidx.activity.result.component1
 import androidx.activity.result.component2
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.core.view.isVisible
 import androidx.preference.PreferenceFragmentCompat
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -33,6 +34,24 @@ import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
 import moe.matsuri.nb4a.Protocols.getProtocolColor
+
+// An earlier TCP-only proxy can carry encapsulated UDP, so only the exit's capability is
+// definitive here. Other hints leave the requirements between hops conditional.
+@StringRes
+internal fun chainUdpHint(hops: List<ProxyEntity>): Int {
+    val exit = hops.last()
+    val bean = exit.requireBean()
+    return when {
+        exit.type == ProxyEntity.TYPE_HTTP || exit.type == ProxyEntity.TYPE_SSH || bean.network() == "tcp" ->
+            R.string.chain_hint_udp_tcp_only
+
+        bean is SOCKSBean && bean.sUoT == true -> R.string.chain_hint_udp_uot
+
+        bean is SOCKSBean -> R.string.chain_hint_udp_socks
+
+        else -> R.string.chain_hint_udp_generic
+    }
+}
 
 class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout_chain_settings) {
 
@@ -84,11 +103,6 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         val dialed = order.flatMap { runCatching { chainHops(it) }.getOrDefault(listOf(it)) }
         val exit = dialed.last()
         val exitName = exit.displayName()
-        val bean = exit.requireBean()
-        // UDP has to be carried by every hop: one TCP-only hop anywhere in the chain blocks it.
-        val tcpOnly = dialed.firstOrNull {
-            it.type == ProxyEntity.TYPE_HTTP || it.type == ProxyEntity.TYPE_SSH || it.requireBean().network() == "tcp"
-        }
         return listOf(
             getString(R.string.chain_hint_order, order.joinToString(" \u2192 ") { it.displayName() }),
             if (DataStore.resolveDestination) {
@@ -96,12 +110,7 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
             } else {
                 getString(R.string.chain_hint_dns_exit, exitName)
             },
-            when {
-                tcpOnly != null -> getString(R.string.chain_hint_udp_tcp_only, tcpOnly.displayName())
-                bean is SOCKSBean && bean.sUoT == true -> getString(R.string.chain_hint_udp_uot, exitName)
-                bean is SOCKSBean -> getString(R.string.chain_hint_udp_socks, exitName)
-                else -> getString(R.string.chain_hint_udp_generic)
-            },
+            getString(chainUdpHint(dialed), exitName),
         ).joinToString("\n")
     }
 

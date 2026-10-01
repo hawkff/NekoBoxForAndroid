@@ -5,7 +5,9 @@ import android.os.RemoteException
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.viewModels
 import androidx.appcompat.widget.Toolbar
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import io.nekohasekai.sagernet.Key
@@ -23,6 +25,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.widget.QRCodeDialog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -37,7 +42,8 @@ class ShareConnectionActivity :
 
     private lateinit var binding: LayoutShareConnectionBinding
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHARE_CONNECTION)
-    private val sync = ShareServiceSync()
+    private val sync by viewModels<ShareServiceSync>()
+    private var applyJob: Job? = null
     private val connect = registerForActivityResult(VpnRequestActivity.StartService()) {
         if (it) {
             sync.onLaunchFailed()
@@ -95,7 +101,9 @@ class ShareConnectionActivity :
     override fun snackbarInternal(text: CharSequence): Snackbar = Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG)
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        act(sync.onState(state, DataStore.allowAccess))
+        sync.onState(state)
+        // The barrier is only worth paying for when a change can still act on this report.
+        if (sync.pending) applyPendingChanges()
         refresh()
     }
 
@@ -108,21 +116,31 @@ class ShareConnectionActivity :
             BaseService.State.Idle
         }
         DataStore.serviceState = state
-        act(sync.onState(state, DataStore.allowAccess))
-        refresh()
+        stateChanged(state, null, null)
     }
 
     // The inbound is generated at start: a running service reloads, a stopped one starts when
     // sharing is switched on. The flag lives in the cached store, so wait for the write before
     // the service process reads it.
     private fun applyToService(startIfStopped: Boolean) {
-        runOnDefaultDispatcher {
+        sync.onChange(DataStore.serviceState, startIfStopped, DataStore.allowAccess)
+        applyPendingChanges()
+    }
+
+    private fun applyPendingChanges() {
+        // A newer change must get its own write barrier; an older waiter must not consume it.
+        // Destruction cancels the waiter, while the ViewModel keeps the intent for the next bind.
+        applyJob?.cancel()
+        applyJob = lifecycleScope.launch {
             try {
                 DataStore.configurationStore.awaitWrites()
-                onMainDispatcher { act(sync.onChange(DataStore.serviceState, startIfStopped, DataStore.allowAccess)) }
+                act(sync.nextAction(DataStore.serviceState, DataStore.allowAccess))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                sync.onLaunchFailed()
                 Logs.w(e)
-                onMainDispatcher { snackbar(R.string.service_failed).show() }
+                snackbar(R.string.service_failed).show()
             }
         }
     }

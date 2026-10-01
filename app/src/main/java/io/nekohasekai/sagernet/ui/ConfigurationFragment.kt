@@ -528,6 +528,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             proxies = listOf(base.id, exit.id)
             initializeDefaultValues()
         }
+
         // Subscription groups are overwritten on update, and a group that picks its member by
         // URL test would treat the chain as one more candidate: keep it where the selection is
         // what gets dialed.

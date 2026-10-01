@@ -214,6 +214,7 @@ class ConfigBuilderGoldenTest {
                 name = "custom-config"
                 type = 0
                 config = "{}"
+                initializeDefaultValues()
             },
         )
         val customOutbound = addProfile(
@@ -222,6 +223,7 @@ class ConfigBuilderGoldenTest {
                 name = "custom-outbound"
                 type = 1
                 config = """{"type":"socks","server":"192.0.2.29","server_port":1080}"""
+                initializeDefaultValues()
             },
         )
         val customConfigHop = addChain(group, "custom-config-hop", hop.id, customConfig.id)

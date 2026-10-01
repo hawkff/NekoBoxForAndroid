@@ -295,9 +295,9 @@
     <string name="chain_hint_dns_exit">Destination names are resolved by %s.</string>
     <string name="chain_hint_dns_direct">Destination names are resolved on this device through the configured DNS routing, then the address is dialed through the chain (Resolve destination is on).</string>
     <string name="chain_hint_udp_tcp_only">UDP is not relayed: %s carries TCP only.</string>
-    <string name="chain_hint_udp_socks">UDP relay depends on %s supporting SOCKS5 UDP.</string>
+    <string name="chain_hint_udp_socks">UDP relay requires SOCKS5 UDP support at %s and a compatible path through the preceding hops.</string>
     <string name="chain_hint_udp_uot">UDP is tunneled over TCP to %s.</string>
-    <string name="chain_hint_udp_generic">UDP is relayed when every hop supports it.</string>
+    <string name="chain_hint_udp_generic">UDP support depends on the exit protocol and the transports between hops. A TCP tunnel can carry encapsulated UDP.</string>
     <string name="share_connection">Share connection</string>
     <string name="share_connection_off">Sharing is off</string>
     <string name="share_connection_waiting">Sharing starts once the service is running</string>
