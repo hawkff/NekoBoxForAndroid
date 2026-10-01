@@ -158,6 +158,8 @@ class ShareConnectionActivity :
     }
 
     // IPv4 only: the inbound listens on 0.0.0.0. The tun address belongs to this device alone.
+    // Whether an address outside the private ranges is reachable depends on the carrier or
+    // router in front of it, so the label only says that it is not private.
     // ponytail: interface names are vendor specific, so the label is the raw name.
     private fun lanAddresses(): List<Pair<String, String>> = runCatching {
         NetworkInterface.getNetworkInterfaces().toList()

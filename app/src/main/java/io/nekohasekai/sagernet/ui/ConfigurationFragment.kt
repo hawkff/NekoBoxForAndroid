@@ -501,9 +501,11 @@ class ConfigurationFragment @JvmOverloads constructor(
         val base = requireNotNull(ProfileManager.getProfile(baseId)) { getString(R.string.profile_empty) }
         val exit = requireNotNull(ProfileManager.getProfile(exitId)) { getString(R.string.profile_empty) }
         require(!chainContains(exit, base.id)) { getString(R.string.circular_reference_sum) }
+        val baseHops = base.chainBean?.proxies ?: listOf(base.id)
+        require(baseHops.isNotEmpty()) { getString(R.string.chain_no_hops, base.displayName()) }
         val bean = ChainBean().apply {
             name = "${base.displayName()} \u2192 ${exit.displayName()}"
-            proxies = (base.chainBean?.proxies ?: listOf(base.id)) + exit.id
+            proxies = baseHops + exit.id
             initializeDefaultValues()
         }
         // Subscription groups are overwritten on update; keep the chain in a basic group.

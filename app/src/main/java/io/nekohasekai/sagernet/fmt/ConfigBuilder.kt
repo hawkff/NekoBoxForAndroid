@@ -37,6 +37,8 @@ import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
+import io.nekohasekai.sagernet.ktx.readableMessage
+import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.ktx.unwrapIPV6Host
 import io.nekohasekai.sagernet.utils.PackageCache
 import moe.matsuri.nb4a.*
@@ -315,7 +317,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
     // it onto a per-subscription resolver (keep it on the global direct path).
     val nonCustomFinalHosts = hashSetOf<String>()
     val isVPN = DataStore.serviceMode == Key.MODE_VPN
-    val bind = if (!forTest && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
+    // Exported configs run elsewhere: keep their listener on loopback and leave this device's
+    // inbound credentials out of them.
+    val bind = if (!forTest && !forExport && DataStore.allowAccess) "0.0.0.0" else LOCALHOST
     // Whether the local mixed (SOCKS/HTTP) inbound is present in the final config.
     // In VPN/TUN mode it is omitted unless the user opts in (requireProxyInVPN), shares the
     // connection with other devices (allowAccess) or the system HTTP proxy needs it
@@ -439,7 +443,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         tag = TAG_MIXED
                         listen = bind
                         listen_port = DataStore.mixedPort
-                        if (DataStore.mixedInboundNeedsAuth) {
+                        if (DataStore.mixedInboundNeedsAuth && !forExport) {
                             users = buildList {
                                 add(
                                     User().also { u ->
@@ -857,11 +861,21 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             return chainTagOut
         }
 
+        // A broken chain fails the build when it is the selected profile. As a group member or a
+        // rule outbound it is left out with a warning, so the service still starts.
+        fun buildChainOrSkip(chainId: Long, entity: ProxyEntity): String? = try {
+            buildChain(chainId, entity)
+        } catch (e: IllegalArgumentException) {
+            if (entity.id == proxy.id) throw e
+            runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
+            null
+        }
+
         // build outbounds
         if (buildSelector) {
             val list = SagerDatabase.proxyDao.getByGroup(group.id).filter { it.canBuild() }
-            list.forEach {
-                tagMap[it.id] = buildChain(it.id, it)
+            list.forEach { member ->
+                buildChainOrSkip(member.id, member)?.let { tagMap[member.id] = it }
             }
             val memberTags = tagMap.values.toList()
             outbounds.add(
@@ -891,7 +905,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         }
         // build outbounds from route item
         extraProxies.forEach { (key, p) ->
-            tagMap[key] = buildChain(key, p)
+            buildChainOrSkip(key, p)?.let { tagMap[key] = it }
         }
 
         val mainProxyTag = (if (buildSelector) TAG_PROXY else tagMap[proxy.id]) ?: TAG_PROXY

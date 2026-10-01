@@ -26,6 +26,7 @@ import io.nekohasekai.sagernet.databinding.LayoutAddEntityBinding
 import io.nekohasekai.sagernet.databinding.LayoutProfileBinding
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.internal.chainContains
+import io.nekohasekai.sagernet.fmt.internal.chainHops
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.ProfileSelectActivity
@@ -61,15 +62,21 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
     // Hop order plus the two things chaining does not change by itself: which side resolves
     // destination names and whether UDP survives the exit hop.
     private fun updateHint() {
-        val exit = proxyList.lastOrNull()
-        if (exit == null) {
-            chainHint.text = getString(R.string.chain_hint_empty)
-            return
+        val hops = proxyList.toList()
+        runOnDefaultDispatcher {
+            val text = hintText(hops)
+            onMainDispatcher { chainHint.text = text }
         }
+    }
+
+    private fun hintText(hops: List<ProxyEntity>): String {
+        val listed = hops.lastOrNull() ?: return getString(R.string.chain_hint_empty)
+        // A nested chain reaches the destination through its own last hop.
+        val exit = runCatching { chainHops(listed).last() }.getOrDefault(listed)
         val exitName = exit.displayName()
         val bean = exit.requireBean()
-        chainHint.text = listOf(
-            getString(R.string.chain_hint_order, proxyList.joinToString(" \u2192 ") { it.displayName() }),
+        return listOf(
+            getString(R.string.chain_hint_order, hops.joinToString(" \u2192 ") { it.displayName() }),
             if (DataStore.resolveDestination) {
                 getString(R.string.chain_hint_dns_direct)
             } else {

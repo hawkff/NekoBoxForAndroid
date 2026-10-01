@@ -211,6 +211,19 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
+    fun brokenChain_isSkippedAsGroupMemberButFailsWhenSelected() {
+        val group = addGroup(isSelector = true)
+        val healthy = addSocks(group, "192.0.2.27", 1081, "healthy")
+        val broken = addChain(group, "broken", 424242L)
+
+        val result = build(healthy)
+        val selector = outbound(JSONObject(result.config), "selector")
+        assertEquals(listOf(result.profileTagMap.getValue(healthy.id)), strings(selector.getJSONArray("outbounds")))
+        assertFalse(result.profileTagMap.containsKey(broken.id))
+        assertThrows(IllegalArgumentException::class.java) { build(broken) }
+    }
+
+    @Test
     fun sharedConnection_keepsMixedInboundInVpnModeWithSeparateCredential() {
         val profile = addSocks(addGroup(), "192.0.2.90", 1080, "shared")
         DataStore.serviceMode = Key.MODE_VPN
@@ -377,16 +390,21 @@ class ConfigBuilderGoldenTest {
     }
 
     @Test
-    fun forExport_omitsClashApiSecret() {
+    fun forExport_omitsDeviceSecretsAndLanBinding() {
         DataStore.enableClashAPI = true
+        DataStore.allowAccess = true
         assertEquals("export-secret", DataStore.clashApiSecret)
         val profile = addSocks(addGroup(), "192.0.2.50", 1080, "export-socks")
 
         val root = JSONObject(build(profile, forExport = true).config)
         val clashApi = root.getJSONObject("experimental").getJSONObject("clash_api")
+        val mixed = objects(root.getJSONArray("inbounds")).single { it.optString("type") == "mixed" }
 
         assertEquals("127.0.0.1:9090", clashApi.getString("external_controller"))
         assertFalse(clashApi.has("secret"))
+        assertEquals(LOCALHOST, mixed.getString("listen"))
+        assertFalse(mixed.has("users"))
+        assertFalse(root.toString().contains(DataStore.shareSecret))
     }
 
     @Test

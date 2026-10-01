@@ -306,7 +306,7 @@
     <string name="share_connection_addresses">Reachable at</string>
     <string name="share_connection_addresses_summary">HTTP and SOCKS5 proxy on the same port, credentials below.</string>
     <string name="share_connection_no_address">No network address found</string>
-    <string name="share_connection_public">public address, reachable from the Internet</string>
+    <string name="share_connection_public">not a private-network address</string>
     <string name="share_connection_copy_link">Copy link</string>
     <string name="share_connection_link_name">NekoBox share</string>
     <string name="share_connection_credentials">Credentials</string>
