@@ -301,6 +301,15 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             ).associateBy { it.id }
         }
     val buildSelector = !forTest && group?.isSelector == true && !forExport
+    // A Tailscale node has one saved identity, so one config can run one instance of a profile.
+    // Every selector member would get its own copy of a Tailscale landing proxy (each with a
+    // different detour), and a URL test would start a second node next to the running service.
+    val tailscaleProfiles = hashSetOf<Long>()
+    if (buildSelector) {
+        require(group.landingProxy?.let(lookupCache::proxy)?.requireBean() !is TailscaleBean) {
+            SagerNet.application.getString(R.string.tailscale_selector_landing)
+        }
+    }
     val userDNSRuleList = mutableListOf<DNSRule_DefaultOptions>()
     val domainListDNSDirectForce = mutableListOf<String>()
     val bypassDNSBeans = hashSetOf<AbstractBean>()
@@ -737,8 +746,13 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         is SnellBean ->
                             buildSingBoxOutboundSnellBean(bean)
 
-                        is TailscaleBean ->
+                        is TailscaleBean -> {
+                            require(!forTest) { SagerNet.application.getString(R.string.tailscale_no_test) }
+                            require(tailscaleProfiles.add(proxyEntity.id)) {
+                                SagerNet.application.getString(R.string.tailscale_single_use, bean.displayName())
+                            }
                             buildSingBoxEndpointTailscaleBean(bean, proxyEntity.id)
+                        }
 
                         else -> throw IllegalStateException("can't reach")
                     }

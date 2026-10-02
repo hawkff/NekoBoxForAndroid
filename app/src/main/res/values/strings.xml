@@ -658,6 +658,11 @@
     <string name="tailscale_reset_identity">Reset identity</string>
     <string name="tailscale_reset_identity_sum">Delete the node key and login state. The next start registers a new machine. Stop the service first.</string>
     <string name="tailscale_reset_identity_done">Tailscale identity removed</string>
+    <string name="tailscale_reset_identity_running">Stop the service before resetting the identity</string>
+    <string name="tailscale_reset_identity_failed">Could not remove the Tailscale identity</string>
+    <string name="tailscale_no_test">Tailscale profiles cannot be tested</string>
+    <string name="tailscale_single_use">Tailscale profile %s can only be used once per configuration</string>
+    <string name="tailscale_selector_landing">A Tailscale profile cannot be the landing proxy of a selector group</string>
     <string name="tailscale_routing">Routing</string>
     <string name="tailscale_exit_node">Exit node</string>
     <string name="tailscale_exit_node_sum">Tailscale IP or machine name of a node that advertises itself as an exit node. Empty: only tailnet addresses are reachable.</string>

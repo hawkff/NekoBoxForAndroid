@@ -62,12 +62,19 @@ class TailscaleSettingsActivity : ProfileSettingsActivity<TailscaleBean>() {
     }
 
     private fun resetIdentity() {
+        // A running core may hold the directory open and write the current identity back;
+        // the profile may also be in use as a chain hop or rule outbound, so check the service, not the selection.
+        if (DataStore.serviceState.started) {
+            Toast.makeText(this, R.string.tailscale_reset_identity_running, Toast.LENGTH_SHORT).show()
+            return
+        }
         val profileId = DataStore.editingId
         runOnIoDispatcher {
             // The core runs with no_backup as its working directory (libcore InitCore).
-            File(SagerNet.application.noBackupFilesDir, tailscaleStateDirectory(profileId)).deleteRecursively()
+            val removed = File(SagerNet.application.noBackupFilesDir, tailscaleStateDirectory(profileId)).deleteRecursively()
             onMainDispatcher {
-                Toast.makeText(this@TailscaleSettingsActivity, R.string.tailscale_reset_identity_done, Toast.LENGTH_SHORT).show()
+                val message = if (removed) R.string.tailscale_reset_identity_done else R.string.tailscale_reset_identity_failed
+                Toast.makeText(this@TailscaleSettingsActivity, message, Toast.LENGTH_SHORT).show()
             }
         }
     }

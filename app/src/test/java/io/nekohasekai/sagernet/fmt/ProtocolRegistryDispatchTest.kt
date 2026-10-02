@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.fmt
 
 import io.nekohasekai.sagernet.database.ProtocolRegistry
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.amneziawg.AmneziaWGBean
 import io.nekohasekai.sagernet.fmt.http.HttpBean
 import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
@@ -258,9 +259,39 @@ class ProtocolRegistryDispatchTest {
             }
             val profile = ProxyEntity(id = index + 1L).putBean(bean)
             if (profile.needExternal()) continue
-            val config = ConfigBuilderTestEnv.io { buildConfig(profile, forTest = true).config }
+            // Tailscale refuses test builds (a URL test would start a second node); build it as a
+            // service config so the core still checks the generated endpoint.
+            val config = ConfigBuilderTestEnv.io { buildConfig(profile, forTest = bean !is TailscaleBean).config }
             directory.resolve("$index-${bean.javaClass.simpleName}.json").writeText(config)
         }
+    }
+
+    @Test
+    fun tailscaleRunsOneInstancePerConfig() {
+        ConfigBuilderTestEnv.reset()
+        val node = ProxyEntity(groupId = 1L).putBean(tailscale().apply { initializeDefaultValues() })
+        node.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(node) }
+
+        val urlTest = assertThrows(IllegalArgumentException::class.java) {
+            ConfigBuilderTestEnv.io { buildConfig(node, forTest = true) }
+        }
+        assertTrue(urlTest.message!!, urlTest.message!!.contains("cannot be tested"))
+
+        // Both hops of this chain are the same node, so the builder would start it twice.
+        val chain = ProxyEntity(id = node.id + 1, groupId = 1L).putBean(
+            ChainBean().apply {
+                name = "twice"
+                proxies = listOf(node.id, node.id)
+                initializeDefaultValues()
+            },
+        )
+        val duplicate = assertThrows(IllegalArgumentException::class.java) {
+            ConfigBuilderTestEnv.io { buildConfig(chain) }
+        }
+        assertTrue(duplicate.message!!, duplicate.message!!.contains("once per configuration"))
+
+        val single = ConfigBuilderTestEnv.io { buildConfig(node).config }
+        assertTrue(single, single.contains("\"state_directory\": \"tailscale/${node.id}\""))
     }
 
     @Test
