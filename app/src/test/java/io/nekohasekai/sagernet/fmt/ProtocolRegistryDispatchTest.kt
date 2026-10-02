@@ -272,7 +272,7 @@ class ProtocolRegistryDispatchTest {
     fun tailscaleRunsOneInstancePerConfig() {
         ConfigBuilderTestEnv.reset()
         val groupId = ConfigBuilderTestEnv.io { SagerDatabase.groupDao.createGroup(ProxyGroup(isSelector = true)) }
-        fun add(bean: AbstractBean) = ProxyEntity(groupId = groupId).putBean(bean.apply { initializeDefaultValues() })
+        fun add(bean: AbstractBean, order: Long = 0L) = ProxyEntity(groupId = groupId, userOrder = order).putBean(bean.apply { initializeDefaultValues() })
             .also { it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) } }
         val node = add(tailscale())
         val server = add(socks())
@@ -282,6 +282,16 @@ class ProtocolRegistryDispatchTest {
                 name = "twice"
                 proxies = listOf(node.id, server.id, node.id)
             },
+        )
+        // Built first as a group member: its Tailscale exit hop is appended before the broken
+        // Hysteria hop fails, so the skipped chain must be rolled back and must not block the node.
+        val broken = add(hysteria().apply { enableECH = true }, order = -2)
+        add(
+            ChainBean().apply {
+                name = "broken-first"
+                proxies = listOf(broken.id, node.id)
+            },
+            order = -1,
         )
 
         val urlTest = assertThrows(IllegalArgumentException::class.java) {

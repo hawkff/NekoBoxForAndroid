@@ -576,7 +576,6 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 }
                 chainTailscaleProfiles += hop.id
             }
-            tailscaleProfiles += chainTailscaleProfiles
             val chainTrafficSet = HashSet<ProxyEntity>().apply {
                 plusAssign(profileList)
                 add(entity)
@@ -889,17 +888,28 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             }
 
             trafficMap[chainTagOut] = chainTrafficSet.toList()
+            // Reserve only for a chain that built completely; a hop that fails later releases them.
+            tailscaleProfiles += chainTailscaleProfiles
             return chainTagOut
         }
 
         // A broken chain fails the build when it is the selected profile. As a group member or a
         // rule outbound it is left out with a warning, so the service still starts.
-        fun buildChainOrSkip(chainId: Long, entity: ProxyEntity): String? = try {
-            buildChain(chainId, entity)
-        } catch (e: IllegalArgumentException) {
-            if (entity.id == proxy.id) throw e
-            runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
-            null
+        fun buildChainOrSkip(chainId: Long, entity: ProxyEntity): String? {
+            // buildChain appends to these as it goes; a hop that fails halfway must not leave an
+            // outbound whose detour points at a tag that is never created, or a global tag for it.
+            val appended = listOf(outbounds, endpointList, inbounds, routeRules, externalIndexMap).map { it to it.size }
+            val globalBefore = HashMap(globalOutbounds)
+            return try {
+                buildChain(chainId, entity)
+            } catch (e: IllegalArgumentException) {
+                if (entity.id == proxy.id) throw e
+                for ((list, size) in appended) list.subList(size, list.size).clear()
+                globalOutbounds.clear()
+                globalOutbounds.putAll(globalBefore)
+                runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
+                null
+            }
         }
 
         // build outbounds
