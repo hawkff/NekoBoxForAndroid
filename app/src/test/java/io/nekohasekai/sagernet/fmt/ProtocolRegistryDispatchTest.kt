@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.fmt.snell.SnellBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.socks.toUri
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
+import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.trojan.TrojanBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
@@ -162,6 +163,11 @@ class ProtocolRegistryDispatchTest {
         serverAddress = "192.0.2.13"
         serverPort = 51820
     }
+    private fun tailscale() = TailscaleBean().apply {
+        authKey = "tskey-auth-test"
+        exitNode = "100.64.0.1"
+        onlyTcp443 = true
+    }
     private fun tuic() = TuicBean().apply {
         serverAddress = "192.0.2.14"
         serverPort = 443
@@ -204,6 +210,7 @@ class ProtocolRegistryDispatchTest {
         ssh() to ProxyEntity.TYPE_SSH,
         wg() to ProxyEntity.TYPE_WG,
         awg() to ProxyEntity.TYPE_AWG,
+        tailscale() to ProxyEntity.TYPE_TAILSCALE,
         tuic() to ProxyEntity.TYPE_TUIC,
         juicity() to ProxyEntity.TYPE_JUICITY,
         shadowTls() to ProxyEntity.TYPE_SHADOWTLS,
@@ -330,6 +337,7 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SSH to SSHSettingsActivity::class.java,
             ProxyEntity.TYPE_WG to WireGuardSettingsActivity::class.java,
             ProxyEntity.TYPE_AWG to AmneziaWGSettingsActivity::class.java,
+            ProxyEntity.TYPE_TAILSCALE to TailscaleSettingsActivity::class.java,
             ProxyEntity.TYPE_TUIC to TuicSettingsActivity::class.java,
             ProxyEntity.TYPE_JUICITY to JuicitySettingsActivity::class.java,
             ProxyEntity.TYPE_SHADOWTLS to ShadowTLSSettingsActivity::class.java,
@@ -342,6 +350,7 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SSH,
             ProxyEntity.TYPE_WG,
             ProxyEntity.TYPE_AWG,
+            ProxyEntity.TYPE_TAILSCALE,
             ProxyEntity.TYPE_SHADOWTLS,
             ProxyEntity.TYPE_CONFIG,
         )
@@ -360,7 +369,7 @@ class ProtocolRegistryDispatchTest {
             ProxyEntity.TYPE_SNELL,
         )
 
-        assertEquals(19, allBeans.size)
+        assertEquals(20, allBeans.size)
         assertEquals(allBeans.map { it.second }.toSet(), settingsActivities.keys)
         for ((_, type) in allBeans) {
             val descriptor = ProtocolRegistry.forType(type)!!

@@ -29,6 +29,8 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.socks.buildSingBoxOutboundSocksBean
 import io.nekohasekai.sagernet.fmt.ssh.SSHBean
 import io.nekohasekai.sagernet.fmt.ssh.buildSingBoxOutboundSSHBean
+import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
+import io.nekohasekai.sagernet.fmt.tailscale.buildSingBoxEndpointTailscaleBean
 import io.nekohasekai.sagernet.fmt.tuic.TuicBean
 import io.nekohasekai.sagernet.fmt.tuic.buildSingBoxOutboundTuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
@@ -469,6 +471,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         }
 
         val outbounds = mutableListOf<SingBoxOption>().also { outbounds = it }
+        // sing-box endpoints (Tailscale) are outbounds with their own top-level array; they
+        // keep the chain tag/detour wiring and are referenced by tag like any outbound.
+        val endpointList = mutableListOf<SingBoxOption>()
 
         // init routing object
         val route = RouteOptions().apply {
@@ -732,6 +737,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         is SnellBean ->
                             buildSingBoxOutboundSnellBean(bean)
 
+                        is TailscaleBean ->
+                            buildSingBoxEndpointTailscaleBean(bean, proxyEntity.id)
+
                         else -> throw IllegalStateException("can't reach")
                     }
 
@@ -851,7 +859,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     }
                 }
 
-                outbounds.add(currentOutbound)
+                if (currentOutbound is Endpoint) endpointList.add(currentOutbound) else outbounds.add(currentOutbound)
                 chainOutbounds.add(currentOutbound)
                 pastOutbound = currentOutbound
                 pastEntity = proxyEntity
@@ -1343,6 +1351,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             dnsFamilyRules(rule, strategy)
         }
 
+        if (endpointList.isNotEmpty()) endpoints = endpointList
         if (!forTest) _hack_custom_config = DataStore.globalCustomConfig
     }.let {
         val configTree = SingBoxOptions.toJsonTree(it)
