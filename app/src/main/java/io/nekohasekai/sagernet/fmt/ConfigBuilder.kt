@@ -563,6 +563,20 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         @Suppress("UNCHECKED_CAST")
         fun buildChain(chainId: Long, entity: ProxyEntity): String {
             val profileList = entity.resolveChain()
+            // Validate before touching the shared lists: a chain skipped halfway would leave
+            // outbounds with a detour to a tag that is never created. The first dialed hop is
+            // shared through globalOutbounds, so a Tailscale profile already built there is reused.
+            val chainTailscaleProfiles = mutableListOf<Long>()
+            profileList.forEachIndexed { index, hop ->
+                if (hop.requireBean() !is TailscaleBean) return@forEachIndexed
+                require(!forTest) { SagerNet.application.getString(R.string.tailscale_no_test) }
+                if (index == profileList.lastIndex && globalOutbounds.containsKey(hop.id)) return@forEachIndexed
+                require(hop.id !in tailscaleProfiles && hop.id !in chainTailscaleProfiles) {
+                    SagerNet.application.getString(R.string.tailscale_single_use, hop.displayName())
+                }
+                chainTailscaleProfiles += hop.id
+            }
+            tailscaleProfiles += chainTailscaleProfiles
             val chainTrafficSet = HashSet<ProxyEntity>().apply {
                 plusAssign(profileList)
                 add(entity)
@@ -746,13 +760,8 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         is SnellBean ->
                             buildSingBoxOutboundSnellBean(bean)
 
-                        is TailscaleBean -> {
-                            require(!forTest) { SagerNet.application.getString(R.string.tailscale_no_test) }
-                            require(tailscaleProfiles.add(proxyEntity.id)) {
-                                SagerNet.application.getString(R.string.tailscale_single_use, bean.displayName())
-                            }
+                        is TailscaleBean ->
                             buildSingBoxEndpointTailscaleBean(bean, proxyEntity.id)
-                        }
 
                         else -> throw IllegalStateException("can't reach")
                     }
