@@ -323,6 +323,21 @@ class ProtocolRegistryDispatchTest {
         assertEquals(1, endpoints.length())
         assertEquals("tailscale/${node.id}", endpoints.getJSONObject(0).getString("state_directory"))
 
+        // MagicDNS resolver bound to the node, and tailnet destinations routed to it.
+        val tsTag = endpoints.getJSONObject(0).getString("tag")
+        val dnsServers = selector.getJSONObject("dns").getJSONArray("servers")
+        val magic = (0 until dnsServers.length()).map { dnsServers.getJSONObject(it) }.single { it.optString("type") == "tailscale" }
+        assertEquals(tsTag, magic.getString("endpoint"))
+        assertTrue(magic.getBoolean("accept_search_domain"))
+        val dnsRules = selector.getJSONObject("dns").getJSONArray("rules")
+        val magicRule = (0 until dnsRules.length()).map { dnsRules.getJSONObject(it) }.single { it.has("preferred_by") }
+        assertEquals(magic.getString("tag"), magicRule.getString("server"))
+        assertEquals(magic.getString("tag"), magicRule.getJSONArray("preferred_by").getString(0))
+        val routeRules = selector.getJSONObject("route").getJSONArray("rules")
+        val tailnetRule = (0 until routeRules.length()).map { routeRules.getJSONObject(it) }.single { it.has("preferred_by") }
+        assertEquals(tsTag, tailnetRule.getString("outbound"))
+        assertEquals(tsTag, tailnetRule.getJSONArray("preferred_by").getString(0))
+
         ConfigBuilderTestEnv.io { SagerDatabase.groupDao.updateGroup(ProxyGroup(id = groupId, isSelector = true, landingProxy = node.id)) }
         val landing = assertThrows(IllegalArgumentException::class.java) {
             ConfigBuilderTestEnv.io { buildConfig(server) }

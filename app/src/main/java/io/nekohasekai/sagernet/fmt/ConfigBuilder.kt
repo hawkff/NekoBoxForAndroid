@@ -951,6 +951,19 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
         val mainProxyTag = (if (buildSelector) TAG_PROXY else tagMap[proxy.id]) ?: TAG_PROXY
 
+        // Tailnet destinations (peer addresses, advertised subnets, MagicDNS names) go to the
+        // node that knows them, even when another outbound is the final one. The exit node's
+        // default route is not a preferred route, so ordinary traffic is unaffected.
+        val tailscaleTags = endpointList.map { it._hack_config_map["tag"] as String }
+        tailscaleTags.forEach { tag ->
+            routeRules.add(
+                Rule_DefaultOptions().apply {
+                    _hack_config_map["preferred_by"] = listOf(tag)
+                    outbound = tag
+                },
+            )
+        }
+
         // check global mode before applying user rules
         if (!forTest && DataStore.globalMode) {
             // rule handling in global mode
@@ -1287,6 +1300,27 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         server = "dns-fake"
                         disable_cache = true
                         query_type = listOf("A", "AAAA")
+                    },
+                )
+            }
+            // MagicDNS: one resolver per Tailscale node answering its MagicDNS hosts, the
+            // tailnet's split-DNS suffixes and single-label machine names. Inserted below the
+            // user hosts rewrite (added at index 0 afterwards) so explicit entries still win.
+            tailscaleTags.forEachIndexed { index, tag ->
+                val serverTag = "dns-tailscale-$index"
+                dnsServers.add(
+                    DNSServerOptions().apply {
+                        type = "tailscale"
+                        this.tag = serverTag
+                        _hack_config_map["endpoint"] = tag
+                        _hack_config_map["accept_search_domain"] = true
+                    },
+                )
+                dnsRules.add(
+                    0,
+                    DNSRule_DefaultOptions().apply {
+                        _hack_config_map["preferred_by"] = listOf(serverTag)
+                        server = serverTag
                     },
                 )
             }
