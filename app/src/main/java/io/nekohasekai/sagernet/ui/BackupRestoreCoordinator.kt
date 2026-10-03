@@ -7,7 +7,7 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
-import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.clearTailscaleState
 import kotlinx.parcelize.parcelableCreator
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
@@ -29,8 +29,9 @@ internal object DatabaseBackupRestoreOperations : BackupRestoreOperations {
             SagerDatabase.groupDao.reset()
             SagerDatabase.groupDao.insert(groups)
         }
-        // Profiles keep their ids across a restore, so surviving Tailscale nodes keep their identity.
-        pruneTailscaleState()
+        // The service is stopped before a restore, and restored ids may collide with another
+        // installation's profiles, so every node starts with a fresh identity.
+        clearTailscaleState()
     }
 
     override suspend fun replaceRules(rules: List<RuleEntity>) {

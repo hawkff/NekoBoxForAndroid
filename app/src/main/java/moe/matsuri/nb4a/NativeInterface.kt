@@ -27,7 +27,8 @@ import libcore.Libcore
 import libcore.NB4AInterface
 import java.net.InetSocketAddress
 
-// Identifier the core uses for its Tailscale login notification (protocol/tailscale/endpoint.go).
+// Identifier prefix of the core's Tailscale login notification, followed by the endpoint tag
+// (protocol/tailscale/endpoint.go).
 const val TAILSCALE_LOGIN_NOTIFICATION = "tailscale-authentication"
 
 class NativeInterface :
@@ -95,7 +96,7 @@ class NativeInterface :
             Logs.w("notification permission missing; $identifier: $openURL")
             return
         }
-        val login = identifier == TAILSCALE_LOGIN_NOTIFICATION
+        val login = identifier.startsWith(TAILSCALE_LOGIN_NOTIFICATION)
         val builder = NotificationCompat.Builder(app, CORE_NOTIFICATION_CHANNEL)
             .setSmallIcon(R.drawable.ic_service_active)
             .setContentTitle(if (login) app.getString(R.string.tailscale_login_required) else title)

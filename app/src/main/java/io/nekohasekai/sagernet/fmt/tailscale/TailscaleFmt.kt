@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.fmt.tailscale
 
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import moe.matsuri.nb4a.SingBoxOptions
@@ -13,11 +14,20 @@ fun tailscaleStateDirectory(profileId: Long) = "tailscale/$profileId"
 // The core runs with no_backup as its working directory (libcore InitCore).
 fun tailscaleStateFile(profileId: Long) = File(SagerNet.application.noBackupFilesDir, tailscaleStateDirectory(profileId))
 
-// Remove node identities whose profile is gone. Called after profiles are deleted.
+// Remove node identities whose profile is gone. Called after profiles are deleted. Skipped
+// while the service runs: a node whose profile was just deleted may still be writing its state,
+// and the next deletion or restore picks the directory up.
 fun pruneTailscaleState() {
+    if (DataStore.serviceState.started) return
     val directories = File(SagerNet.application.noBackupFilesDir, "tailscale").listFiles() ?: return
     val live = SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE).toSet()
     directories.filter { it.name.toLongOrNull() !in live }.forEach { it.deleteRecursively() }
+}
+
+// A restore replaces every profile; ids may collide with another installation's profiles, so no
+// saved identity can be trusted to belong to the restored profile of the same id.
+fun clearTailscaleState() {
+    File(SagerNet.application.noBackupFilesDir, "tailscale").deleteRecursively()
 }
 
 fun buildSingBoxEndpointTailscaleBean(bean: TailscaleBean, profileId: Long): SingBoxOptions.Endpoint_TailscaleOptions = SingBoxOptions.Endpoint_TailscaleOptions().apply {

@@ -1,5 +1,7 @@
 package io.nekohasekai.sagernet.fmt
 
+import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
@@ -19,6 +21,8 @@ class TailscaleStateTest {
     @Test
     fun pruneKeepsLiveNodesAndRemovesOrphans() {
         ConfigBuilderTestEnv.reset()
+        // Shared static state; another test may have left the service marked as running.
+        DataStore.serviceState = BaseService.State.Idle
         val node = ProxyEntity(groupId = 1L).putBean(TailscaleBean().apply { initializeDefaultValues() })
         node.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(node) }
         val live = tailscaleStateFile(node.id).apply {
@@ -37,7 +41,12 @@ class TailscaleStateTest {
         assertFalse(orphan.exists())
         assertFalse(stray.exists())
 
+        // Nothing is pruned while the service runs: the node may still be writing its state.
         ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.deleteById(node.id) }
+        DataStore.serviceState = BaseService.State.Connected
+        ConfigBuilderTestEnv.io { pruneTailscaleState() }
+        assertTrue(live.exists())
+        DataStore.serviceState = BaseService.State.Idle
         ConfigBuilderTestEnv.io { pruneTailscaleState() }
         assertFalse(live.exists())
     }

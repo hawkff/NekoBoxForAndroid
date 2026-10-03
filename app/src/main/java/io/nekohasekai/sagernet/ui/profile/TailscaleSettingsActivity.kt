@@ -14,6 +14,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.bg.proto.TailscaleAccess
+import io.nekohasekai.sagernet.bg.proto.TailscaleLoginDeclined
 import io.nekohasekai.sagernet.bg.proto.TailscalePeer
 import io.nekohasekai.sagernet.bg.proto.TailscalePeersInstance
 import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
@@ -120,6 +121,8 @@ class TailscaleSettingsActivity :
         lifecycleScope.launch(Dispatchers.IO) {
             val peers = try {
                 loadPeers(profileId)
+            } catch (_: TailscaleLoginDeclined) {
+                return@launch
             } catch (e: Exception) {
                 Logs.w(e)
                 onMainDispatcher {

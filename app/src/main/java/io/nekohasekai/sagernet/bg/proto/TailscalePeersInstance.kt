@@ -1,7 +1,9 @@
 package io.nekohasekai.sagernet.bg.proto
 
+import android.os.SystemClock
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.buildConfig
+import kotlinx.coroutines.delay
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import org.json.JSONArray
@@ -24,7 +26,10 @@ fun parseTailscalePeers(json: String): List<TailscalePeer> {
 }
 
 // Time a user gets to finish an interactive login in the browser while the probe node waits.
-const val TAILSCALE_LOGIN_TIMEOUT_MS = 180_000
+const val TAILSCALE_LOGIN_TIMEOUT_MS = 180_000L
+
+// The user dismissed the login prompt; the caller shows nothing further.
+class TailscaleLoginDeclined : Exception("login declined")
 
 // A short-lived node for a Tailscale profile the service is not running, used to list its
 // peers. It reuses the profile's saved identity, which is free while the service does not.
@@ -51,9 +56,25 @@ class TailscalePeersInstance(profile: ProxyEntity) : BoxInstance(profile) {
             Libcore.tailscaleWaitReady(box, endpoint.tag, false, TAILSCALE_READY_TIMEOUT_MS)
         } catch (e: Exception) {
             val url = Libcore.tailscaleAuthURL(box, endpoint.tag)
-            if (url.isEmpty() || !onLoginRequired(url)) throw e
-            Libcore.tailscaleWaitReady(box, endpoint.tag, false, TAILSCALE_LOGIN_TIMEOUT_MS)
+            if (url.isEmpty()) throw e
+            if (!onLoginRequired(url)) throw TailscaleLoginDeclined()
+            awaitLogin(endpoint.tag)
         }
         parseTailscalePeers(Libcore.tailscalePeers(box, endpoint.tag))
+    }
+
+    // tailscaleWaitReady returns at once while a login is pending, so poll in short rounds; the
+    // delay between rounds is where cancellation (leaving the editor) takes effect.
+    private suspend fun awaitLogin(tag: String) {
+        val deadline = SystemClock.elapsedRealtime() + TAILSCALE_LOGIN_TIMEOUT_MS
+        while (true) {
+            try {
+                Libcore.tailscaleWaitReady(box, tag, false, 2_000)
+                return
+            } catch (e: Exception) {
+                if (SystemClock.elapsedRealtime() > deadline) throw e
+            }
+            delay(1_000)
+        }
     }
 }
