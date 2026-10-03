@@ -242,7 +242,12 @@ abstract class BoxInstance(val profile: ProxyEntity) : Closeable {
             stateLease = null
         }
         if (::config.isInitialized && config.tailscaleEndpoints.isNotEmpty()) {
-            pruneTailscaleState(profileIds = config.tailscaleEndpoints.keys)
+            try {
+                pruneTailscaleState(profileIds = config.tailscaleEndpoints.keys)
+            } catch (_: Exception) {
+                // Best-effort housekeeping must not replace the probe result or its failure.
+                Logs.w("Tailscale state cleanup deferred")
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import android.app.Application
+import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
 import io.nekohasekai.sagernet.database.DataStore
@@ -15,6 +16,7 @@ import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -32,6 +34,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.Closeable
+import java.io.File
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -200,6 +204,44 @@ class BoxProbeLifecycleTest {
     }
 
     @Test
+    fun bestEffortPruneFailurePreservesSuccessfulResultAndOriginalQueryError() = runBlocking {
+        val node = node()
+        val state = tailscaleStateFile(node.id).apply { mkdirs() }
+        // No lease/native instance is opened by this fixture. Obstruct only its unused lock path.
+        val lockPath = File(SagerNet.application.noBackupFilesDir, "tailscale-locks/${node.id}.lock")
+        lockPath.parentFile!!.mkdirs()
+        assertTrue(lockPath.mkdir())
+        val messages = mutableListOf<String>()
+        val previousSink = Logs.sink
+        Logs.sink = { messages += it }
+        try {
+            assertEquals(17, cleanupOnlyProbe(node).runProbe { 17 })
+            val failure = IOException("original query failure")
+            val thrown = runCatching { cleanupOnlyProbe(node).runProbe { throw failure } }.exceptionOrNull()
+            assertTrue(generateSequence(thrown) { it.cause }.any { it === failure || it.message == failure.message })
+            assertEquals(2, messages.size)
+            assertTrue(messages.all { it.endsWith("Tailscale state cleanup deferred") })
+            assertTrue(state.exists())
+        } finally {
+            Logs.sink = previousSink
+            lockPath.deleteRecursively()
+            state.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun bestEffortPruneGuardDoesNotSuppressLeaseReleaseFailure() {
+        val node = node()
+        val instance = cleanupOnlyProbe(node).apply { config = prepared(node) }
+        val failure = IOException("lease release failed")
+        BoxInstance::class.java.getDeclaredField("stateLease").apply {
+            isAccessible = true
+            set(instance, Closeable { throw failure })
+        }
+        assertSame(failure, runCatching { instance.close() }.exceptionOrNull())
+    }
+
+    @Test
     fun testAndPeerInstancesReuseTheExactPreparedConfig() {
         val node = node()
         val config = prepared(node)
@@ -208,6 +250,14 @@ class BoxProbeLifecycleTest {
             instance.javaClass.getDeclaredMethod("buildConfig").apply { isAccessible = true }.invoke(instance)
             assertSame(config, instance.config)
         }
+    }
+
+    private fun cleanupOnlyProbe(node: ProxyEntity) = object : BoxInstance(node) {
+        override suspend fun init() {
+            config = prepared(node)
+        }
+
+        override fun launch() = Unit
     }
 
     private fun node() = ProxyEntity(groupId = 1).putBean(TailscaleBean().apply { initializeDefaultValues() }).also {
