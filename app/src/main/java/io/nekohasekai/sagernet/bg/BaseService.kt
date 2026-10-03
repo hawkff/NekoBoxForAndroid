@@ -14,6 +14,7 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
 import io.nekohasekai.sagernet.bg.proto.ProxyInstance
+import io.nekohasekai.sagernet.bg.proto.TAILSCALE_READY_TIMEOUT_MS
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
@@ -27,6 +28,7 @@ import libcore.Libcore
 import moe.matsuri.nb4a.Protocols
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import moe.matsuri.nb4a.utils.Util
+import org.json.JSONArray
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 
@@ -188,10 +190,22 @@ class BaseService {
             }
         }
 
+        private fun runningProxy() = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
+
+        // Right after Connected the nodes may still be logging in or selecting their exit node.
+        private fun awaitTailscaleNodes(proxy: ProxyInstance) {
+            for (endpoint in proxy.config.tailscaleEndpoints.values) {
+                Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, endpoint.waitForExitNode, TAILSCALE_READY_TIMEOUT_MS)
+            }
+        }
+
         override fun urlTestProfile(profileId: Long): Int {
-            val proxy = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
-            val tag = proxy.config.profileTagMap[profileId] ?: error(PROFILE_NOT_RUNNING)
+            val proxy = runningProxy()
+            val tag = proxy.config.profileTagMap[profileId]
+                ?: proxy.config.tailscaleEndpoints[profileId]?.tag
+                ?: error(PROFILE_NOT_RUNNING)
             return try {
+                awaitTailscaleNodes(proxy)
                 Libcore.urlTestOutbound(proxy.box, tag, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
             } catch (e: Exception) {
                 error(Protocols.genFriendlyMsg(e.readableMessage))
@@ -199,10 +213,14 @@ class BaseService {
         }
 
         override fun tailscalePeers(profileId: Long): String {
-            val proxy = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
+            val proxy = runningProxy()
             val endpoint = proxy.config.tailscaleEndpoints[profileId] ?: error(PROFILE_NOT_RUNNING)
+            // Only the login matters for listing peers; the exit node may be the one being replaced.
+            Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, false, TAILSCALE_READY_TIMEOUT_MS)
             return Libcore.tailscalePeers(proxy.box, endpoint.tag)
         }
+
+        override fun runningTailscaleProfiles(): String = JSONArray(runningProxy().config.tailscaleEndpoints.keys.toList()).toString()
 
         override fun connections(includeClosed: Boolean): String = data?.proxy?.takeIf { it.isInitialized() }?.box?.connections(includeClosed) ?: "[]"
 

@@ -670,6 +670,8 @@
     <string name="tailscale_exit_node_pick_none">No node in this tailnet offers an exit</string>
     <string name="tailscale_exit_node_pick_offline">offline</string>
     <string name="tailscale_save_first">Save the profile first</string>
+    <string name="tailscale_service_starting">The service is starting; try again in a moment</string>
+    <string name="tailscale_node_in_use">This Tailscale node is in use by the running service</string>
     <string name="tailscale_exit_node_allow_lan_access">Allow LAN access with exit node</string>
     <string name="tailscale_exit_node_allow_lan_access_sum">Keep local network addresses reachable while the exit node is in use</string>
     <string name="tailscale_accept_routes">Use tailnet subnet routes</string>

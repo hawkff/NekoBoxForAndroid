@@ -38,7 +38,8 @@ class TailscalePeersInstance(profile: ProxyEntity) : BoxInstance(profile) {
     suspend fun listPeers(): List<TailscalePeer> = use {
         init()
         launch()
-        val endpoint = config.tailscaleEndpoints.values.single()
+        // The config may also carry a group's Tailscale front or landing node; pick this profile's.
+        val endpoint = config.tailscaleEndpoints.getValue(profile.id)
         // Only the login matters here; the configured exit node may be the one being replaced.
         Libcore.tailscaleWaitReady(box, endpoint.tag, false, TAILSCALE_READY_TIMEOUT_MS)
         parseTailscalePeers(Libcore.tailscalePeers(box, endpoint.tag))

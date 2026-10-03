@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui.profile
 
 import android.os.Bundle
 import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
@@ -10,8 +11,8 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
-import io.nekohasekai.sagernet.bg.PROFILE_NOT_RUNNING
 import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.bg.proto.TailscaleAccess
 import io.nekohasekai.sagernet.bg.proto.TailscalePeer
 import io.nekohasekai.sagernet.bg.proto.TailscalePeersInstance
 import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
@@ -22,6 +23,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.proxy.PreferenceBinding
 import moe.matsuri.nb4a.proxy.PreferenceBindingManager
 import moe.matsuri.nb4a.proxy.Type
@@ -106,13 +110,15 @@ class TailscaleSettingsActivity :
         if (pickingExitNode) return
         pickingExitNode = true
         Toast.makeText(this, R.string.tailscale_exit_node_pick_loading, Toast.LENGTH_SHORT).show()
-        runOnIoDispatcher {
+        // Scoped to the editor: leaving it cancels the query, and a probe node closes once its
+        // readiness wait returns.
+        lifecycleScope.launch(Dispatchers.IO) {
             val peers = try {
                 loadPeers(profileId)
             } catch (e: Exception) {
                 Logs.w(e)
                 onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show() }
-                return@runOnIoDispatcher
+                return@launch
             } finally {
                 pickingExitNode = false
             }
@@ -120,18 +126,15 @@ class TailscaleSettingsActivity :
         }
     }
 
-    private suspend fun loadPeers(profileId: Long): List<TailscalePeer> {
-        val service = connection.service
-        if (service != null && DataStore.serviceState.connected) {
-            try {
-                return parseTailscalePeers(service.tailscalePeers(profileId))
-            } catch (e: IllegalStateException) {
-                // Not part of the running configuration: its identity is free for a probe node.
-                if (e.message?.contains(PROFILE_NOT_RUNNING) != true) throw e
-            }
-        }
+    // Through the service when it drives this node, otherwise a short-lived node on the saved
+    // profile; refused while the service runs the node under another profile.
+    private suspend fun loadPeers(profileId: Long): List<TailscalePeer> = TailscaleAccess.run(
+        { connection.service },
+        listOf(profileId),
+        { parseTailscalePeers(it.tailscalePeers(profileId)) },
+    ) {
         val entity = proxyEntity ?: error(getString(R.string.tailscale_save_first))
-        return TailscalePeersInstance(entity).listPeers()
+        TailscaleAccess.probeLock.withLock { TailscalePeersInstance(entity).listPeers() }
     }
 
     private fun showExitNodes(peers: List<TailscalePeer>) {
