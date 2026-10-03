@@ -37,9 +37,8 @@ class TailscaleConfigTest {
         serverPort = 1080
     }
 
-    private fun add(bean: AbstractBean, groupId: Long = 0, order: Long = 0): ProxyEntity =
-        ProxyEntity(groupId = groupId, userOrder = order).putBean(bean.apply { initializeDefaultValues() })
-            .also { it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) } }
+    private fun add(bean: AbstractBean, groupId: Long = 0, order: Long = 0): ProxyEntity = ProxyEntity(groupId = groupId, userOrder = order).putBean(bean.apply { initializeDefaultValues() })
+        .also { it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) } }
 
     private fun chain(vararg hops: ProxyEntity) = ChainBean().apply { proxies = hops.map { it.id } }
 
@@ -67,6 +66,7 @@ class TailscaleConfigTest {
                         checkDetours(value.get(key))
                     }
                 }
+
                 is JSONArray -> (0 until value.length()).forEach { checkDetours(value.get(it)) }
             }
         }
@@ -156,7 +156,13 @@ class TailscaleConfigTest {
                 val chain = add(chain(entry, exit), groupId, if (chainFirst) -1 else 2)
                 val result = build(entry, "normal")
                 val config = fixture("shared-$tailscale-$chainFirst", result, TAG_PROXY)
-                val entryTag = if (chainFirst) "g-${entry.id}" else if (tailscale) "tailnet" else "entry"
+                val entryTag = if (chainFirst) {
+                    "g-${entry.id}"
+                } else if (tailscale) {
+                    "tailnet"
+                } else {
+                    "entry"
+                }
                 val chainTag = if (chainFirst) "socks" else "socks-1"
                 val outbounds = config.objects("outbounds") + config.objects("endpoints")
                 assertEquals(entryTag, outbounds.single { it.optString("tag") == chainTag }.getString("detour"))
