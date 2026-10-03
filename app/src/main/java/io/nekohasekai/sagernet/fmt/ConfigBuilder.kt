@@ -190,6 +190,8 @@ class ConfigBuildResult(
     val autoSelect: Boolean = false,
     // Tailscale profile id -> its endpoint in this config, for readiness waits and peer queries.
     val tailscaleEndpoints: Map<Long, TailscaleEndpoint> = emptyMap(),
+    // Profile id -> the Tailscale profiles among its hops (group front/landing included).
+    val profileTailscaleNodes: Map<Long, Set<Long>> = emptyMap(),
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 
@@ -310,6 +312,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
     // different detour).
     val tailscaleProfiles = hashSetOf<Long>()
     val tailscaleEndpoints = HashMap<Long, ConfigBuildResult.TailscaleEndpoint>()
+    val profileTailscaleNodes = HashMap<Long, Set<Long>>()
     if (buildSelector) {
         require(group.landingProxy?.let(lookupCache::proxy)?.requireBean() !is TailscaleBean) {
             SagerNet.application.getString(R.string.tailscale_selector_landing)
@@ -899,6 +902,8 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             // Reserve only for a chain that built completely; a hop that fails later releases them.
             tailscaleProfiles += chainTailscaleProfiles
             tailscaleEndpoints += chainTailscaleEndpoints
+            profileList.filter { it.requireBean() is TailscaleBean }.map { it.id }.toSet()
+                .takeIf { it.isNotEmpty() }?.let { profileTailscaleNodes[entity.id] = it }
             return chainTagOut
         }
 
@@ -1447,6 +1452,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             localProxyCredentials,
             buildSelector && group.autoSelect,
             tailscaleEndpoints,
+            profileTailscaleNodes,
         )
     }
 }

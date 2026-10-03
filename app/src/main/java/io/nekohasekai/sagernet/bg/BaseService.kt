@@ -192,9 +192,12 @@ class BaseService {
 
         private fun runningProxy() = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
 
-        // Right after Connected the nodes may still be logging in or selecting their exit node.
-        private fun awaitTailscaleNodes(proxy: ProxyInstance) {
-            for (endpoint in proxy.config.tailscaleEndpoints.values) {
+        // Right after Connected a node may still be logging in or selecting its exit node. Only
+        // the nodes on the tested profile's path are awaited, so another member's broken node
+        // does not block the test.
+        private fun awaitTailscaleNodes(proxy: ProxyInstance, profileId: Long) {
+            val nodes = proxy.config.profileTailscaleNodes[profileId] ?: setOf(profileId)
+            for (endpoint in nodes.mapNotNull { proxy.config.tailscaleEndpoints[it] }) {
                 Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, endpoint.waitForExitNode, TAILSCALE_READY_TIMEOUT_MS)
             }
         }
@@ -205,7 +208,7 @@ class BaseService {
                 ?: proxy.config.tailscaleEndpoints[profileId]?.tag
                 ?: error(PROFILE_NOT_RUNNING)
             return try {
-                awaitTailscaleNodes(proxy)
+                awaitTailscaleNodes(proxy, profileId)
                 Libcore.urlTestOutbound(proxy.box, tag, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
             } catch (e: Exception) {
                 error(Protocols.genFriendlyMsg(e.readableMessage))

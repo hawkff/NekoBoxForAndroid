@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.bg.proto.TailscalePeer
 import io.nekohasekai.sagernet.bg.proto.TailscalePeersInstance
 import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateDirectory
 import io.nekohasekai.sagernet.ktx.Logs
@@ -127,14 +128,14 @@ class TailscaleSettingsActivity :
     }
 
     // Through the service when it drives this node, otherwise a short-lived node on the saved
-    // profile; refused while the service runs the node under another profile.
-    private suspend fun loadPeers(profileId: Long): List<TailscalePeer> = TailscaleAccess.run(
-        { connection.service },
-        listOf(profileId),
-        { parseTailscalePeers(it.tailscalePeers(profileId)) },
-    ) {
+    // profile; refused while the service runs any node the probe would start (a group front or
+    // landing node included).
+    private suspend fun loadPeers(profileId: Long): List<TailscalePeer> {
         val entity = proxyEntity ?: error(getString(R.string.tailscale_save_first))
-        TailscaleAccess.probeLock.withLock { TailscalePeersInstance(entity).listPeers() }
+        val nodes = buildConfig(entity, forTest = true).tailscaleEndpoints.keys
+        return TailscaleAccess.run({ connection.service }, nodes, { parseTailscalePeers(it.tailscalePeers(profileId)) }) {
+            TailscaleAccess.probeLock.withLock { TailscalePeersInstance(entity).listPeers() }
+        }
     }
 
     private fun showExitNodes(peers: List<TailscalePeer>) {

@@ -300,6 +300,7 @@ class ProtocolRegistryDispatchTest {
         val endpoint = test.tailscaleEndpoints.getValue(node.id)
         assertEquals("Tailscale via 100.64.0.1", endpoint.tag)
         assertTrue(endpoint.waitForExitNode)
+        assertEquals(setOf(node.id), test.profileTailscaleNodes[node.id])
 
         val duplicate = assertThrows(IllegalArgumentException::class.java) {
             ConfigBuilderTestEnv.io { buildConfig(twice, forExport = true) }
