@@ -7,7 +7,9 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
-import io.nekohasekai.sagernet.fmt.tailscale.clearTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.parcelize.parcelableCreator
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
@@ -23,15 +25,21 @@ internal interface BackupRestoreOperations {
 
 internal object DatabaseBackupRestoreOperations : BackupRestoreOperations {
     override suspend fun replaceProfiles(profiles: List<ProxyEntity>, groups: List<ProxyGroup>) {
+        // Import asks the service to stop first; wait for it so no node writes its identity
+        // while the directories are decided below.
+        withTimeoutOrNull(10_000) { while (DataStore.serviceState.started) delay(100) }
+        val previous = SagerDatabase.proxyDao.getEntities(SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE))
+            .associate { it.id to it.requireBean() }
         SagerDatabase.instance.runInTransaction {
             SagerDatabase.proxyDao.reset()
             SagerDatabase.proxyDao.insert(profiles)
             SagerDatabase.groupDao.reset()
             SagerDatabase.groupDao.insert(groups)
         }
-        // The service is stopped before a restore, and restored ids may collide with another
-        // installation's profiles, so every node starts with a fresh identity.
-        clearTailscaleState()
+        // Ids survive a restore, but a backup from another installation may reuse one for a
+        // different node: an identity is kept only for a profile restored with the same content.
+        val kept = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE && previous[it.id] == it.requireBean() }.map { it.id }
+        pruneTailscaleState(keep = kept.toSet())
     }
 
     override suspend fun replaceRules(rules: List<RuleEntity>) {

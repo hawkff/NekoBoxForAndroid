@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui.profile
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
@@ -13,8 +14,10 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.bg.proto.TAILSCALE_LOGIN_TIMEOUT_MS
 import io.nekohasekai.sagernet.bg.proto.TailscaleAccess
 import io.nekohasekai.sagernet.bg.proto.TailscaleLoginDeclined
+import io.nekohasekai.sagernet.bg.proto.TailscaleLoginPending
 import io.nekohasekai.sagernet.bg.proto.TailscalePeer
 import io.nekohasekai.sagernet.bg.proto.TailscalePeersInstance
 import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
@@ -27,6 +30,7 @@ import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.withLock
@@ -119,22 +123,34 @@ class TailscaleSettingsActivity :
         // Scoped to the editor: leaving it cancels the query, and a probe node closes once its
         // readiness wait returns.
         lifecycleScope.launch(Dispatchers.IO) {
-            val peers = try {
-                loadPeers(profileId)
+            try {
+                val peers = try {
+                    loadPeers(profileId)
+                } catch (e: TailscaleLoginPending) {
+                    // The running service owns the node: offer the page, then poll it for the result.
+                    if (!onMainDispatcher { askToOpenLogin(e.url) }) throw TailscaleLoginDeclined()
+                    awaitPeersAfterLogin(profileId)
+                }
+                onMainDispatcher { showExitNodes(peers.filter { it.exitNode }) }
             } catch (_: TailscaleLoginDeclined) {
-                return@launch
             } catch (e: Exception) {
                 Logs.w(e)
-                onMainDispatcher {
-                    // The service reports a pending login as an error that carries the URL.
-                    val loginUrl = LOGIN_URL.find(e.readableMessage)?.value
-                    if (loginUrl != null) askToOpenLogin(loginUrl) else Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show()
-                }
-                return@launch
+                onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show() }
             } finally {
                 pickingExitNode = false
             }
-            onMainDispatcher { showExitNodes(peers.filter { it.exitNode }) }
+        }
+    }
+
+    private suspend fun awaitPeersAfterLogin(profileId: Long): List<TailscalePeer> {
+        val deadline = SystemClock.elapsedRealtime() + TAILSCALE_LOGIN_TIMEOUT_MS
+        while (true) {
+            try {
+                return loadPeers(profileId)
+            } catch (e: TailscaleLoginPending) {
+                if (SystemClock.elapsedRealtime() > deadline) throw e
+            }
+            delay(2_000)
         }
     }
 
@@ -164,7 +180,15 @@ class TailscaleSettingsActivity :
     private suspend fun loadPeers(profileId: Long): List<TailscalePeer> {
         val entity = proxyEntity ?: error(getString(R.string.tailscale_save_first))
         val nodes = buildConfig(entity, forTest = true).tailscaleEndpoints.keys
-        return TailscaleAccess.run({ connection.service }, nodes, { parseTailscalePeers(it.tailscalePeers(profileId)) }) {
+        val viaService = { service: ISagerNetService ->
+            try {
+                parseTailscalePeers(service.tailscalePeers(profileId))
+            } catch (e: IllegalStateException) {
+                // The service reports a pending login as an error carrying the URL.
+                throw LOGIN_URL.find(e.readableMessage)?.let { TailscaleLoginPending(it.value) } ?: e
+            }
+        }
+        return TailscaleAccess.run({ connection.service }, nodes, viaService) {
             TailscaleAccess.probeLock.withLock {
                 TailscalePeersInstance(entity).listPeers { url -> onMainDispatcher { askToOpenLogin(url) } }
             }

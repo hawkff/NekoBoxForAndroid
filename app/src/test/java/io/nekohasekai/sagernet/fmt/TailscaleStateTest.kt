@@ -41,6 +41,12 @@ class TailscaleStateTest {
         assertFalse(orphan.exists())
         assertFalse(stray.exists())
 
+        // A restore passes the ids whose profile content survived; everything else goes.
+        val replaced = tailscaleStateFile(node.id + 1).apply { mkdirs() }
+        ConfigBuilderTestEnv.io { pruneTailscaleState(keep = setOf(node.id)) }
+        assertTrue(live.exists())
+        assertFalse(replaced.exists())
+
         // Nothing is pruned while the service runs: the node may still be writing its state.
         ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.deleteById(node.id) }
         DataStore.serviceState = BaseService.State.Connected

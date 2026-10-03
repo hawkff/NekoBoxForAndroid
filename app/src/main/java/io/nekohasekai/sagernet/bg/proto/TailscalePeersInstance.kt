@@ -31,6 +31,9 @@ const val TAILSCALE_LOGIN_TIMEOUT_MS = 180_000L
 // The user dismissed the login prompt; the caller shows nothing further.
 class TailscaleLoginDeclined : Exception("login declined")
 
+// The running service reports a node waiting for its interactive login at [url].
+class TailscaleLoginPending(val url: String) : Exception("Tailscale needs login: $url")
+
 // A short-lived node for a Tailscale profile the service is not running, used to list its
 // peers. It reuses the profile's saved identity, which is free while the service does not.
 class TailscalePeersInstance(profile: ProxyEntity) : BoxInstance(profile) {
