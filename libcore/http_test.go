@@ -506,9 +506,12 @@ func TestCheckRedirectKeepsCustomHeadersOnlyOnTheSameHTTPSHost(t *testing.T) {
 	first, _ := http.NewRequest(http.MethodGet, "https://sub.example/path", nil)
 
 	cases := map[string]bool{
-		"https://sub.example/next":   true,
-		"https://other.example/next": false,
-		"http://sub.example/next":    false,
+		"https://sub.example/next":      true,
+		"https://sub.example:443/next":  true,
+		"https://SUB.example:8443/next": true,
+		"https://other.example/next":    false,
+		"https://sub.example.net/next":  false,
+		"http://sub.example/next":       false,
 	}
 	for target, kept := range cases {
 		redirect, _ := http.NewRequest(http.MethodGet, target, nil)
