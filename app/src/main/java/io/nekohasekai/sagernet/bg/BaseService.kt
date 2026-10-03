@@ -64,8 +64,8 @@ class BaseService {
     interface ExpectedException
 
     class Data internal constructor(private val service: Interface) {
-        var state = State.Stopped
-        var proxy: ProxyInstance? = null
+        @Volatile var state = State.Stopped
+        @Volatile var proxy: ProxyInstance? = null
         var notification: ServiceNotification? = null
 
         val receiver = broadcastReceiverWithSelf { self, ctx, intent ->
@@ -112,6 +112,7 @@ class BaseService {
         var closeReceiverRegistered = false
 
         val binder = Binder(this)
+        internal val tailscale = TailscaleSessionController(this) { binder.callbackIdMap.containsKey(it) }
         var connectingJob: Job? = null
 
         // Kill switch reconnect while stopGate.holdTun keeps the interface up with no core behind it.
@@ -127,7 +128,9 @@ class BaseService {
             if (s == State.Stopping || s == State.Stopped) {
                 stopGate.onEnterStopState()
             }
+            if (s == State.Connecting || s == State.Stopping) TailscaleSessionController.stopAllAdmission()
             state = s
+            if (s == State.Connected || s == State.Stopped) TailscaleSessionController.resumeAllAdmission()
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
         }
@@ -137,9 +140,13 @@ class BaseService {
         ISagerNetService.Stub(),
         CoroutineScope,
         AutoCloseable {
-        private val callbacks = RemoteCallbackList<ISagerNetServiceCallback>()
+        private val callbacks = object : RemoteCallbackList<ISagerNetServiceCallback>() {
+            override fun onCallbackDied(callback: ISagerNetServiceCallback) {
+                releaseCallback(callback)
+            }
+        }
 
-        val callbackIdMap = ConcurrentHashMap<ISagerNetServiceCallback, Int>()
+        val callbackIdMap = ConcurrentHashMap<IBinder, Int>()
 
         override val coroutineContext = Dispatchers.Main.immediate + Job()
 
@@ -151,10 +158,10 @@ class BaseService {
                 Runtime.getRuntime().exit(0)
                 return
             }
-            if (!callbackIdMap.containsKey(cb)) {
-                callbacks.register(cb)
+            synchronized(callbackIdMap) {
+                if (!callbackIdMap.containsKey(cb.asBinder()) && !callbacks.register(cb)) return
+                callbackIdMap[cb.asBinder()] = id
             }
-            callbackIdMap[cb] = id
         }
 
         private val broadcastMutex = Mutex()
@@ -177,8 +184,37 @@ class BaseService {
         }
 
         override fun unregisterCallback(cb: ISagerNetServiceCallback) {
-            callbackIdMap.remove(cb)
+            releaseCallback(cb)
             callbacks.unregister(cb)
+        }
+
+        private fun releaseCallback(cb: ISagerNetServiceCallback) {
+            synchronized(callbackIdMap) { callbackIdMap.remove(cb.asBinder()) }
+            data?.tailscale?.releaseOwner(cb.asBinder())
+        }
+
+        override fun observeTailscale(cb: ISagerNetServiceCallback, sessionId: Long, profileId: Long, expectedIdentity: String) {
+            data?.tailscale?.open(cb, sessionId, profileId, expectedIdentity, false)
+        }
+
+        override fun startTailscaleCheck(cb: ISagerNetServiceCallback, sessionId: Long, profileId: Long, expectedIdentity: String) {
+            data?.tailscale?.open(cb, sessionId, profileId, expectedIdentity, true)
+        }
+
+        override fun closeTailscaleSession(cb: ISagerNetServiceCallback, sessionId: Long) {
+            data?.tailscale?.closeSession(cb, sessionId)
+        }
+
+        override fun pingTailscalePeer(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, peerId: String, timeoutMs: Int) {
+            data?.tailscale?.ping(cb, sessionId, requestId, peerId, timeoutMs)
+        }
+
+        override fun setTailscaleExitNode(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, peerId: String, expectedSavedSelection: String) {
+            data?.tailscale?.setExit(cb, sessionId, requestId, peerId, expectedSavedSelection)
+        }
+
+        override fun cancelTailscaleRequest(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long) {
+            data?.tailscale?.cancelRequest(cb, sessionId, requestId)
         }
 
         override fun urlTest(): Int {
@@ -202,8 +238,20 @@ class BaseService {
         // does not block the test.
         private fun awaitTailscaleNodes(proxy: ProxyInstance, profileId: Long) {
             val nodes = proxy.config.profileTailscaleNodes[profileId] ?: setOf(profileId)
-            for (endpoint in nodes.mapNotNull { proxy.config.tailscaleEndpoints[it] }) {
-                Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, endpoint.waitForExitNode, TAILSCALE_READY_TIMEOUT_MS)
+            for (nodeId in nodes) {
+                val endpoint = proxy.config.tailscaleEndpoints[nodeId] ?: continue
+                val deadline = SystemClock.elapsedRealtime() + TAILSCALE_READY_TIMEOUT_MS
+                while (true) {
+                    check(data?.state == State.Connected && data?.proxy === proxy) { "core not started" }
+                    try {
+                        Libcore.tailscaleWaitReady(proxy.box, endpoint.tag,
+                            proxy.tailscaleReadiness.get(nodeId, endpoint.waitForExitNode), 1_000)
+                        break
+                    } catch (e: Exception) {
+                        if (SystemClock.elapsedRealtime() >= deadline) throw e
+                        Thread.sleep(100)
+                    }
+                }
             }
         }
 
@@ -247,6 +295,8 @@ class BaseService {
         }
 
         override fun close() {
+            data?.tailscale?.destroy()
+            callbackIdMap.clear()
             callbacks.kill()
             cancel()
             data = null
@@ -390,6 +440,7 @@ class BaseService {
                     if (!data.stopGate.holdTun) DefaultNetworkListener.stop(this@Interface)
                 },
             ) {
+                TailscaleSessionController.drainAll()
                 data.proxy?.closeAndPersist()
             }
         }
@@ -579,6 +630,7 @@ class BaseService {
             // "connection failed" even though the live instance is already carrying traffic.
             data.connectingJob = runOnDefaultDispatcher {
                 try {
+                    TailscaleSessionController.drainAll()
                     DataStore.configurationStore.refreshSuspend()
                     when {
                         ipcProfileId == 0L -> DataStore.selectedProxy = 0L

@@ -114,6 +114,42 @@ class TailscaleAccessTest {
         assertEquals(1, probes)
     }
 
+    @Test
+    fun managementTemporaryProbeRefusesEveryNonStoppedState() = runTest {
+        for (state in BaseService.State.values().filter { it != BaseService.State.Stopped }) {
+            var started = false
+            val failure = runCatching {
+                TailscaleAccess.whileStopped({ state }) { started = true }
+            }.exceptionOrNull()
+            assertNotNull(failure)
+            assertFalse(started)
+        }
+    }
+
+    @Test
+    fun managementTemporaryProbeUsesExistingGuardAndRechecksAfterServiceStart() = runTest {
+        var state = BaseService.State.Stopped
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = async {
+            TailscaleAccess.run({ binder { state } }, listOf(1), { Unit }) {
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+        entered.await()
+        var started = false
+        val queued = async {
+            runCatching { TailscaleAccess.whileStopped({ state }) { started = true } }
+        }
+        runCurrent()
+        state = BaseService.State.Connecting
+        release.complete(Unit)
+        first.await()
+        assertNotNull(queued.await().exceptionOrNull())
+        assertFalse(started)
+    }
+
     private fun binder(state: () -> BaseService.State) = Proxy.newProxyInstance(
         ISagerNetService::class.java.classLoader,
         arrayOf(ISagerNetService::class.java),

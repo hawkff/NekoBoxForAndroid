@@ -394,18 +394,26 @@ data class ProxyEntity(
         fun updateProxyRow(proxy: ProxyEntity): Int
 
         // Editors and test results may hold old snapshots across reset or backup export.
-        // Ordinary updates cannot roll back the durable node marker.
+        // Ordinary updates cannot roll back the durable node marker or a saved exit.
         @Transaction
         fun updateProxy(proxy: ProxyEntity): Int {
             if (proxy.type == TYPE_TAILSCALE) {
                 val current = getById(proxy.id)
                 proxy.uuid = if (current?.type == TYPE_TAILSCALE) current.uuid else UUID.randomUUID().toString()
+                if (current?.type == TYPE_TAILSCALE) {
+                    proxy.tailscaleBean = proxy.tailscaleBean?.clone()?.apply {
+                        exitNode = current.tailscaleBean?.exitNode.orEmpty()
+                    }
+                }
             }
             return updateProxyRow(proxy)
         }
 
         @Transaction
         fun updateProxy(proxies: List<ProxyEntity>): Int = proxies.sumOf { updateProxy(it) }
+
+        @Query("UPDATE proxy_entities SET tailscaleBean = :bean WHERE id = :id AND type = 28 AND uuid = :identity")
+        fun updateTailscaleBean(id: Long, identity: String, bean: TailscaleBean): Int
 
         @Query("UPDATE proxy_entities SET uuid = :marker WHERE id = :id AND type = 28")
         fun setTailscaleMarker(id: Long, marker: String): Int

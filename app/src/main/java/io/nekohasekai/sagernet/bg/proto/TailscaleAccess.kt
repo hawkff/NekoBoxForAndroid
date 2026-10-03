@@ -21,6 +21,14 @@ object TailscaleAccess {
 
     private const val CORE_NOT_STARTED = "core not started"
 
+    internal suspend fun <T> whileStopped(state: () -> BaseService.State, probe: suspend () -> T): T {
+        check(state() == BaseService.State.Stopped) { "tailscale:not-stopped" }
+        return probeLock.withLock {
+            check(state() == BaseService.State.Stopped) { "tailscale:not-stopped" }
+            probe()
+        }
+    }
+
     // The service handle while the service is starting or running, null when it is stopped.
     // The binder's own state decides: the cached state is stale in a freshly started UI
     // process, and binding is asynchronous, so the binder is waited for briefly.
