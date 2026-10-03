@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.ui
 
 import android.app.Application
+import android.database.sqlite.SQLiteConstraintException
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -9,6 +10,8 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.stageTailscaleRestore
+import io.nekohasekai.sagernet.fmt.tailscale.tailscaleRestoreDirectory
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -21,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
@@ -55,6 +59,169 @@ class TailscaleRestoreTest {
             assertTrue(marker.isNotBlank())
             assertNotEquals(importedMarker, marker)
             assertNotEquals(local.uuid, marker)
+        }
+    }
+
+    @Test
+    fun duplicateProfilesRollBackRowsMarkersAndExactCredentialFiles() {
+        val local = setup()
+        val rows = databaseRows()
+        val files = credentialFiles(local.id)
+        val foreign = local.copy(uuid = "foreign")
+        val failure = runCatching {
+            replace(listOf(foreign, foreign.copy()), listOf(ProxyGroup(id = 1, name = "replacement")))
+        }.exceptionOrNull()
+        assertTrue("Expected duplicate profile ID constraint failure", failure is SQLiteConstraintException)
+        assertEquals(rows, databaseRows())
+        assertEquals(local.uuid, stored(local.id).uuid)
+        assertEquals(files, credentialFiles(local.id))
+        assertFalse(tailscaleRestoreDirectory(local.id).exists())
+    }
+
+    @Test
+    fun duplicateGroupsRollBackRowsMarkersAndExactCredentialFiles() {
+        val local = setup()
+        val rows = databaseRows()
+        val files = credentialFiles(local.id)
+        val failure = runCatching {
+            replace(listOf(local.copy(uuid = "foreign")), listOf(ProxyGroup(id = 1), ProxyGroup(id = 1)))
+        }.exceptionOrNull()
+        assertTrue("Expected duplicate group ID constraint failure", failure is SQLiteConstraintException)
+        assertEquals(rows, databaseRows())
+        assertEquals(local.uuid, stored(local.id).uuid)
+        assertEquals(files, credentialFiles(local.id))
+        assertFalse(tailscaleRestoreDirectory(local.id).exists())
+    }
+
+    @Test
+    fun interruptionBeforeCommitRecoversOriginalIncludingLegacyBlankMarker() {
+        for (legacy in listOf(false, true)) {
+            val local = setup()
+            if (legacy) ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.setTailscaleMarker(local.id, "") }
+            val rows = databaseRows()
+            val files = credentialFiles(local.id)
+            val original = stored(local.id).uuid
+            acquireTailscaleState(listOf(local.id)).use {
+                stageTailscaleRestore(local.id, original, "replacement")
+            }
+            assertFalse(tailscaleStateFile(local.id).exists())
+            assertTrue(tailscaleRestoreDirectory(local.id).resolve("state").exists())
+            ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+            assertEquals(rows, databaseRows())
+            assertEquals(files, credentialFiles(local.id))
+            assertFalse(tailscaleRestoreDirectory(local.id).exists())
+        }
+    }
+
+    @Test
+    fun interruptionWithMetadataButOriginalDirectoryStillActivePreservesExactBytes() {
+        val local = setup()
+        val files = credentialFiles(local.id)
+        acquireTailscaleState(listOf(local.id)).use {
+            stageTailscaleRestore(local.id, local.uuid, "replacement")
+            // Same layout as interruption after metadata write but before the staging rename,
+            // or after the rollback rename but before metadata cleanup.
+            assertTrue(tailscaleRestoreDirectory(local.id).resolve("state").renameTo(tailscaleStateFile(local.id)))
+        }
+        ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+        assertEquals(files, credentialFiles(local.id))
+        assertFalse(tailscaleRestoreDirectory(local.id).exists())
+    }
+
+    @Test
+    fun unknownCommittedMarkerFailsClosedWithoutRetiringPotentiallyValidCredentials() {
+        val local = setup()
+        acquireTailscaleState(listOf(local.id)).use { stageTailscaleRestore(local.id, local.uuid, "replacement") }
+        val files = fileTree(tailscaleRestoreDirectory(local.id))
+        try {
+            ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.setTailscaleMarker(local.id, "unknown") }
+            val failure = ConfigBuilderTestEnv.io { runCatching { acquireTailscaleState(listOf(local.id)).close() }.exceptionOrNull() }
+            assertNotNull(failure)
+            assertEquals(files, fileTree(tailscaleRestoreDirectory(local.id)))
+            assertFalse(tailscaleStateFile(local.id).exists())
+        } finally {
+            ConfigBuilderTestEnv.io {
+                SagerDatabase.proxyDao.setTailscaleMarker(local.id, local.uuid)
+                acquireTailscaleState(listOf(local.id)).close()
+            }
+        }
+    }
+
+    @Test
+    fun interruptionAfterCommitNeverExposesRetiredStateToReplacementOrDeletedNode() {
+        for (deleted in listOf(false, true)) {
+            val local = setup()
+            if (deleted) {
+                local.uuid = ""
+                ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.setTailscaleMarker(local.id, "") }
+            }
+            ConfigBuilderTestEnv.io {
+                acquireTailscaleState(listOf(local.id)).use {
+                    stageTailscaleRestore(local.id, local.uuid, if (deleted) null else "replacement")
+                    SagerDatabase.instance.runInTransaction {
+                        if (deleted) SagerDatabase.proxyDao.deleteById(local.id) else SagerDatabase.proxyDao.setTailscaleMarker(local.id, "replacement")
+                    }
+                }
+            }
+            assertFalse(tailscaleStateFile(local.id).exists())
+            assertTrue(tailscaleRestoreDirectory(local.id).resolve("state").exists())
+            ConfigBuilderTestEnv.io {
+                acquireTailscaleState(listOf(local.id)).use {
+                    assertFalse(tailscaleStateFile(local.id).exists())
+                    assertFalse(tailscaleRestoreDirectory(local.id).exists())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun unexpectedActiveDirectoryPreservesStagedCredentialsAndRetriesWithoutOverwrite() {
+        val local = setup()
+        val files = credentialFiles(local.id)
+        acquireTailscaleState(listOf(local.id)).use { stageTailscaleRestore(local.id, local.uuid, "replacement") }
+        val stagedFiles = fileTree(tailscaleRestoreDirectory(local.id))
+        val active = tailscaleStateFile(local.id).apply { mkdirs() }.resolve("unexpected")
+        active.writeBytes(byteArrayOf(3, 1, 4))
+        val failure = ConfigBuilderTestEnv.io { runCatching { acquireTailscaleState(listOf(local.id)).close() }.exceptionOrNull() }
+        assertNotNull(failure)
+        assertEquals(stagedFiles, fileTree(tailscaleRestoreDirectory(local.id)))
+        assertEquals(listOf<Byte>(3, 1, 4), active.readBytes().toList())
+        assertEquals(local.uuid, stored(local.id).uuid)
+        tailscaleStateFile(local.id).deleteRecursively()
+        ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+        assertEquals(files, credentialFiles(local.id))
+    }
+
+    @Test
+    fun malformedStagingFailsClosedWithoutDeletingCredentialBytes() {
+        val local = setup()
+        acquireTailscaleState(listOf(local.id)).use { stageTailscaleRestore(local.id, local.uuid, "replacement") }
+        val staging = tailscaleRestoreDirectory(local.id)
+        val metadata = staging.resolve("metadata.json")
+        val valid = metadata.readBytes()
+        try {
+            metadata.writeText("invalid")
+            val before = fileTree(staging)
+            val failure = ConfigBuilderTestEnv.io { runCatching { acquireTailscaleState(listOf(local.id)).close() }.exceptionOrNull() }
+            assertNotNull(failure)
+            assertEquals(before, fileTree(staging))
+            assertFalse(tailscaleStateFile(local.id).exists())
+        } finally {
+            metadata.writeBytes(valid)
+            ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+        }
+    }
+
+    @Test
+    fun validForeignRestoreRemovesStagingBeforeTheNewNodeCanAcquireItsIdentity() {
+        val local = setup()
+        restore(local.copy(uuid = "foreign"))
+        ConfigBuilderTestEnv.io {
+            acquireTailscaleState(listOf(local.id)).use {
+                assertNotEquals(local.uuid, stored(local.id).uuid)
+                assertFalse(tailscaleStateFile(local.id).exists())
+                assertFalse(tailscaleRestoreDirectory(local.id).exists())
+            }
         }
     }
 
@@ -96,13 +263,32 @@ class TailscaleRestoreTest {
             SagerDatabase.groupDao.insert(listOf(ProxyGroup(id = 1, name = "original")))
             SagerDatabase.proxyDao.addProxy(node)
         }
-        tailscaleStateFile(node.id).apply { mkdirs() }.resolve("tailscaled.state").writeText("local-state")
+        tailscaleStateFile(node.id).apply {
+            deleteRecursively()
+            mkdirs()
+            resolve("tailscaled.state").writeBytes(byteArrayOf(0, 1, -1, 0, 127))
+            resolve("nested").mkdirs()
+            resolve("nested/preferences").writeBytes(byteArrayOf(42, 0, -128))
+            resolve("empty-directory").mkdirs()
+        }
         return node
     }
 
     private fun stored(id: Long) = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(id)!! }
 
-    private fun restore(node: ProxyEntity) = ConfigBuilderTestEnv.io {
-        runBlocking { DatabaseBackupRestoreOperations.replaceProfiles(listOf(node), listOf(ProxyGroup(id = 1, name = "restored"))) }
+    private fun restore(node: ProxyEntity) = replace(listOf(node), listOf(ProxyGroup(id = 1, name = "restored")))
+
+    private fun replace(profiles: List<ProxyEntity>, groups: List<ProxyGroup>) = ConfigBuilderTestEnv.io {
+        runBlocking { DatabaseBackupRestoreOperations.replaceProfiles(profiles, groups) }
+    }
+
+    private fun databaseRows() = ConfigBuilderTestEnv.io {
+        SagerDatabase.proxyDao.getAll() to SagerDatabase.groupDao.allGroups()
+    }
+
+    private fun credentialFiles(id: Long) = fileTree(tailscaleStateFile(id))
+
+    private fun fileTree(directory: File) = directory.walkTopDown().associate {
+        it.relativeTo(directory).path to (it.isDirectory to if (it.isFile) it.readBytes().toList() else emptyList())
     }
 }

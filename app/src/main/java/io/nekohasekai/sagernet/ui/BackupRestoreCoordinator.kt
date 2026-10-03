@@ -8,7 +8,9 @@ import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.recoverTailscaleRestore
 import io.nekohasekai.sagernet.fmt.tailscale.retainsTailscaleIdentity
+import io.nekohasekai.sagernet.fmt.tailscale.stageTailscaleRestore
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateIds
 import kotlinx.coroutines.delay
@@ -38,24 +40,51 @@ internal object DatabaseBackupRestoreOperations : BackupRestoreOperations {
             } == true,
         ) { "Service is still stopping. Wait for it to stop and retry the restore." }
         var lease: Closeable? = null
+        val staged = ArrayList<Long>()
+        var orphans = emptySet<Long>()
         try {
-            SagerDatabase.instance.runInTransaction {
-                val previous = SagerDatabase.proxyDao.getEntities(SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE))
-                    .associateBy { it.id }
-                val restored = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE }
-                val ids = previous.keys + restored.map { it.id } + tailscaleStateIds()
-                // Keep locks through transaction commit, not merely through the last SQL write.
-                lease = acquireTailscaleState(ids)
-                val kept = restored.filter { retainsTailscaleIdentity(previous[it.id], it) }.map { it.id }.toSet()
-                for (id in ids - kept) {
-                    check(tailscaleStateFile(id).deleteRecursively()) { "Cannot remove replaced Tailscale identity" }
+            try {
+                SagerDatabase.instance.runInTransaction {
+                    val previous = SagerDatabase.proxyDao.getEntities(SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE))
+                        .associateBy { it.id }
+                    val restored = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE }
+                    val ids = previous.keys + restored.map { it.id } + tailscaleStateIds()
+                    // Keep locks through commit and filesystem completion, including rollback.
+                    lease = acquireTailscaleState(ids)
+                    val kept = restored.filter { retainsTailscaleIdentity(previous[it.id], it) }.map { it.id }.toSet()
+                    restored.filter { it.id !in kept }.forEach { it.uuid = UUID.randomUUID().toString() }
+                    val replacements = restored.associateBy { it.id }
+                    orphans = ids - previous.keys - replacements.keys
+                    for (id in ids - kept - orphans) {
+                        staged += id
+                        stageTailscaleRestore(id, previous[id]?.uuid, replacements[id]?.uuid)
+                    }
+                    SagerDatabase.proxyDao.reset()
+                    SagerDatabase.proxyDao.insert(profiles)
+                    SagerDatabase.groupDao.reset()
+                    SagerDatabase.groupDao.insert(groups)
                 }
-                restored.filter { it.id !in kept }.forEach { it.uuid = UUID.randomUUID().toString() }
-                SagerDatabase.proxyDao.reset()
-                SagerDatabase.proxyDao.insert(profiles)
-                SagerDatabase.groupDao.reset()
-                SagerDatabase.groupDao.insert(groups)
+            } catch (failure: Throwable) {
+                // Room has rolled back. Recover every directory, even if one rename fails.
+                var recoveryFailure: Throwable? = null
+                for (id in staged.asReversed()) {
+                    try {
+                        recoverTailscaleRestore(id)
+                    } catch (e: Throwable) {
+                        if (recoveryFailure == null) recoveryFailure = e else recoveryFailure.addSuppressed(e)
+                    }
+                }
+                if (recoveryFailure != null) {
+                    recoveryFailure.addSuppressed(failure)
+                    throw recoveryFailure
+                }
+                throw failure
             }
+            // Only committed markers authorize retirement; a crash here is recovered on acquisition.
+            staged.forEach { recoverTailscaleRestore(it) }
+            // No original or replacement Tailscale row exists for these IDs. Keep orphan files
+            // untouched on SQL failure; after commit they cannot be exposed to a foreign node.
+            orphans.forEach { check(tailscaleStateFile(it).deleteRecursively()) { "Cannot remove orphan Tailscale identity" } }
         } finally {
             lease?.close()
         }

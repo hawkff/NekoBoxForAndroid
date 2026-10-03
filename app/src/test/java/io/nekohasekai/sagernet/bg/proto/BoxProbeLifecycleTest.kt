@@ -14,6 +14,7 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
+import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -175,6 +176,27 @@ class BoxProbeLifecycleTest {
             }
         }
         acquireTailscaleState(config.tailscaleEndpoints.keys).use { }
+    }
+
+    @Test
+    fun closePrunesOnlyItsOwnDeletedEndpointsWithoutScanningOtherStateDirectories() = runBlocking {
+        val node = node()
+        val own = tailscaleStateFile(node.id).apply { mkdirs() }.resolve("state")
+        own.writeText("owned")
+        val unrelated = tailscaleStateFile(node.id + 100_000).apply { mkdirs() }.resolve("state")
+        unrelated.writeText("unrelated")
+        val stray = unrelated.parentFile!!.parentFile!!.resolve("unrelated-stray").apply { mkdirs() }
+        try {
+            Probe(node, prepared(node)).runProbe {
+                SagerDatabase.proxyDao.deleteById(node.id)
+            }
+            assertFalse(own.parentFile!!.exists())
+            assertEquals("unrelated", unrelated.readText())
+            assertTrue(stray.isDirectory)
+        } finally {
+            unrelated.parentFile!!.deleteRecursively()
+            stray.deleteRecursively()
+        }
     }
 
     @Test

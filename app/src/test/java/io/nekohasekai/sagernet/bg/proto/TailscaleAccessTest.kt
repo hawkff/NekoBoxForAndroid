@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -28,12 +29,56 @@ class TailscaleAccessTest {
         ConfigBuilderTestEnv.reset()
         DataStore.serviceState = BaseService.State.Idle
         var probed = false
+        var serviceCalls = 0
         val binder = binder { BaseService.State.Stopping }
         val failure = runCatching {
-            TailscaleAccess.run({ binder }, listOf(1), { error("must not query stopping core") }) { probed = true }
+            TailscaleAccess.run({ binder }, listOf(1), { serviceCalls++ }) {
+                probed = true
+                0
+            }
         }.exceptionOrNull()
+        assertEquals(0, serviceCalls)
         assertNotNull(failure)
         assertFalse(probed)
+    }
+
+    @Test
+    fun serviceQueryCompletesWhileUnrelatedLoginProbeHoldsSerialization() = runTest {
+        ConfigBuilderTestEnv.reset()
+        val stopped = binder { BaseService.State.Stopped }
+        val connected = binder { BaseService.State.Connected }
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val login = async {
+            TailscaleAccess.run({ stopped }, listOf(1), { -1 }) {
+                entered.complete(Unit)
+                release.await()
+                1
+            }
+        }
+        entered.await()
+        var serviceCalls = 0
+        var probes = 0
+        val query = async {
+            TailscaleAccess.run({ connected }, listOf(2), {
+                serviceCalls++
+                42
+            }) {
+                probes++
+                -1
+            }
+        }
+        try {
+            runCurrent()
+            assertFalse(login.isCompleted)
+            assertTrue("Service query must not wait for login probe", query.isCompleted)
+            assertEquals(42, query.await())
+            assertEquals(1, serviceCalls)
+            assertEquals(0, probes)
+        } finally {
+            release.complete(Unit)
+        }
+        login.await()
     }
 
     @Test

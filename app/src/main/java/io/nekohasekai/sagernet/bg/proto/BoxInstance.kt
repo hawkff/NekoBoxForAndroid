@@ -241,6 +241,8 @@ abstract class BoxInstance(val profile: ProxyEntity) : Closeable {
             stateLease?.close()
             stateLease = null
         }
-        if (::config.isInitialized && config.tailscaleEndpoints.isNotEmpty()) pruneTailscaleState()
+        if (::config.isInitialized && config.tailscaleEndpoints.isNotEmpty()) {
+            pruneTailscaleState(profileIds = config.tailscaleEndpoints.keys)
+        }
     }
 }

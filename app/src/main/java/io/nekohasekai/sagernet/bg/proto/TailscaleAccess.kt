@@ -39,15 +39,25 @@ object TailscaleAccess {
     // Runs [viaService] when the service is up, retrying while its core is still initializing.
     // PROFILE_NOT_RUNNING means the profile is not part of its configuration, and the probe may
     // go ahead as long as none of [nodes] is.
-    suspend fun <T> run(binder: () -> ISagerNetService?, nodes: Collection<Long>, viaService: (ISagerNetService) -> T, probe: suspend () -> T): T = probeLock.withLock {
-        // Recheck only after serialization: a queued probe's previous decision can be stale.
+    suspend fun <T> run(binder: () -> ISagerNetService?, nodes: Collection<Long>, viaService: (ISagerNetService) -> T, probe: suspend () -> T): T {
+        // A login probe must not block queries using unrelated nodes already owned by the service.
+        viaServiceIfRunning(binder, nodes, viaService)?.let { return it.getOrThrow() }
+        return probeLock.withLock {
+            // A service may have started while this fallback waited behind another probe.
+            viaServiceIfRunning(binder, nodes, viaService)?.let { return@withLock it.getOrThrow() }
+            probe()
+        }
+    }
+
+    // Result distinguishes a successful nullable value from the absence of a service path.
+    private suspend fun <T> viaServiceIfRunning(binder: () -> ISagerNetService?, nodes: Collection<Long>, viaService: (ISagerNetService) -> T): Result<T>? {
         val service = service(binder)
         if (service != null && BaseService.State.values()[service.state] == BaseService.State.Stopping) {
             error(app.getString(R.string.tailscale_service_starting))
         }
         if (service != null) {
             try {
-                return@withLock retryWhileStarting(service) { viaService(service) }
+                return Result.success(retryWhileStarting(service) { viaService(service) })
             } catch (e: IllegalStateException) {
                 if (e.message?.contains(PROFILE_NOT_RUNNING) != true) throw e
             }
@@ -55,7 +65,7 @@ object TailscaleAccess {
             val busy = (0 until running.length()).map { running.getLong(it) }
             if (nodes.any { it in busy }) error(app.getString(R.string.tailscale_node_in_use))
         }
-        probe()
+        return null
     }
 
     private suspend fun <T> retryWhileStarting(service: ISagerNetService, block: () -> T): T {
