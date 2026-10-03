@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.group
 
 import android.annotation.SuppressLint
+import android.os.Build
 import androidx.core.net.toUri
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SubscriptionFilterMode
@@ -104,6 +105,13 @@ object RawUpdater : GroupUpdater() {
                 }
                 setURL(subscription.link)
                 setUserAgent(subscription.customUserAgent.takeIf { it!!.isNotBlank() } ?: USER_AGENT)
+                if (subscription.sendDeviceId == true) {
+                    // The header set Happ introduced; 3x-ui, Marzban and Remnawave count devices by it.
+                    setHeader("X-HWID", DataStore.subscriptionDeviceId())
+                    setHeader("X-Device-OS", "Android")
+                    setHeader("X-Ver-OS", Build.VERSION.RELEASE)
+                    setHeader("X-Device-Model", Build.MODEL)
+                }
             }.execute()
             updateFromContent(
                 proxyGroup,
@@ -1218,17 +1226,10 @@ object RawUpdater : GroupUpdater() {
                 return proxies.takeIf { it.isNotEmpty() }
             }
         } else if (text.contains("[Interface]")) {
-            // amneziawg (wireguard with obfuscation params) or plain wireguard
             try {
-                val parsed = if (isAmneziaWGConf(text)) {
-                    parseAmneziaWG(text)
-                } else {
-                    parseWireGuard(text)
-                }
                 proxies.addAll(
-                    parsed.map {
+                    parseWireGuardConf(text).onEach {
                         if (fileName.isNotBlank()) it.name = fileName.removeSuffix(".conf")
-                        it
                     },
                 )
                 return proxies
@@ -1263,6 +1264,20 @@ object RawUpdater : GroupUpdater() {
     fun clashCipher(cipher: String): String = when (cipher) {
         "dummy" -> "none"
         else -> cipher
+    }
+
+    /**
+     * A WireGuard `.conf`, or an AmneziaWG one when the `[Interface]` section carries obfuscation
+     * keys. A `# comment` line directly above `[Peer]` names the profile, as in 3x-ui's AmneziaWG
+     * exports.
+     */
+    fun parseWireGuardConf(conf: String): List<AbstractBean> {
+        val beans = if (isAmneziaWGConf(conf)) parseAmneziaWG(conf) else parseWireGuard(conf)
+        val remark = conf.lines().zipWithNext().firstOrNull { (comment, section) ->
+            section.trim() == "[Peer]" && comment.trimStart().startsWith("#")
+        }?.first?.trimStart('#', ' ')?.trim()
+        if (!remark.isNullOrEmpty()) beans.forEach { it.name = remark }
+        return beans
     }
 
     fun parseWireGuard(conf: String): List<WireGuardBean> {

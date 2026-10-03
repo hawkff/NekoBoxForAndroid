@@ -50,6 +50,7 @@ type HTTPClient interface {
 type HTTPRequest interface {
 	SetURL(link string) error
 	SetUserAgent(userAgent string)
+	SetHeader(key string, value string)
 	AllowInsecure()
 	Execute() (HTTPResponse, error)
 }
@@ -193,6 +194,10 @@ func (r *httpRequest) SetURL(link string) (err error) {
 
 func (r *httpRequest) SetUserAgent(userAgent string) {
 	r.request.Header.Set("User-Agent", userAgent)
+}
+
+func (r *httpRequest) SetHeader(key string, value string) {
+	r.request.Header.Set(key, value)
 }
 
 func (r *httpRequest) Execute() (HTTPResponse, error) {

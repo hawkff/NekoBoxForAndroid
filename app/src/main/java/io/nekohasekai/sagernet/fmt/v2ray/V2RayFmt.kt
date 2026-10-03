@@ -41,9 +41,22 @@ data class VmessQRCode(
     var sni: String = "",
     var alpn: String = "",
     var fp: String = "",
+    var ech: String = "",
     var mode: String? = null,
     var extra: JsonElement? = null,
 )
+
+// Xray `echConfigList`: a base64 ECH config list, or a DoH URL (optionally `domain+url`) the
+// client queries at connect time. sing-box resolves the HTTPS record itself when ECH is enabled
+// without a config, so only the inline form is stored.
+private fun StandardV2RayBean.applyECHParam(value: String) {
+    if (value.isBlank()) return
+    enableECH = true
+    if (!value.contains("://")) echConfig = value
+}
+
+/** The stored ECH config as the compact base64 share links carry, without PEM armour. */
+private fun StandardV2RayBean.echParam() = echConfig!!.lines().filterNot { it.startsWith("-----") }.joinToString("").trim()
 
 fun StandardV2RayBean.isTLS(): Boolean = security == "tls"
 
@@ -212,6 +225,9 @@ fun StandardV2RayBean.parseDuckSoft(url: HttpUrl) {
             }
             url.queryParameter("sid")?.let {
                 realityShortId = it
+            }
+            url.queryParameterPreservingPlus("ech")?.let {
+                applyECHParam(it)
             }
         }
     }
@@ -405,9 +421,10 @@ fun parseV2RayN(link: String): VMessBean {
     bean.type = if (vmessQRCode.net == "splithttp") "xhttp" else vmessQRCode.net
     if (bean.type == "xhttp") {
         bean.xhttpMode = vmessQRCode.mode
-        vmessQRCode.extra?.takeUnless { it.isJsonNull }?.let {
-            bean.xhttpExtra = XhttpExtraConverter.xrayToSingBox(if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else it.toString())
-        }
+        val extra = vmessQRCode.extra?.takeUnless { it.isJsonNull }?.let {
+            if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else it.toString()
+        } ?: XhttpExtraConverter.flattenedExtra(JSONObject(result))?.toString()
+        if (extra != null) bean.xhttpExtra = XhttpExtraConverter.xrayToSingBox(extra)
     }
     bean.host = vmessQRCode.host
     bean.path = vmessQRCode.path
@@ -427,6 +444,7 @@ fun parseV2RayN(link: String): VMessBean {
             if (bean.sni.isNullOrBlank()) bean.sni = bean.host
             if (vmessQRCode.alpn != "none") bean.alpn = vmessQRCode.alpn
             bean.utlsFingerprint = vmessQRCode.fp
+            bean.applyECHParam(vmessQRCode.ech)
         }
     }
 
@@ -505,6 +523,7 @@ fun VMessBean.toV2rayN(): String {
         sni = bean.sni!!
         alpn = bean.alpn!!.replace("\n", ",")
         fp = bean.utlsFingerprint!!
+        if (bean.enableECH!!) ech = bean.echParam()
     }.let {
         NGUtil.encode(Gson().toJson(it))
     }
@@ -616,6 +635,9 @@ fun StandardV2RayBean.toUriVMessVLESSTrojan(isTrojan: Boolean): String {
                 }
                 if (utlsFingerprint!!.isNotBlank()) {
                     builder.addQueryParameter("fp", utlsFingerprint)
+                }
+                if (enableECH!!) {
+                    echParam().takeIf { it.isNotBlank() }?.let { builder.addQueryParameter("ech", it) }
                 }
                 if (realityPubKey!!.isNotBlank()) {
                     builder.setQueryParameter("security", "reality")
