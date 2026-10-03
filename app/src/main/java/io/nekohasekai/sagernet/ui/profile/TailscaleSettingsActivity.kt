@@ -1,14 +1,15 @@
 package io.nekohasekai.sagernet.ui.profile
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
@@ -19,18 +20,21 @@ import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
-import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateDirectory
+import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.proxy.PreferenceBinding
 import moe.matsuri.nb4a.proxy.PreferenceBindingManager
 import moe.matsuri.nb4a.proxy.Type
-import java.io.File
+import kotlin.coroutines.resume
+
+private val LOGIN_URL = Regex("https?://\\S+")
 
 class TailscaleSettingsActivity :
     ProfileSettingsActivity<TailscaleBean>(),
@@ -118,13 +122,37 @@ class TailscaleSettingsActivity :
                 loadPeers(profileId)
             } catch (e: Exception) {
                 Logs.w(e)
-                onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show() }
+                onMainDispatcher {
+                    // The service reports a pending login as an error that carries the URL.
+                    val loginUrl = LOGIN_URL.find(e.readableMessage)?.value
+                    if (loginUrl != null) askToOpenLogin(loginUrl) else Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show()
+                }
                 return@launch
             } finally {
                 pickingExitNode = false
             }
             onMainDispatcher { showExitNodes(peers.filter { it.exitNode }) }
         }
+    }
+
+    // Offers the interactive login page; true when the user opened it.
+    private suspend fun askToOpenLogin(url: String): Boolean = suspendCancellableCoroutine { continuation ->
+        if (isFinishing || isDestroyed) {
+            continuation.resume(false)
+            return@suspendCancellableCoroutine
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.tailscale_login_required)
+            .setMessage(R.string.tailscale_login_message)
+            .setPositiveButton(R.string.tailscale_login_open) { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                Toast.makeText(this, R.string.tailscale_login_waiting, Toast.LENGTH_LONG).show()
+                continuation.resume(true)
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> continuation.resume(false) }
+            .setOnCancelListener { continuation.resume(false) }
+            .show()
+        continuation.invokeOnCancellation { dialog.dismiss() }
     }
 
     // Through the service when it drives this node, otherwise a short-lived node on the saved
@@ -134,7 +162,9 @@ class TailscaleSettingsActivity :
         val entity = proxyEntity ?: error(getString(R.string.tailscale_save_first))
         val nodes = buildConfig(entity, forTest = true).tailscaleEndpoints.keys
         return TailscaleAccess.run({ connection.service }, nodes, { parseTailscalePeers(it.tailscalePeers(profileId)) }) {
-            TailscaleAccess.probeLock.withLock { TailscalePeersInstance(entity).listPeers() }
+            TailscaleAccess.probeLock.withLock {
+                TailscalePeersInstance(entity).listPeers { url -> onMainDispatcher { askToOpenLogin(url) } }
+            }
         }
     }
 
@@ -171,8 +201,7 @@ class TailscaleSettingsActivity :
         }
         val profileId = DataStore.editingId
         runOnIoDispatcher {
-            // The core runs with no_backup as its working directory (libcore InitCore).
-            val removed = File(SagerNet.application.noBackupFilesDir, tailscaleStateDirectory(profileId)).deleteRecursively()
+            val removed = tailscaleStateFile(profileId).deleteRecursively()
             onMainDispatcher {
                 val message = if (removed) R.string.tailscale_reset_identity_done else R.string.tailscale_reset_identity_failed
                 Toast.makeText(this@TailscaleSettingsActivity, message, Toast.LENGTH_SHORT).show()
