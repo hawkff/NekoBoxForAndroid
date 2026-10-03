@@ -1,5 +1,8 @@
 package io.nekohasekai.sagernet.fmt.tailscale
 
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.proto.TailscaleStateLease
 import io.nekohasekai.sagernet.database.DataStore
@@ -61,9 +64,34 @@ internal fun stageTailscaleRestore(profileId: Long, originalMarker: String?, rep
 // A failed rollback rename leaves both the metadata and original bytes available for retry.
 internal fun recoverTailscaleRestore(profileId: Long) {
     val staging = tailscaleRestoreDirectory(profileId)
-    if (!staging.exists()) return
     val failure = "Tailscale identity recovery required at $staging; preserved state must not be removed."
-    check(staging.isDirectory && staging.listFiles()?.all { it.name == "metadata.json" || it.name == "state" } == true) { failure }
+    fun mode(file: File): Int? = try {
+        Os.lstat(file.path).st_mode
+    } catch (e: ErrnoException) {
+        if (e.errno != OsConstants.ENOENT) throw IllegalStateException(failure, e)
+        null
+    }
+    // lstat rejects links, including dangling ones, before listing or reading their targets.
+    check(OsConstants.S_ISDIR(mode(staging.parentFile!!) ?: return)) { failure }
+    check(OsConstants.S_ISDIR(mode(staging) ?: return)) { failure }
+    val entries = staging.listFiles() ?: error(failure)
+    for (entry in entries) {
+        val entryMode = mode(entry) ?: error(failure)
+        check(
+            when (entry.name) {
+                "metadata.json" -> OsConstants.S_ISREG(entryMode)
+                "state" -> OsConstants.S_ISDIR(entryMode)
+                else -> false
+            },
+        ) { failure }
+    }
+    if (entries.none { it.name == "state" }) {
+        // Creation or final cleanup can be interrupted without any retired credentials left.
+        // These are bookkeeping-only files; neither their contents nor the DB marker matter.
+        entries.forEach { check(it.delete()) { failure } }
+        check(staging.delete()) { failure }
+        return
+    }
     val metadata = try {
         JSONObject(File(staging, "metadata.json").readText())
     } catch (e: Exception) {

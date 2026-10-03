@@ -25,6 +25,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
@@ -94,6 +95,124 @@ class TailscaleRestoreTest {
         assertEquals(local.uuid, stored(local.id).uuid)
         assertEquals(files, credentialFiles(local.id))
         assertFalse(tailscaleRestoreDirectory(local.id).exists())
+    }
+
+    @Test
+    fun emptyOrIncompleteCreationBookkeepingDoesNotBlockExistingIdentity() {
+        for (metadata in listOf(null, "", "{\"version\":")) {
+            val local = setup()
+            val rows = databaseRows()
+            val files = credentialFiles(local.id)
+            val staging = tailscaleRestoreDirectory(local.id).apply { assertTrue(mkdirs()) }
+            metadata?.let { staging.resolve("metadata.json").writeText(it) }
+            repeat(2) {
+                ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+                assertFalse(staging.exists())
+                assertEquals(rows, databaseRows())
+                assertEquals(local.uuid, stored(local.id).uuid)
+                assertEquals(files, credentialFiles(local.id))
+            }
+        }
+    }
+
+    @Test
+    fun emptyBookkeepingAfterRollbackCleanupPreservesRestoredCredentials() {
+        val local = setup()
+        val rows = databaseRows()
+        val files = credentialFiles(local.id)
+        val staging = tailscaleRestoreDirectory(local.id)
+        acquireTailscaleState(listOf(local.id)).use {
+            stageTailscaleRestore(local.id, local.uuid, "replacement")
+            assertTrue(staging.resolve("state").renameTo(tailscaleStateFile(local.id)))
+            assertTrue(staging.resolve("metadata.json").delete())
+        }
+        repeat(2) {
+            ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+            assertFalse(staging.exists())
+            assertEquals(rows, databaseRows())
+            assertEquals(local.uuid, stored(local.id).uuid)
+            assertEquals(files, credentialFiles(local.id))
+        }
+    }
+
+    @Test
+    fun emptyOrMetadataOnlyBookkeepingAfterRetirementCannotReviveOldIdentity() {
+        for (deleted in listOf(false, true)) {
+            for (metadataRemains in listOf(false, true)) {
+                val local = setup()
+                val staging = tailscaleRestoreDirectory(local.id)
+                ConfigBuilderTestEnv.io {
+                    acquireTailscaleState(listOf(local.id)).use {
+                        stageTailscaleRestore(local.id, local.uuid, if (deleted) null else "replacement")
+                        if (deleted) SagerDatabase.proxyDao.deleteById(local.id) else SagerDatabase.proxyDao.setTailscaleMarker(local.id, "replacement")
+                        assertTrue(staging.resolve("state").deleteRecursively())
+                        if (!metadataRemains) assertTrue(staging.resolve("metadata.json").delete())
+                    }
+                }
+                val rows = databaseRows()
+                repeat(2) {
+                    ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() }
+                    assertFalse(staging.exists())
+                    assertFalse(tailscaleStateFile(local.id).exists())
+                    assertEquals(rows, databaseRows())
+                    if (!deleted) assertEquals("replacement", stored(local.id).uuid)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun unexpectedBookkeepingEntriesArePreservedWithoutChangingActiveIdentity() {
+        for (name in listOf("unexpected", "metadata.json")) {
+            val local = setup()
+            val rows = databaseRows()
+            val files = credentialFiles(local.id)
+            val staging = tailscaleRestoreDirectory(local.id).apply { assertTrue(mkdirs()) }
+            staging.resolve(name).apply { mkdirs() }.resolve("preserve").writeBytes(byteArrayOf(0, -1, 42))
+            val before = fileTree(staging)
+            try {
+                val failure = ConfigBuilderTestEnv.io { runCatching { acquireTailscaleState(listOf(local.id)).close() }.exceptionOrNull() }
+                assertNotNull(failure)
+                assertEquals(before, fileTree(staging))
+                assertEquals(rows, databaseRows())
+                assertEquals(files, credentialFiles(local.id))
+            } finally {
+                staging.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun recoveryRejectsLinkedBookkeepingWithoutFollowingTargets() {
+        for (entry in listOf("metadata.json", "state", "staging", "dangling")) {
+            val local = setup()
+            val rows = databaseRows()
+            val files = credentialFiles(local.id)
+            val staging = tailscaleRestoreDirectory(local.id)
+            staging.parentFile!!.mkdirs()
+            val link = if (entry == "staging" || entry == "dangling") {
+                staging
+            } else {
+                assertTrue(staging.mkdir())
+                staging.resolve(entry)
+            }
+            val target = when (entry) {
+                "metadata.json" -> tailscaleStateFile(local.id).resolve("tailscaled.state")
+                "dangling" -> staging.parentFile!!.resolve("absent-target")
+                else -> tailscaleStateFile(local.id)
+            }
+            Files.createSymbolicLink(link.toPath(), target.toPath())
+            try {
+                val failure = ConfigBuilderTestEnv.io { runCatching { acquireTailscaleState(listOf(local.id)).close() }.exceptionOrNull() }
+                assertNotNull(failure)
+                assertTrue(Files.isSymbolicLink(link.toPath()))
+                assertEquals(rows, databaseRows())
+                assertEquals(files, credentialFiles(local.id))
+            } finally {
+                Files.delete(link.toPath())
+                if (link != staging) assertTrue(staging.delete())
+            }
+        }
     }
 
     @Test
