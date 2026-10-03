@@ -136,6 +136,7 @@ class SagerConnection(
             check(!callbackRegistered)
             service.registerCallback(serviceCallback, connectionId)
             callbackRegistered = true
+            DataStore.serviceState = BaseService.State.values()[service.state]
         } catch (e: RemoteException) {
             e.printStackTrace()
         }

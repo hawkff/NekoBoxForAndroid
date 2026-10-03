@@ -22,22 +22,24 @@ import io.nekohasekai.sagernet.bg.proto.TailscalePeer
 import io.nekohasekai.sagernet.bg.proto.TailscalePeersInstance
 import io.nekohasekai.sagernet.bg.proto.parseTailscalePeers
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.fmt.ConfigBuildResult
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
-import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
-import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.ktx.onMainDispatcher
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.withLock
 import moe.matsuri.nb4a.proxy.PreferenceBinding
 import moe.matsuri.nb4a.proxy.PreferenceBindingManager
 import moe.matsuri.nb4a.proxy.Type
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 private val LOGIN_URL = Regex("https?://\\S+")
 
@@ -124,17 +126,20 @@ class TailscaleSettingsActivity :
         // readiness wait returns.
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                val entity = SagerDatabase.proxyDao.getById(profileId) ?: error(getString(R.string.tailscale_save_first))
+                val prepared = buildConfig(entity, forTest = true)
                 val peers = try {
-                    loadPeers(profileId)
+                    loadPeers(entity, prepared)
                 } catch (e: TailscaleLoginPending) {
                     // The running service owns the node: offer the page, then poll it for the result.
                     if (!onMainDispatcher { askToOpenLogin(e.url) }) throw TailscaleLoginDeclined()
-                    awaitPeersAfterLogin(profileId)
+                    awaitPeersAfterLogin(entity, prepared)
                 }
                 onMainDispatcher { showExitNodes(peers.filter { it.exitNode }) }
             } catch (_: TailscaleLoginDeclined) {
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Logs.w(e)
                 onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show() }
             } finally {
                 pickingExitNode = false
@@ -142,11 +147,11 @@ class TailscaleSettingsActivity :
         }
     }
 
-    private suspend fun awaitPeersAfterLogin(profileId: Long): List<TailscalePeer> {
+    private suspend fun awaitPeersAfterLogin(entity: ProxyEntity, prepared: ConfigBuildResult): List<TailscalePeer> {
         val deadline = SystemClock.elapsedRealtime() + TAILSCALE_LOGIN_TIMEOUT_MS
         while (true) {
             try {
-                return loadPeers(profileId)
+                return loadPeers(entity, prepared)
             } catch (e: TailscaleLoginPending) {
                 if (SystemClock.elapsedRealtime() > deadline) throw e
             }
@@ -156,6 +161,7 @@ class TailscaleSettingsActivity :
 
     // Offers the interactive login page; true when the user opened it.
     private suspend fun askToOpenLogin(url: String): Boolean = suspendCancellableCoroutine { continuation ->
+        if (!continuation.isActive) return@suspendCancellableCoroutine
         if (isFinishing || isDestroyed) {
             continuation.resume(false)
             return@suspendCancellableCoroutine
@@ -164,34 +170,37 @@ class TailscaleSettingsActivity :
             .setTitle(R.string.tailscale_login_required)
             .setMessage(R.string.tailscale_login_message)
             .setPositiveButton(R.string.tailscale_login_open) { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
-                Toast.makeText(this, R.string.tailscale_login_waiting, Toast.LENGTH_LONG).show()
-                continuation.resume(true)
+                if (continuation.isActive) {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                        Toast.makeText(this, R.string.tailscale_login_waiting, Toast.LENGTH_LONG).show()
+                        continuation.resume(true)
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                }
             }
-            .setNegativeButton(android.R.string.cancel) { _, _ -> continuation.resume(false) }
-            .setOnCancelListener { continuation.resume(false) }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> if (continuation.isActive) continuation.resume(false) }
+            .setOnCancelListener { if (continuation.isActive) continuation.resume(false) }
             .show()
-        continuation.invokeOnCancellation { dialog.dismiss() }
+        continuation.invokeOnCancellation { runOnUiThread { dialog.dismiss() } }
     }
 
     // Through the service when it drives this node, otherwise a short-lived node on the saved
     // profile; refused while the service runs any node the probe would start (a group front or
     // landing node included).
-    private suspend fun loadPeers(profileId: Long): List<TailscalePeer> {
-        val entity = proxyEntity ?: error(getString(R.string.tailscale_save_first))
-        val nodes = buildConfig(entity, forTest = true).tailscaleEndpoints.keys
+    private suspend fun loadPeers(entity: ProxyEntity, prepared: ConfigBuildResult): List<TailscalePeer> {
+        val nodes = prepared.tailscaleEndpoints.keys
         val viaService = { service: ISagerNetService ->
             try {
-                parseTailscalePeers(service.tailscalePeers(profileId))
+                parseTailscalePeers(service.tailscalePeers(entity.id))
             } catch (e: IllegalStateException) {
                 // The service reports a pending login as an error carrying the URL.
                 throw LOGIN_URL.find(e.readableMessage)?.let { TailscaleLoginPending(it.value) } ?: e
             }
         }
         return TailscaleAccess.run({ connection.service }, nodes, viaService) {
-            TailscaleAccess.probeLock.withLock {
-                TailscalePeersInstance(entity).listPeers { url -> onMainDispatcher { askToOpenLogin(url) } }
-            }
+            TailscalePeersInstance(entity, prepared).listPeers { url -> onMainDispatcher { askToOpenLogin(url) } }
         }
     }
 
@@ -212,8 +221,11 @@ class TailscaleSettingsActivity :
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.tailscale_exit_node_pick)
             .setItems(labels.toTypedArray()) { _, index ->
-                // The hostname is what the control server shows and what SetExitNodeIP accepts.
-                (exitNode.preference as EditTextPreference).text = peers[index].name
+                try {
+                    (exitNode.preference as EditTextPreference).text = peers[index].exitNodeAddress()
+                } catch (e: IllegalStateException) {
+                    Toast.makeText(this, e.readableMessage, Toast.LENGTH_LONG).show()
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -222,16 +234,20 @@ class TailscaleSettingsActivity :
     private fun resetIdentity() {
         // A running core may hold the directory open and write the current identity back;
         // the profile may also be in use as a chain hop or rule outbound, so check the service, not the selection.
-        if (DataStore.serviceState.started) {
+        if (DataStore.serviceState.ownsTailscaleState) {
             Toast.makeText(this, R.string.tailscale_reset_identity_running, Toast.LENGTH_SHORT).show()
             return
         }
         val profileId = DataStore.editingId
-        runOnIoDispatcher {
-            val removed = tailscaleStateFile(profileId).deleteRecursively()
-            onMainDispatcher {
-                val message = if (removed) R.string.tailscale_reset_identity_done else R.string.tailscale_reset_identity_failed
-                Toast.makeText(this@TailscaleSettingsActivity, message, Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val marker = resetTailscaleIdentity(profileId)
+                proxyEntity?.uuid = marker
+                onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, R.string.tailscale_reset_identity_done, Toast.LENGTH_SHORT).show() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onMainDispatcher { Toast.makeText(this@TailscaleSettingsActivity, e.readableMessage, Toast.LENGTH_LONG).show() }
             }
         }
     }

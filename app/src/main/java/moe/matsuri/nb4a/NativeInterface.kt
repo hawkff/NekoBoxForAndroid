@@ -93,7 +93,7 @@ class NativeInterface :
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(app, POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            Logs.w("notification permission missing; $identifier: $openURL")
+            Logs.w("notification permission missing; $identifier")
             return
         }
         val login = identifier.startsWith(TAILSCALE_LOGIN_NOTIFICATION)

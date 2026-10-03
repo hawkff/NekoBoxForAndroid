@@ -5,9 +5,15 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
+import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.profilesForBackup
 import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,8 +58,71 @@ class TailscaleStateTest {
         DataStore.serviceState = BaseService.State.Connected
         ConfigBuilderTestEnv.io { pruneTailscaleState() }
         assertTrue(live.exists())
+        DataStore.serviceState = BaseService.State.Stopping
+        ConfigBuilderTestEnv.io { pruneTailscaleState() }
+        assertTrue(live.exists())
+        assertFalse(BaseService.State.Stopping.started)
         DataStore.serviceState = BaseService.State.Idle
         ConfigBuilderTestEnv.io { pruneTailscaleState() }
         assertFalse(live.exists())
+    }
+
+    @Test
+    fun probeLeaseRefusesResetAndPruningEvenWithCachedIdle() {
+        ConfigBuilderTestEnv.reset()
+        DataStore.serviceState = BaseService.State.Idle
+        val node = node()
+        val directory = tailscaleStateFile(node.id).apply { mkdirs() }
+        acquireTailscaleState(listOf(node.id)).use {
+            assertNotNull(ConfigBuilderTestEnv.io { runCatching { resetTailscaleIdentity(node.id) }.exceptionOrNull() })
+            ConfigBuilderTestEnv.io { pruneTailscaleState(emptySet()) }
+            assertTrue(directory.exists())
+            assertEquals(node.uuid, ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(node.id)!!.uuid })
+        }
+        ConfigBuilderTestEnv.io { pruneTailscaleState(emptySet()) }
+        assertFalse(directory.exists())
+    }
+
+    @Test
+    fun resetRotatesMarkerAndStaleUpdatesCannotUndoIt() {
+        ConfigBuilderTestEnv.reset()
+        DataStore.serviceState = BaseService.State.Idle
+        val node = node()
+        val original = node.uuid
+        val directory = tailscaleStateFile(node.id).apply { mkdirs() }
+        DataStore.serviceState = BaseService.State.Stopping
+        assertNotNull(ConfigBuilderTestEnv.io { runCatching { resetTailscaleIdentity(node.id) }.exceptionOrNull() })
+        assertTrue(directory.exists())
+        DataStore.serviceState = BaseService.State.Idle
+        val marker = ConfigBuilderTestEnv.io { resetTailscaleIdentity(node.id) }
+        assertNotEquals(original, marker)
+        assertFalse(directory.exists())
+        ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.updateProxy(node) }
+        assertEquals(marker, ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(node.id)!!.uuid })
+    }
+
+    @Test
+    fun exportDurablyMarksLegacyNodeWithoutDeletingCredentialsAndClonesGetFreshMarker() {
+        ConfigBuilderTestEnv.reset()
+        val node = node()
+        ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.setTailscaleMarker(node.id, "") }
+        val state = tailscaleStateFile(node.id).apply { mkdirs() }.resolve("tailscaled.state")
+        state.writeText("local-state")
+        DataStore.serviceState = BaseService.State.Connected
+        try {
+            val exported = ConfigBuilderTestEnv.io { profilesForBackup().single() }
+            assertTrue(exported.uuid.isNotBlank())
+            assertEquals(exported.uuid, ConfigBuilderTestEnv.io { profilesForBackup().single().uuid })
+            assertEquals("local-state", state.readText())
+            val clone = exported.copy(id = 0)
+            ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(clone) }
+            assertNotEquals(exported.uuid, clone.uuid)
+        } finally {
+            DataStore.serviceState = BaseService.State.Idle
+        }
+    }
+
+    private fun node() = ProxyEntity(groupId = 1L).putBean(TailscaleBean().apply { initializeDefaultValues() }).also {
+        it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) }
     }
 }

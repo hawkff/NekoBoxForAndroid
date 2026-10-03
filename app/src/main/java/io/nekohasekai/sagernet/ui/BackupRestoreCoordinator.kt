@@ -7,13 +7,18 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.preference.KeyValuePair
-import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.retainsTailscaleIdentity
+import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
+import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateIds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.parcelize.parcelableCreator
 import moe.matsuri.nb4a.utils.Util
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.Closeable
+import java.util.UUID
 
 internal interface BackupRestoreOperations {
     suspend fun replaceProfiles(profiles: List<ProxyEntity>, groups: List<ProxyGroup>)
@@ -25,21 +30,35 @@ internal interface BackupRestoreOperations {
 
 internal object DatabaseBackupRestoreOperations : BackupRestoreOperations {
     override suspend fun replaceProfiles(profiles: List<ProxyEntity>, groups: List<ProxyGroup>) {
-        // Import asks the service to stop first; wait for it so no node writes its identity
-        // while the directories are decided below.
-        withTimeoutOrNull(10_000) { while (DataStore.serviceState.started) delay(100) }
-        val previous = SagerDatabase.proxyDao.getEntities(SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE))
-            .associate { it.id to it.requireBean() }
-        SagerDatabase.instance.runInTransaction {
-            SagerDatabase.proxyDao.reset()
-            SagerDatabase.proxyDao.insert(profiles)
-            SagerDatabase.groupDao.reset()
-            SagerDatabase.groupDao.insert(groups)
+        // Stopping is still busy. A timeout must fail before *any* selected section mutates.
+        check(
+            withTimeoutOrNull(10_000) {
+                while (DataStore.serviceState.ownsTailscaleState) delay(100)
+                true
+            } == true,
+        ) { "Service is still stopping. Wait for it to stop and retry the restore." }
+        var lease: Closeable? = null
+        try {
+            SagerDatabase.instance.runInTransaction {
+                val previous = SagerDatabase.proxyDao.getEntities(SagerDatabase.proxyDao.getIdsByType(ProxyEntity.TYPE_TAILSCALE))
+                    .associateBy { it.id }
+                val restored = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE }
+                val ids = previous.keys + restored.map { it.id } + tailscaleStateIds()
+                // Keep locks through transaction commit, not merely through the last SQL write.
+                lease = acquireTailscaleState(ids)
+                val kept = restored.filter { retainsTailscaleIdentity(previous[it.id], it) }.map { it.id }.toSet()
+                for (id in ids - kept) {
+                    check(tailscaleStateFile(id).deleteRecursively()) { "Cannot remove replaced Tailscale identity" }
+                }
+                restored.filter { it.id !in kept }.forEach { it.uuid = UUID.randomUUID().toString() }
+                SagerDatabase.proxyDao.reset()
+                SagerDatabase.proxyDao.insert(profiles)
+                SagerDatabase.groupDao.reset()
+                SagerDatabase.groupDao.insert(groups)
+            }
+        } finally {
+            lease?.close()
         }
-        // Ids survive a restore, but a backup from another installation may reuse one for a
-        // different node: an identity is kept only for a profile restored with the same content.
-        val kept = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE && previous[it.id] == it.requireBean() }.map { it.id }
-        pruneTailscaleState(keep = kept.toSet())
     }
 
     override suspend fun replaceRules(rules: List<RuleEntity>) {

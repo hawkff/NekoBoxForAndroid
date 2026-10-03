@@ -56,6 +56,9 @@ class BaseService {
         Connected(true, true, true),
         Stopping,
         Stopped,
+        ;
+
+        val ownsTailscaleState: Boolean get() = started || this == Stopping
     }
 
     interface ExpectedException
@@ -191,7 +194,8 @@ class BaseService {
             }
         }
 
-        private fun runningProxy() = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
+        private fun runningProxy() = data?.takeIf { it.state == State.Connected }?.proxy?.takeIf { it.isInitialized() }
+            ?: error("core not started")
 
         // Right after Connected a node may still be logging in or selecting its exit node. Only
         // the nodes on the tested profile's path are awaited, so another member's broken node
@@ -220,8 +224,12 @@ class BaseService {
             val proxy = runningProxy()
             val endpoint = proxy.config.tailscaleEndpoints[profileId] ?: error(PROFILE_NOT_RUNNING)
             // Only the login matters for listing peers; the exit node may be the one being replaced.
-            Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, false, TAILSCALE_READY_TIMEOUT_MS)
-            return Libcore.tailscalePeers(proxy.box, endpoint.tag)
+            return try {
+                Libcore.tailscaleWaitReady(proxy.box, endpoint.tag, false, TAILSCALE_READY_TIMEOUT_MS)
+                Libcore.tailscalePeers(proxy.box, endpoint.tag)
+            } catch (e: Exception) {
+                error(e.readableMessage)
+            }
         }
 
         override fun runningTailscaleProfiles(): String = JSONArray(runningProxy().config.tailscaleEndpoints.keys.toList()).toString()
