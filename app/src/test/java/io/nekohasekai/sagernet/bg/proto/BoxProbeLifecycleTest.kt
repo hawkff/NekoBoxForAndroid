@@ -17,7 +17,6 @@ import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.support.NoFollowShadowLinux
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -46,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class, shadows = [NoFollowShadowLinux::class])
+@Config(sdk = [35], application = Application::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 class BoxProbeLifecycleTest {
     @Before

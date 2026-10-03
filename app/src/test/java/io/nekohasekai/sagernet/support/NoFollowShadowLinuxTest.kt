@@ -16,7 +16,7 @@ import org.robolectric.annotation.Config
 import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class, shadows = [NoFollowShadowLinux::class])
+@Config(sdk = [35], application = Application::class)
 class NoFollowShadowLinuxTest {
     @get:Rule
     val temporary = TemporaryFolder()
