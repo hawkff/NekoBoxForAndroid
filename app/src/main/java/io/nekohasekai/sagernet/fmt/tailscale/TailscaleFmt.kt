@@ -88,6 +88,7 @@ internal fun recoverTailscaleRestore(profileId: Long) {
             check(!state.exists()) { failure }
             check(retired.deleteRecursively()) { failure }
         }
+
         current == original -> {
             if (retired.exists()) {
                 state.parentFile!!.mkdirs()
@@ -96,14 +97,14 @@ internal fun recoverTailscaleRestore(profileId: Long) {
                 check(state.exists()) { failure }
             }
         }
+
         else -> error(failure)
     }
     check(staging.deleteRecursively()) { failure }
 }
 
-internal fun retainsTailscaleIdentity(previous: ProxyEntity?, restored: ProxyEntity): Boolean =
-    previous?.type == ProxyEntity.TYPE_TAILSCALE && restored.type == ProxyEntity.TYPE_TAILSCALE &&
-        previous.uuid.isNotBlank() && previous.uuid == restored.uuid && previous.requireBean() == restored.requireBean()
+internal fun retainsTailscaleIdentity(previous: ProxyEntity?, restored: ProxyEntity): Boolean = previous?.type == ProxyEntity.TYPE_TAILSCALE && restored.type == ProxyEntity.TYPE_TAILSCALE &&
+    previous.uuid.isNotBlank() && previous.uuid == restored.uuid && previous.requireBean() == restored.requireBean()
 
 // Adding provenance to a legacy local node does not change or remove its credentials.
 internal fun profilesForBackup(): List<ProxyEntity> {

@@ -76,7 +76,7 @@ class TailscaleStateLeaseTest {
             listOf(
                 File(System.getProperty("java.home"), "bin/java").path,
                 "-cp",
-                File(fixture.protectionDomain.codeSource.location.toURI()).path,
+                File(requireNotNull(requireNotNull(fixture.protectionDomain).codeSource).location.toURI()).path,
                 fixture.name,
                 File(directory, "$id.lock").path,
             ) + if (hold) listOf("hold") else emptyList(),

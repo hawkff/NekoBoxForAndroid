@@ -45,8 +45,11 @@ class TailscaleRestoreTest {
             val restored = local.copy(tailscaleBean = local.tailscaleBean!!.clone())
             when (kind) {
                 "foreign" -> restored.uuid = "foreign-marker"
+
                 "blank" -> restored.uuid = ""
+
                 "incompatible" -> restored.tailscaleBean!!.hostname = "different-host"
+
                 "legacy-local" -> {
                     ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.setTailscaleMarker(local.id, "") }
                     restored.uuid = ""
