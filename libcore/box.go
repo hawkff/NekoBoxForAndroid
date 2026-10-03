@@ -70,8 +70,12 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
-	cancel context.CancelFunc
-	state  int
+	ctx           context.Context
+	cancel        context.CancelFunc
+	state         int
+	running       bool
+	tailscaleWork sync.WaitGroup
+	closeDone     chan struct{}
 
 	v2api        *boxapi.SbV2rayServer
 	connections  *connectionTracker
@@ -112,6 +116,7 @@ func NewSingBoxInstance(config string, localTransport LocalDNSTransport) (b *Box
 
 	b = &BoxInstance{
 		Box:          instance,
+		ctx:          ctx,
 		cancel:       cancel,
 		pauseManager: service.FromContext[pause.Manager](ctx),
 		connections:  newConnectionTracker(),
@@ -136,22 +141,37 @@ func (b *BoxInstance) Start() (err error) {
 
 	if b.state == 0 {
 		b.state = 1
-		return b.Box.Start()
+		err = b.Box.Start()
+		b.running = err == nil
+		return err
 	}
 	return errors.New("already started")
 }
 
 func (b *BoxInstance) Close() (err error) {
-	b.access.Lock()
-	defer b.access.Unlock()
-
 	defer deferPanicToError("box.Close", func(err_ error) { err = err_ })
 
-	// no double close
+	b.access.Lock()
 	if b.state == 2 {
+		done := b.closeDone
+		b.access.Unlock()
+		if done != nil {
+			<-done
+		}
 		return nil
 	}
 	b.state = 2
+	b.running = false
+	b.closeDone = make(chan struct{})
+	done := b.closeDone
+	b.access.Unlock()
+	defer close(done)
+
+	// Stop admission before cancellation; workers never need access to finish.
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.tailscaleWork.Wait()
 
 	// clear main instance
 	if mainInstance == b {
@@ -160,11 +180,8 @@ func (b *BoxInstance) Close() (err error) {
 	}
 
 	// close box
-	if b.cancel != nil {
-		b.cancel()
-	}
 	if b.Box != nil {
-		b.Box.Close()
+		return b.Box.Close()
 	}
 
 	return nil
