@@ -47,13 +47,16 @@ data class VmessQRCode(
 )
 
 // Xray `echConfigList`: a base64 ECH config list, or a DoH URL (optionally `domain+url`) the
-// client queries at connect time. sing-box resolves the HTTPS record itself when ECH is enabled
-// without a config, so only the inline form is stored.
+// client queries at connect time. Both are kept so the link exports unchanged; see
+// buildSingBoxOutboundTLS for how the URL form runs.
 private fun StandardV2RayBean.applyECHParam(value: String) {
     if (value.isBlank()) return
     enableECH = true
-    if (!value.contains("://")) echConfig = value
+    echConfig = value
 }
+
+/** True for Xray's dynamic form, a DoH URL instead of an inline config list. */
+private fun StandardV2RayBean.echConfigIsURL() = echConfig!!.contains("://")
 
 /** The stored ECH config as the compact base64 share links carry, without PEM armour. */
 private fun StandardV2RayBean.echParam() = echConfig!!.lines().filterNot { it.startsWith("-----") }.joinToString("").trim()
@@ -809,7 +812,9 @@ fun buildSingBoxOutboundTLS(bean: StandardV2RayBean): OutboundTLSOptions? {
         if (bean.enableECH!!) {
             ech = OutboundECHOptions().apply {
                 enabled = true
-                if (bean.echConfig!!.isNotBlank()) {
+                // Without a config sing-box queries the HTTPS record itself, which is what the
+                // DoH URL form asks for.
+                if (bean.echConfig!!.isNotBlank() && !bean.echConfigIsURL()) {
                     config = if (bean.echConfig!!.contains("BEGIN ECH CONFIGS")) {
                         bean.echConfig!!.lines()
                     } else {

@@ -27,7 +27,7 @@ fun parseWireGuardLink(link: String): WireGuardBean {
             }
         }?.takeIf { it.isNotBlank() } ?: error("missing address")
         mtu = url.queryParameter("mtu")?.toIntOrNull()
-        reserved = url.queryParameter("reserved")
+        reserved = url.queryParameterPreservingPlus("reserved")
     }
 }
 

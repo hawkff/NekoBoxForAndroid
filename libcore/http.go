@@ -172,7 +172,8 @@ func (c *httpClient) Close() {
 
 type httpRequest struct {
 	*httpClient
-	request http.Request
+	request       http.Request
+	customHeaders []string
 }
 
 func (r *httpRequest) AllowInsecure() {
@@ -198,10 +199,30 @@ func (r *httpRequest) SetUserAgent(userAgent string) {
 
 func (r *httpRequest) SetHeader(key string, value string) {
 	r.request.Header.Set(key, value)
+	r.customHeaders = append(r.customHeaders, key)
+}
+
+// checkRedirect keeps Go's ten-hop limit and drops the headers set through SetHeader when a
+// redirect leaves the original host or downgrades from HTTPS, so a device identifier meant for the
+// subscription server reaches neither third parties nor the network in the clear.
+func (r *httpRequest) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := via[0].URL
+	if req.URL.Host != first.Host || (first.Scheme == "https" && req.URL.Scheme != "https") {
+		for _, key := range r.customHeaders {
+			req.Header.Del(key)
+		}
+	}
+	return nil
 }
 
 func (r *httpRequest) Execute() (HTTPResponse, error) {
 	defer deferPanicToError("http execute", func(err error) { log.Println(err) })
+	if len(r.customHeaders) > 0 {
+		r.h1h2Client.CheckRedirect = r.checkRedirect
+	}
 	// full direct
 	if r.tryH3Direct && !r.trySocks5 {
 		return r.doH3Direct()
@@ -373,7 +394,8 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			request: func(ctx context.Context) (response *http.Response, err error) {
 				request := r.request.Clone(ctx)
 				echClient := &http.Client{
-					Timeout: defaultHTTPRequestTimeout,
+					Timeout:       defaultHTTPRequestTimeout,
+					CheckRedirect: r.checkRedirect,
 					Transport: &http.Transport{
 						DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 							var d net.Dialer
@@ -399,7 +421,8 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			request: func(ctx context.Context) (response *http.Response, err error) {
 				request := r.request.Clone(ctx)
 				h3Client := &http.Client{
-					Timeout: defaultHTTPRequestTimeout,
+					Timeout:       defaultHTTPRequestTimeout,
+					CheckRedirect: r.checkRedirect,
 					Transport: &http3.Transport{
 						TLSClientConfig: r.tls.Clone(),
 						QUICConfig: &quic.Config{

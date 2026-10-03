@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.fmt.hysteria.HysteriaBean
 import io.nekohasekai.sagernet.fmt.hysteria.parseHysteria2
 import io.nekohasekai.sagernet.fmt.shadowsocks.parseShadowsocks
 import io.nekohasekai.sagernet.fmt.v2ray.VMessBean
+import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundTLS
 import io.nekohasekai.sagernet.fmt.v2ray.parseV2RayN
 import io.nekohasekai.sagernet.fmt.v2ray.toUriVMessVLESSTrojan
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
@@ -127,6 +128,7 @@ class PanelShareLinkTest {
 
     @Test
     fun vlessLink_importsEchAndRoundTripsIt() = runTest {
+        ConfigBuilderTestEnv.reset()
         val link = "vless://$UUID@node.example:443?type=tcp&security=tls&sni=node.example&fp=chrome&flow=xtls-rprx-vision&ech=${encode(ECH)}#ech"
         val bean = parseProxies(link).single() as VMessBean
         assertTrue(bean.enableECH!!)
@@ -135,10 +137,16 @@ class PanelShareLinkTest {
         val reimported = parseProxies(bean.toUriVMessVLESSTrojan(false)).single() as VMessBean
         assertEquals(ECH, reimported.echConfig)
 
-        // A DoH URL means "query the HTTPS record"; sing-box does that itself when no config is set.
+        // A DoH URL means "query the HTTPS record"; it is kept for export and sing-box runs ECH without a config.
         val dynamic = parseProxies("vless://$UUID@node.example:443?type=tcp&security=tls&ech=${encode("https://1.1.1.1/dns-query")}").single() as VMessBean
         assertTrue(dynamic.enableECH!!)
-        assertEquals("", dynamic.echConfig)
+        assertEquals("https://1.1.1.1/dns-query", dynamic.echConfig)
+        assertTrue(dynamic.toUriVMessVLESSTrojan(false).contains("ech="))
+        val dynamicEch = buildSingBoxOutboundTLS(dynamic.applyDefaultValues())!!.ech!!
+        assertEquals(true, dynamicEch.enabled)
+        assertNull(dynamicEch.config)
+        val inlineEch = buildSingBoxOutboundTLS(bean.applyDefaultValues())!!.ech!!
+        assertEquals(listOf("-----BEGIN ECH CONFIGS-----", ECH, "-----END ECH CONFIGS-----"), inlineEch.config)
     }
 
     @Test

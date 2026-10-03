@@ -105,8 +105,9 @@ object RawUpdater : GroupUpdater() {
                 }
                 setURL(subscription.link)
                 setUserAgent(subscription.customUserAgent.takeIf { it!!.isNotBlank() } ?: USER_AGENT)
-                if (subscription.sendDeviceId == true) {
-                    // The header set Happ introduced; 3x-ui, Marzban and Remnawave count devices by it.
+                // The header set Happ introduced; 3x-ui, Marzban and Remnawave count devices by it.
+                // Only over TLS: the identifier is not worth exposing to the network in the clear.
+                if (subscription.sendDeviceId == true && link.startsWith("https://")) {
                     setHeader("X-HWID", DataStore.subscriptionDeviceId())
                     setHeader("X-Device-OS", "Android")
                     setHeader("X-Ver-OS", Build.VERSION.RELEASE)
@@ -1268,15 +1269,14 @@ object RawUpdater : GroupUpdater() {
 
     /**
      * A WireGuard `.conf`, or an AmneziaWG one when the `[Interface]` section carries obfuscation
-     * keys. A `# comment` line directly above `[Peer]` names the profile, as in 3x-ui's AmneziaWG
-     * exports.
+     * keys. With a single peer, a `# comment` line directly above `[Peer]` names the profile, as in
+     * 3x-ui's AmneziaWG exports.
      */
     fun parseWireGuardConf(conf: String): List<AbstractBean> {
         val beans = if (isAmneziaWGConf(conf)) parseAmneziaWG(conf) else parseWireGuard(conf)
-        val remark = conf.lines().zipWithNext().firstOrNull { (comment, section) ->
-            section.trim() == "[Peer]" && comment.trimStart().startsWith("#")
-        }?.first?.trimStart('#', ' ')?.trim()
-        if (!remark.isNullOrEmpty()) beans.forEach { it.name = remark }
+        val remark = conf.lines().zipWithNext().singleOrNull { (_, section) -> section.trim() == "[Peer]" }
+            ?.first?.takeIf { it.trimStart().startsWith("#") }?.trimStart('#', ' ')?.trim()
+        if (!remark.isNullOrEmpty()) beans.singleOrNull()?.name = remark
         return beans
     }
 

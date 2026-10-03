@@ -518,6 +518,9 @@ class GroupFragment :
                     groupTraffic.isVisible = true
                     groupTraffic.text = text
                     groupStatus.setPadding(0)
+                } else {
+                    groupTraffic.isVisible = false
+                    groupStatus.setPadding(0, 0, 0, dp2px(4))
                 }
             } else {
                 groupTraffic.isVisible = false

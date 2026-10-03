@@ -372,6 +372,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var subscriptionDeviceId by configurationStore.string(Key.SUBSCRIPTION_DEVICE_ID)
 
     /** Random per-install identifier sent as X-HWID by subscriptions that opt in. Not derived from hardware. */
+    @Synchronized
     fun subscriptionDeviceId(): String = subscriptionDeviceId.ifBlank {
         java.util.UUID.randomUUID().toString().also { subscriptionDeviceId = it }
     }
