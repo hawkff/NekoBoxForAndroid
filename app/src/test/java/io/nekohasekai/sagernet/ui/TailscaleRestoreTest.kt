@@ -13,6 +13,7 @@ import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.stageTailscaleRestore
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleRestoreDirectory
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
+import io.nekohasekai.sagernet.support.NoFollowShadowLinux
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -28,7 +29,7 @@ import java.io.File
 import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class)
+@Config(sdk = [35], application = Application::class, shadows = [NoFollowShadowLinux::class])
 class TailscaleRestoreTest {
     @Test
     fun matchingNonemptyMarkerAndCompatibleContentPreserveLocalState() {

@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.fmt.tailscale.profilesForBackup
 import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
+import io.nekohasekai.sagernet.support.NoFollowShadowLinux
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -21,7 +22,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = android.app.Application::class)
+@Config(sdk = [35], application = android.app.Application::class, shadows = [NoFollowShadowLinux::class])
 class TailscaleStateTest {
 
     @Test
