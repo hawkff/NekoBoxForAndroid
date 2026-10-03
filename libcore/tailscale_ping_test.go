@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"testing"
 	"time"
@@ -66,6 +67,8 @@ type tailscalePingFixture struct {
 	results     []*adapter.TailscalePingResult
 	address     string
 	pingCleaned bool
+	earlyReturn bool
+	terminal    error
 }
 
 func (f *tailscalePingFixture) StartTailscalePing(ctx context.Context, address string, callback func(*adapter.TailscalePingResult)) error {
@@ -73,6 +76,9 @@ func (f *tailscalePingFixture) StartTailscalePing(ctx context.Context, address s
 	defer func() { f.pingCleaned = true }()
 	for _, result := range f.results {
 		callback(result)
+	}
+	if f.earlyReturn {
+		return f.terminal
 	}
 	<-ctx.Done()
 	return ctx.Err()
@@ -104,6 +110,27 @@ func TestTailscalePingFiveSamplesAndCleanup(t *testing.T) {
 	}
 	if samples[0].Path != "derp" || samples[1].Path != "direct" || samples[2].LatencyMs != nil {
 		t.Fatal("outcomes lost")
+	}
+}
+
+func TestTailscalePingEarlyEndIsNotCompletion(t *testing.T) {
+	for _, terminal := range []error{nil, io.EOF} {
+		fixture := &tailscalePingFixture{
+			tailscaleStatusFixture: tailscaleStatusFixture{status: statusWithPeers(&adapter.TailscalePeer{StableID: "peer", TailscaleIPs: []string{"100.64.0.2"}})},
+			earlyReturn:            true, terminal: terminal,
+		}
+		s := newTailscaleStream(context.Background(), 5, false)
+		s.run(func() {}, func(ctx context.Context) error {
+			return produceTailscalePing(ctx, fixture, "peer", time.Second, s.publish)
+		})
+		awaitTailscaleDone(t, s.done)
+		if _, err := s.Next(1); err == nil || err.Error() == "EOF" {
+			t.Fatal("early producer termination appeared as natural completion")
+		}
+		if !fixture.pingCleaned {
+			t.Fatal("early termination did not join cleanup")
+		}
+		s.Close()
 	}
 }
 

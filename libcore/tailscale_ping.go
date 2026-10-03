@@ -109,6 +109,9 @@ func produceTailscalePing(ctx context.Context, source tailscalePingSource, stabl
 	if sequence == 5 {
 		return nil
 	}
+	if err == nil {
+		return errors.New("tailscale:ping-ended: producer stopped before five samples")
+	}
 	return err
 }
 

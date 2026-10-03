@@ -9,6 +9,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/tailscale"
 )
 
+// Deadlines are cooperative: callers retain ownership until local backend work returns.
 const tailscaleChangeTimeout = 5 * time.Second
 
 // TailscaleExitNodeChange owns the core's exact exit-only undo token.

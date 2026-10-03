@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,34 @@ func TestTailscaleStreamDrainsBeforeTerminal(t *testing.T) {
 			t.Fatalf("terminal = %v, want %v", err, want)
 		}
 		s.Close()
+		s.Close()
+	}
+}
+
+func TestTailscaleStreamTerminalMessages(t *testing.T) {
+	for _, test := range []struct {
+		terminal error
+		message  string
+	}{
+		{nil, "EOF"},
+		{io.EOF, "tailscale:operation-failed: EOF"},
+		{errors.New("transport disconnected"), "tailscale:operation-failed: transport disconnected"},
+		{context.DeadlineExceeded, "context deadline exceeded"},
+		{context.Canceled, "context canceled"},
+	} {
+		s := newTailscaleStream(context.Background(), 5, false)
+		s.run(func() {}, func(context.Context) error { return test.terminal })
+		awaitTailscaleDone(t, s.done)
+		_, err := s.Next(1)
+		if err == nil || err.Error() != test.message {
+			t.Fatalf("terminal = %v, want %q", err, test.message)
+		}
+		if test.terminal == nil && err != io.EOF {
+			t.Fatal("natural completion is not raw EOF")
+		}
+		if test.terminal == io.EOF && !strings.HasPrefix(err.Error(), "tailscale:") {
+			t.Fatal("operational EOF is indistinguishable from completion")
+		}
 		s.Close()
 	}
 }

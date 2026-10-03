@@ -3,7 +3,9 @@ package libcore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,12 +58,22 @@ func (s *TailscaleStream) publish(value string) {
 	s.signal()
 }
 
+func tailscaleOperationError(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || strings.HasPrefix(err.Error(), "tailscale:") {
+		return err
+	}
+	// Raw EOF is reserved for intentional stream completion across gomobile.
+	return fmt.Errorf("tailscale:operation-failed: %w", err)
+}
+
 // run owns producer cleanup and releases box admission before signaling completion.
 func (s *TailscaleStream) run(release func(), produce func(context.Context) error) {
 	go func() {
 		err := produce(s.ctx)
 		if err == nil {
 			err = io.EOF
+		} else {
+			err = tailscaleOperationError(err)
 		}
 		s.mu.Lock()
 		s.terminal = err
@@ -184,7 +196,7 @@ func firstTailscaleStatus(ctx context.Context, source tailscaleStatusSource) (*a
 		if err == nil {
 			err = errors.New("tailscale:status-unavailable")
 		}
-		return nil, err
+		return nil, tailscaleOperationError(err)
 	}
 }
 
@@ -213,20 +225,27 @@ func ObserveTailscaleStatus(i *BoxInstance, tag string) (*TailscaleStream, error
 		if projectionErr != nil {
 			return projectionErr
 		}
+		if err == nil {
+			return errors.New("tailscale:status-ended: subscription stopped")
+		}
 		return err
 	})
 	return s, nil
 }
 
+const tailscaleStatusTimeout = 5 * time.Second
+
 func TailscaleStatus(i *BoxInstance, tag string) (string, error) {
-	s, err := ObserveTailscaleStatus(i, tag)
+	endpoint, lifetime, release, err := acquireTailscale(i, tag)
 	if err != nil {
 		return "", err
 	}
-	defer s.Close()
-	value, err := s.Next(5000)
-	if err == nil && value == "" {
-		err = context.DeadlineExceeded
+	defer release()
+	ctx, cancel := context.WithTimeout(lifetime, tailscaleStatusTimeout)
+	defer cancel()
+	status, err := firstTailscaleStatus(ctx, endpoint)
+	if err != nil {
+		return "", err
 	}
-	return value, err
+	return marshalTailscaleStatus(status)
 }
