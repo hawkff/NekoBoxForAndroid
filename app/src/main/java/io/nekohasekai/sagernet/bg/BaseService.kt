@@ -34,6 +34,10 @@ import java.util.concurrent.ConcurrentHashMap
 private const val KILL_SWITCH_RETRY_INITIAL_MS = 5_000L
 private const val KILL_SWITCH_RETRY_MAX_MS = 60_000L
 
+// Binder error for a profile that is not part of the running configuration; callers fall
+// back to a test instance of their own.
+const val PROFILE_NOT_RUNNING = "profile not in running configuration"
+
 class BaseService {
 
     enum class State(
@@ -182,6 +186,22 @@ class BaseService {
             } catch (e: Exception) {
                 error(Protocols.genFriendlyMsg(e.readableMessage))
             }
+        }
+
+        override fun urlTestProfile(profileId: Long): Int {
+            val proxy = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
+            val tag = proxy.config.profileTagMap[profileId] ?: error(PROFILE_NOT_RUNNING)
+            return try {
+                Libcore.urlTestOutbound(proxy.box, tag, DataStore.connectionTestURL, DataStore.connectionTestTimeout)
+            } catch (e: Exception) {
+                error(Protocols.genFriendlyMsg(e.readableMessage))
+            }
+        }
+
+        override fun tailscalePeers(profileId: Long): String {
+            val proxy = data?.proxy?.takeIf { it.isInitialized() } ?: error("core not started")
+            val endpoint = proxy.config.tailscaleEndpoints[profileId] ?: error(PROFILE_NOT_RUNNING)
+            return Libcore.tailscalePeers(proxy.box, endpoint.tag)
         }
 
         override fun connections(includeClosed: Boolean): String = data?.proxy?.takeIf { it.isInitialized() }?.box?.connections(includeClosed) ?: "[]"
