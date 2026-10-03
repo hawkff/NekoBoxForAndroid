@@ -69,6 +69,24 @@ func tailscaleStatus(ctx context.Context, i *BoxInstance, tag string) (*ipnstate
 	return client.Status(ctx)
 }
 
+// tailscaleReady reports backend and exit selection readiness, not packet reachability.
+func tailscaleReady(status *ipnstate.Status, exitNodeWanted bool) bool {
+	if status == nil || status.BackendState != ipn.Running.String() {
+		return false
+	}
+	if !exitNodeWanted {
+		return true
+	}
+	// ExitNodeStatus comes from a netmap snapshot that can miss peer deltas.
+	// Only the live peer state establishes current selection and approval.
+	for _, peer := range status.Peer {
+		if peer != nil && peer.ExitNode && peer.ExitNodeOption {
+			return true
+		}
+	}
+	return false
+}
+
 // TailscaleWaitReady blocks until the node is running, and its exit node is selected when
 // the profile configures one, or the timeout passes. Login state is reported so the caller
 // can show why a node never came up.
@@ -82,9 +100,9 @@ func TailscaleWaitReady(i *BoxInstance, tag string, exitNodeWanted bool, timeout
 	lastState := ""
 	for {
 		status, statusErr := tailscaleStatus(ctx, i, tag)
-		if statusErr == nil {
+		if statusErr == nil && status != nil {
 			lastState = status.BackendState
-			if status.BackendState == ipn.Running.String() && (!exitNodeWanted || status.ExitNodeStatus != nil) {
+			if tailscaleReady(status, exitNodeWanted) {
 				return nil
 			}
 			if status.BackendState == ipn.NeedsLogin.String() && status.AuthURL != "" {
