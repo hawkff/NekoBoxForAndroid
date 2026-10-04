@@ -14,6 +14,7 @@ import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
 import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
 import io.nekohasekai.sagernet.ktx.Logs
@@ -204,9 +205,10 @@ class BoxProbeLifecycleTest {
     }
 
     @Test
-    fun bestEffortPruneFailurePreservesSuccessfulResultAndOriginalQueryError() = runBlocking {
+    fun handledLockFailurePreservesProbeOutcomesAndStateWithoutCleanupWarning() = runBlocking {
         val node = node()
         val state = tailscaleStateFile(node.id).apply { mkdirs() }
+        val credentials = state.resolve("state").apply { writeText("retained") }
         // No lease/native instance is opened by this fixture. Obstruct only its unused lock path.
         val lockPath = File(SagerNet.application.noBackupFilesDir, "tailscale-locks/${node.id}.lock")
         lockPath.parentFile!!.mkdirs()
@@ -216,15 +218,56 @@ class BoxProbeLifecycleTest {
         Logs.sink = { messages += it }
         try {
             assertEquals(17, cleanupOnlyProbe(node).runProbe { 17 })
+            assertEquals("retained", credentials.readText())
             val failure = IOException("original query failure")
             val thrown = runCatching { cleanupOnlyProbe(node).runProbe { throw failure } }.exceptionOrNull()
             assertTrue(generateSequence(thrown) { it.cause }.any { it === failure || it.message == failure.message })
-            assertEquals(2, messages.size)
-            assertTrue(messages.all { it.endsWith("Tailscale state cleanup deferred") })
-            assertTrue(state.exists())
+            assertTrue(messages.isEmpty())
+            assertEquals("retained", credentials.readText())
         } finally {
             Logs.sink = previousSink
             lockPath.deleteRecursively()
+            state.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun propagatedPruneFailurePreservesSuccessfulResultAndOriginalQueryError() = runBlocking {
+        val node = node()
+        val state = tailscaleStateFile(node.id).apply { mkdirs() }
+        val credentials = state.resolve("state").apply { writeText("retained") }
+        val cleanupFailure = IOException("candidate enumeration failed")
+        val attempts = AtomicInteger()
+        // Candidate enumeration precedes the per-node acquisition catch in prune.
+        val ids = object : AbstractSet<Long>() {
+            override val size = 1
+            override fun iterator(): Iterator<Long> {
+                attempts.incrementAndGet()
+                throw cleanupFailure
+            }
+        }
+        val endpoints = object : Map<Long, ConfigBuildResult.TailscaleEndpoint> by prepared(node).tailscaleEndpoints {
+            override val keys: Set<Long> = ids
+        }
+        val config = prepared(node, endpoints = endpoints)
+        val messages = mutableListOf<String>()
+        val previousSink = Logs.sink
+        Logs.sink = { messages += it }
+        try {
+            assertSame(cleanupFailure, runCatching { pruneTailscaleState(profileIds = ids) }.exceptionOrNull())
+            attempts.set(0)
+            assertEquals(17, cleanupOnlyProbe(node, config).runProbe { 17 })
+            assertEquals("retained", credentials.readText())
+            val failure = IOException("original query failure")
+            val thrown = runCatching { cleanupOnlyProbe(node, config).runProbe { throw failure } }.exceptionOrNull()
+            assertTrue(generateSequence(thrown) { it.cause }.any { it === failure || it.message == failure.message })
+            assertEquals(2, attempts.get())
+            assertEquals(2, messages.size)
+            assertTrue(messages.all { it.endsWith("Tailscale state cleanup deferred") })
+            assertTrue(messages.none { it.contains(cleanupFailure.message!!) })
+            assertEquals("retained", credentials.readText())
+        } finally {
+            Logs.sink = previousSink
             state.deleteRecursively()
         }
     }
@@ -252,9 +295,9 @@ class BoxProbeLifecycleTest {
         }
     }
 
-    private fun cleanupOnlyProbe(node: ProxyEntity) = object : BoxInstance(node) {
+    private fun cleanupOnlyProbe(node: ProxyEntity, preparedConfig: ConfigBuildResult = prepared(node)) = object : BoxInstance(node) {
         override suspend fun init() {
-            config = prepared(node)
+            config = preparedConfig
         }
 
         override fun launch() = Unit
@@ -264,14 +307,18 @@ class BoxProbeLifecycleTest {
         it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) }
     }
 
-    private fun prepared(node: ProxyEntity, port: Int? = null) = ConfigBuildResult(
+    private fun prepared(
+        node: ProxyEntity,
+        port: Int? = null,
+        endpoints: Map<Long, ConfigBuildResult.TailscaleEndpoint> = mapOf(node.id to ConfigBuildResult.TailscaleEndpoint("node", false)),
+    ) = ConfigBuildResult(
         config = "{}",
         externalIndex = if (port == null) emptyList() else listOf(ConfigBuildResult.IndexEntity(linkedMapOf(port to node))),
         mainEntId = node.id,
         trafficMap = mapOf("node" to listOf(node)),
         profileTagMap = mapOf(node.id to "node"),
         selectorGroupId = -1,
-        tailscaleEndpoints = mapOf(node.id to ConfigBuildResult.TailscaleEndpoint("node", false)),
+        tailscaleEndpoints = endpoints,
     )
 
     private fun await(latch: CountDownLatch) = assertTrue("Barrier timed out", latch.await(10, TimeUnit.SECONDS))
