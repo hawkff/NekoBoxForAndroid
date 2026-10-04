@@ -69,6 +69,7 @@ class SagerConnection(
     private var connectionActive = false
     private var callbackRegistered = false
     private var callback: Callback? = null
+
     @Volatile private var epoch = 0L
     private var serviceCallback = newServiceCallback(epoch)
     private fun newServiceCallback(callbackEpoch: Long) = object : ISagerNetServiceCallback.Stub() {
@@ -78,11 +79,9 @@ class SagerConnection(
             }
         }
 
-        override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) =
-            deliver { it.cbTailscaleStatus(sessionId, sequence, json) }
+        override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) = deliver { it.cbTailscaleStatus(sessionId, sequence, json) }
 
-        override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) =
-            deliver { it.cbTailscaleResult(sessionId, requestId, json) }
+        override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) = deliver { it.cbTailscaleResult(sessionId, requestId, json) }
 
         override fun stateChanged(state: Int, profileName: String?, msg: String?) {
             if (state < 0) return // skip private
@@ -116,6 +115,7 @@ class SagerConnection(
 
     private var binder: IBinder? = null
     private var deathRecipient: IBinder.DeathRecipient? = null
+
     @Volatile private var tailscaleBinding: Pair<ISagerNetService, ISagerNetServiceCallback>? = null
 
     var service: ISagerNetService? = null

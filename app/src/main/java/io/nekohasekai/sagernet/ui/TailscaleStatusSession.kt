@@ -29,7 +29,9 @@ internal class TailscaleStatusSession(
     private val profileId: Long,
     private val identity: String,
 ) : TailscaleStatusTransport.Listener {
-    companion object { private val ids = AtomicLong() }
+    companion object {
+        private val ids = AtomicLong()
+    }
     private val mutableState = MutableStateFlow(TailscaleStatusUiState())
     val state = mutableState.asStateFlow()
     private var sessionId = 0L
@@ -111,7 +113,9 @@ internal class TailscaleStatusSession(
         sessionId = ids.incrementAndGet()
         observationPending = true
         mutableState.value = TailscaleStatusUiState(
-            connected = true, serviceState = mutableState.value.serviceState, refreshing = refreshing,
+            connected = true,
+            serviceState = mutableState.value.serviceState,
+            refreshing = refreshing,
         )
         attempt { transport.observe(sessionId, profileId, identity) }
     }
@@ -121,7 +125,9 @@ internal class TailscaleStatusSession(
         retireOwnership()
         sessionId = ids.incrementAndGet()
         mutableState.value = TailscaleStatusUiState(
-            connected = true, serviceState = mutableState.value.serviceState, temporaryRequested = true,
+            connected = true,
+            serviceState = mutableState.value.serviceState,
+            temporaryRequested = true,
         )
         attempt { transport.start(sessionId, profileId, identity) }
     }
@@ -180,7 +186,8 @@ internal class TailscaleStatusSession(
         if (status.profileId != profileId || status.identity != identity || status.generation < generation) return
         this.sequence = sequence
         if (status.stage == "closed" && status.source == "none" && status.node == null &&
-            status.errorCode == "tailscale:runtime-changed") {
+            status.errorCode == "tailscale:runtime-changed"
+        ) {
             // Backend retains this lightweight observer across the global admission barrier.
             observe(refreshing = true)
             return
@@ -223,11 +230,14 @@ internal class TailscaleStatusSession(
                 )
                 if (result.done) this.requestId = 0
             }
+
             is TailscaleStatusResult.Exit -> {
                 if (state.pending != "exit") return
                 this.requestId = 0
                 mutableState.value = state.copy(
-                    pending = null, exitOutcome = result.outcome, failed = false,
+                    pending = null,
+                    exitOutcome = result.outcome,
+                    failed = false,
                     status = state.status?.copy(savedExit = result.savedExit),
                 )
             }

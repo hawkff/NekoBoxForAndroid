@@ -37,17 +37,19 @@ internal suspend fun finalizeTailscaleExit(
         try {
             save(saved)
         } catch (e: Exception) {
-            return@withTimeout (try {
-                change.rollback()
-                rolledBack()
-                TailscaleExitResult(
-                    if (e.message == "tailscale:conflict") "conflict" else "failed-rolled-back",
-                    oldExit,
-                    if (e.message == "tailscale:conflict") "tailscale:conflict" else "tailscale:save-failed",
-                )
-            } catch (_: Exception) {
-                TailscaleExitResult("diverged", oldExit, "tailscale:rollback-failed")
-            }).also(completed)
+            return@withTimeout (
+                try {
+                    change.rollback()
+                    rolledBack()
+                    TailscaleExitResult(
+                        if (e.message == "tailscale:conflict") "conflict" else "failed-rolled-back",
+                        oldExit,
+                        if (e.message == "tailscale:conflict") "tailscale:conflict" else "tailscale:save-failed",
+                    )
+                } catch (_: Exception) {
+                    TailscaleExitResult("diverged", oldExit, "tailscale:rollback-failed")
+                }
+                ).also(completed)
         }
         val outcome = try {
             change.commit()

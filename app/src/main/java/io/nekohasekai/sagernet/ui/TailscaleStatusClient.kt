@@ -32,30 +32,33 @@ internal class TailscaleStatusClient(private val context: Context) : TailscaleSt
         val capturedEpoch = ++epoch
         val client = SagerConnection(SagerConnection.CONNECTION_ID_TAILSCALE_STATUS, listenForDeath = true)
         connection = client
-        client.connect(context, object : SagerConnection.Callback {
-            override fun onServiceConnected(service: ISagerNetService) {
-                if (capturedEpoch == epoch) listener.connected(BaseService.State.values()[service.state])
-            }
-            override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-                if (capturedEpoch == epoch) listener.serviceState(state)
-            }
-            override fun onServiceDisconnected() {
-                if (capturedEpoch == epoch) listener.disconnected()
-            }
-            override fun onBinderDied() {
-                if (capturedEpoch == epoch) {
-                    disconnect()
-                    listener.disconnected()
-                    connect(listener)
+        client.connect(
+            context,
+            object : SagerConnection.Callback {
+                override fun onServiceConnected(service: ISagerNetService) {
+                    if (capturedEpoch == epoch) listener.connected(BaseService.State.values()[service.state])
                 }
-            }
-            override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) {
-                if (capturedEpoch == epoch) listener.status(sessionId, sequence, json)
-            }
-            override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) {
-                if (capturedEpoch == epoch) listener.result(sessionId, requestId, json)
-            }
-        })
+                override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
+                    if (capturedEpoch == epoch) listener.serviceState(state)
+                }
+                override fun onServiceDisconnected() {
+                    if (capturedEpoch == epoch) listener.disconnected()
+                }
+                override fun onBinderDied() {
+                    if (capturedEpoch == epoch) {
+                        disconnect()
+                        listener.disconnected()
+                        connect(listener)
+                    }
+                }
+                override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) {
+                    if (capturedEpoch == epoch) listener.status(sessionId, sequence, json)
+                }
+                override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) {
+                    if (capturedEpoch == epoch) listener.result(sessionId, requestId, json)
+                }
+            },
+        )
     }
 
     override fun disconnect() {

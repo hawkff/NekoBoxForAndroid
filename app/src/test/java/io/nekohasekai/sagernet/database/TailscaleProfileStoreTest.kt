@@ -16,13 +16,15 @@ class TailscaleProfileStoreTest {
     @Before
     fun reset() = ConfigBuilderTestEnv.reset()
 
-    private fun node() = ProxyEntity(groupId = 12, tx = 100, rx = 200, userOrder = 7).putBean(TailscaleBean().apply {
-        initializeDefaultValues()
-        name = "node"
-        hostname = "host"
-        exitNode = "100.64.0.1"
-        acceptRoutes = true
-    }).also { it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) } }
+    private fun node() = ProxyEntity(groupId = 12, tx = 100, rx = 200, userOrder = 7).putBean(
+        TailscaleBean().apply {
+            initializeDefaultValues()
+            name = "node"
+            hostname = "host"
+            exitNode = "100.64.0.1"
+            acceptRoutes = true
+        },
+    ).also { it.id = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(it) } }
 
     @Test
     fun exitCasPreservesMetadataBeanFieldsAndOtherRows() = ConfigBuilderTestEnv.io {
@@ -39,12 +41,18 @@ class TailscaleProfileStoreTest {
     fun competingChoiceAndIdentityMismatchDoNotOverwrite() = ConfigBuilderTestEnv.io {
         val a = node()
         TailscaleProfileStore.compareAndSetExit(a.id, a.uuid, "100.64.0.1", "100.64.0.2")
-        assertEquals("tailscale:conflict", runCatching {
-            TailscaleProfileStore.compareAndSetExit(a.id, a.uuid, "100.64.0.1", "100.64.0.3")
-        }.exceptionOrNull()?.message)
-        assertEquals("tailscale:conflict", runCatching {
-            TailscaleProfileStore.compareAndSetExit(a.id, "replaced", "100.64.0.2", "")
-        }.exceptionOrNull()?.message)
+        assertEquals(
+            "tailscale:conflict",
+            runCatching {
+                TailscaleProfileStore.compareAndSetExit(a.id, a.uuid, "100.64.0.1", "100.64.0.3")
+            }.exceptionOrNull()?.message,
+        )
+        assertEquals(
+            "tailscale:conflict",
+            runCatching {
+                TailscaleProfileStore.compareAndSetExit(a.id, "replaced", "100.64.0.2", "")
+            }.exceptionOrNull()?.message,
+        )
         assertEquals("100.64.0.2", TailscaleProfileStore.read(a.id).tailscaleBean!!.exitNode)
     }
 
@@ -86,9 +94,12 @@ class TailscaleProfileStoreTest {
         assertEquals("100.64.0.2", saved.tailscaleBean!!.exitNode)
         assertEquals("draft-host", saved.tailscaleBean!!.hostname)
         assertEquals(a.tx, saved.tx)
-        assertEquals("tailscale:conflict", runCatching {
-            TailscaleProfileStore.saveEditor(a.id, a.uuid, "100.64.0.1", draft, true)
-        }.exceptionOrNull()?.message)
+        assertEquals(
+            "tailscale:conflict",
+            runCatching {
+                TailscaleProfileStore.saveEditor(a.id, a.uuid, "100.64.0.1", draft, true)
+            }.exceptionOrNull()?.message,
+        )
         assertEquals("100.64.0.1", draft.exitNode)
         val cleared = TailscaleProfileStore.saveEditor(a.id, a.uuid, "100.64.0.2", draft.clone().apply { exitNode = "" }, true)
         assertEquals("", cleared.tailscaleBean!!.exitNode)
@@ -99,9 +110,12 @@ class TailscaleProfileStoreTest {
         val a = node()
         val draft = a.tailscaleBean!!.clone().apply { controlUrl = "https://control.example" }
         TailscaleProfileStore.saveEditor(a.id, a.uuid, "100.64.0.1", draft, false)
-        assertEquals("tailscale:conflict", runCatching {
-            TailscaleProfileStore.compareAndSetRuntimeExit(a.id, a.uuid, "100.64.0.1", "", a.tailscaleBean)
-        }.exceptionOrNull()?.message)
+        assertEquals(
+            "tailscale:conflict",
+            runCatching {
+                TailscaleProfileStore.compareAndSetRuntimeExit(a.id, a.uuid, "100.64.0.1", "", a.tailscaleBean)
+            }.exceptionOrNull()?.message,
+        )
         assertEquals("100.64.0.1", TailscaleProfileStore.read(a.id).tailscaleBean!!.exitNode)
     }
 }

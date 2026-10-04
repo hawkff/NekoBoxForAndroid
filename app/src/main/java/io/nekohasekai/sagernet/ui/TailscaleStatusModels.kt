@@ -73,9 +73,14 @@ internal object TailscaleStatusParser {
     fun status(value: String): TailscaleStatusEnvelope = json(value).let { obj ->
         require(obj.getInt("version") == 1)
         TailscaleStatusEnvelope(
-            obj.getLong("profileId"), obj.getString("identity"), obj.getLong("generation"),
-            obj.getString("source"), obj.getString("stage"), obj.getString("savedExit"),
-            obj.optJSONObject("node")?.let(::node), obj.optString("errorCode"),
+            obj.getLong("profileId"),
+            obj.getString("identity"),
+            obj.getLong("generation"),
+            obj.getString("source"),
+            obj.getString("stage"),
+            obj.getString("savedExit"),
+            obj.optJSONObject("node")?.let(::node),
+            obj.optString("errorCode"),
         )
     }
 
@@ -103,20 +108,33 @@ internal object TailscaleStatusParser {
     fun result(value: String): TailscaleStatusResult = json(value).let { obj ->
         when (obj.getString("kind")) {
             "exit" -> TailscaleStatusResult.Exit(obj.getString("outcome"), obj.getString("savedExit"))
+
             "ping" -> TailscaleStatusResult.Ping(
-                obj.getBoolean("done"), obj.optJSONObject("sample")?.let {
+                obj.getBoolean("done"),
+                obj.optJSONObject("sample")?.let {
                     val error = it.optString("error").isNotEmpty()
                     val latency = if (it.isNull("latencyMs") || error) null else it.getDouble("latencyMs")
                     require(latency == null || (latency.isFinite() && latency >= 0))
                     TailscalePingSample(
-                        it.getString("peerId"), it.getString("peerIp"), it.getInt("sequence"), latency,
-                        if (error) "unknown" else it.getString("path").takeIf { path ->
-                            path in setOf("direct", "derp", "peer-relay", "unknown")
-                        } ?: "unknown",
-                        it.getInt("derpRegionId"), it.getString("derpRegionCode"), error,
+                        it.getString("peerId"),
+                        it.getString("peerIp"),
+                        it.getInt("sequence"),
+                        latency,
+                        if (error) {
+                            "unknown"
+                        } else {
+                            it.getString("path").takeIf { path ->
+                                path in setOf("direct", "derp", "peer-relay", "unknown")
+                            } ?: "unknown"
+                        },
+                        it.getInt("derpRegionId"),
+                        it.getString("derpRegionCode"),
+                        error,
                     )
-                }, obj.optString("errorCode").isNotEmpty(),
+                },
+                obj.optString("errorCode").isNotEmpty(),
             )
+
             else -> error("Unsupported Tailscale result")
         }
     }

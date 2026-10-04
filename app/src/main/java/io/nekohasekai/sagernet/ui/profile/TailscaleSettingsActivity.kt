@@ -85,7 +85,8 @@ class TailscaleSettingsActivity :
         restoredEditorDirty = savedInstanceState?.getBoolean("tailscaleEditorDirty") == true
         savedInstanceState?.getString("tailscaleIdentity")?.let { identity ->
             baseline = TailscaleEditorBaseline(
-                identity, savedInstanceState.getString("tailscaleExit").orEmpty(),
+                identity,
+                savedInstanceState.getString("tailscaleExit").orEmpty(),
                 savedInstanceState.getBoolean("tailscaleExitEdited"),
             )
         }
@@ -157,9 +158,15 @@ class TailscaleSettingsActivity :
             throw e
         } catch (e: Exception) {
             onMainDispatcher {
-                Toast.makeText(this@TailscaleSettingsActivity,
-                    if (e.message?.contains("tailscale:conflict") == true) R.string.tailscale_editor_conflict
-                    else R.string.tailscale_editor_save_failed, Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this@TailscaleSettingsActivity,
+                    if (e.message?.contains("tailscale:conflict") == true) {
+                        R.string.tailscale_editor_conflict
+                    } else {
+                        R.string.tailscale_editor_save_failed
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }
@@ -195,8 +202,10 @@ class TailscaleSettingsActivity :
             if (id == 0L) {
                 Toast.makeText(this@TailscaleSettingsActivity, R.string.tailscale_save_first, Toast.LENGTH_SHORT).show()
             } else {
-                startActivity(Intent(this@TailscaleSettingsActivity, TailscaleStatusActivity::class.java)
-                    .putExtra(TailscaleStatusActivity.EXTRA_PROFILE_ID, id))
+                startActivity(
+                    Intent(this@TailscaleSettingsActivity, TailscaleStatusActivity::class.java)
+                        .putExtra(TailscaleStatusActivity.EXTRA_PROFILE_ID, id),
+                )
             }
             true
         }
@@ -283,8 +292,10 @@ class TailscaleSettingsActivity :
         }
         val dialog = MaterialAlertDialogBuilder(this)
             .setTitle(R.string.tailscale_login_required)
-            .setMessage(getString(R.string.tailscale_status_login_origin, link.origin) + "\n\n" +
-                getString(R.string.tailscale_status_login_warning))
+            .setMessage(
+                getString(R.string.tailscale_status_login_origin, link.origin) + "\n\n" +
+                    getString(R.string.tailscale_status_login_warning),
+            )
             .setPositiveButton(R.string.tailscale_login_open) { _, _ ->
                 if (continuation.isActive) {
                     try {

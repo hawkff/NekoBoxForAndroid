@@ -38,12 +38,17 @@ class TailscaleSessionControllerTest {
         val results = LinkedBlockingQueue<JSONObject>()
         val statusEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
         val resultEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
+
         @Volatile var onStatus: ((Long, JSONObject) -> Unit)? = null
+
         @Volatile var onResult: ((Long, JSONObject) -> Unit)? = null
-        val callback = Proxy.newProxyInstance(ISagerNetServiceCallback::class.java.classLoader,
-            arrayOf(ISagerNetServiceCallback::class.java)) { _, method, args ->
+        val callback = Proxy.newProxyInstance(
+            ISagerNetServiceCallback::class.java.classLoader,
+            arrayOf(ISagerNetServiceCallback::class.java),
+        ) { _, method, args ->
             when (method.name) {
                 "asBinder" -> binder
+
                 "cbTailscaleStatus" -> {
                     val json = JSONObject(args!![2] as String)
                     statuses.add(json)
@@ -51,6 +56,7 @@ class TailscaleSessionControllerTest {
                     onStatus?.invoke(args[0] as Long, json)
                     null
                 }
+
                 "cbTailscaleResult" -> {
                     val json = JSONObject(args!![2] as String)
                     results.add(json)
@@ -58,6 +64,7 @@ class TailscaleSessionControllerTest {
                     onResult?.invoke(args[0] as Long, json)
                     null
                 }
+
                 else -> null
             }
         } as ISagerNetServiceCallback
@@ -76,8 +83,10 @@ class TailscaleSessionControllerTest {
 
     private fun newData(): BaseService.Data {
         lateinit var result: BaseService.Data
-        val service = Proxy.newProxyInstance(BaseService.Interface::class.java.classLoader,
-            arrayOf(BaseService.Interface::class.java)) { _, method, _ ->
+        val service = Proxy.newProxyInstance(
+            BaseService.Interface::class.java.classLoader,
+            arrayOf(BaseService.Interface::class.java),
+        ) { _, method, _ ->
             if (method.name == "getData") result else error("Unexpected service operation: ${method.name}")
         } as BaseService.Interface
         result = BaseService.Data(service)
@@ -148,6 +157,7 @@ class TailscaleSessionControllerTest {
         first.status()
         second.status()
         val field = BaseService.Binder::class.java.getDeclaredField("callbacks").apply { isAccessible = true }
+
         @Suppress("UNCHECKED_CAST")
         val callbacks = field.get(data.binder) as RemoteCallbackList<ISagerNetServiceCallback>
         callbacks.onCallbackDied(first.callback)
@@ -318,8 +328,12 @@ class TailscaleSessionControllerTest {
                 check(release.await(5, TimeUnit.SECONDS))
                 object : TailscaleExitChange {
                     override fun savedValue() = "100.64.0.2"
-                    override fun commit() { finalizations.incrementAndGet() }
-                    override fun rollback() { finalizations.incrementAndGet() }
+                    override fun commit() {
+                        finalizations.incrementAndGet()
+                    }
+                    override fun rollback() {
+                        finalizations.incrementAndGet()
+                    }
                 }
             }, {
                 if (failSave) error("disk")
@@ -389,7 +403,10 @@ class TailscaleSessionControllerTest {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val pending = CoroutineScope(owner + Dispatchers.IO).launch {
-            withContext(NonCancellable) { entered.complete(Unit); release.await() }
+            withContext(NonCancellable) {
+                entered.complete(Unit)
+                release.await()
+            }
         }
         entered.await()
         otherMode.state = BaseService.State.Connecting
@@ -468,16 +485,24 @@ class TailscaleSessionControllerTest {
         val release = CountDownLatch(1)
         val committed = AtomicBoolean()
         request(client, 15, "exit") { session, _ ->
-            finalizeTailscaleExit("", {
-                entered.countDown()
-                check(release.await(5, TimeUnit.SECONDS))
-                object : TailscaleExitChange {
-                    override fun savedValue() = "100.64.0.2"
-                    override fun commit() { committed.set(true) }
-                    override fun rollback() = Unit
-                }
-            }, { TailscaleProfileStore.compareAndSetExit(profile.id, profile.uuid, "", it) }, {}, {},
-                completed = { publish(session, 15, exitJson(it)) })
+            finalizeTailscaleExit(
+                "",
+                {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    object : TailscaleExitChange {
+                        override fun savedValue() = "100.64.0.2"
+                        override fun commit() {
+                            committed.set(true)
+                        }
+                        override fun rollback() = Unit
+                    }
+                },
+                { TailscaleProfileStore.compareAndSetExit(profile.id, profile.uuid, "", it) },
+                {},
+                {},
+                completed = { publish(session, 15, exitJson(it)) },
+            )
         }
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         data.binder.cancelTailscaleRequest(client.callback, 1, 15)
@@ -614,8 +639,11 @@ class TailscaleSessionControllerTest {
 
     @Test
     fun blockedStatusUnregisterAndDeathRetainOwnerBudget() = blockStatus { client, attempt ->
-        if (attempt == 0) data.binder.unregisterCallback(client.callback) else {
+        if (attempt == 0) {
+            data.binder.unregisterCallback(client.callback)
+        } else {
             val field = BaseService.Binder::class.java.getDeclaredField("callbacks").apply { isAccessible = true }
+
             @Suppress("UNCHECKED_CAST")
             val callbacks = field.get(data.binder) as RemoteCallbackList<ISagerNetServiceCallback>
             callbacks.onCallbackDied(client.callback)
@@ -741,10 +769,12 @@ class TailscaleSessionControllerTest {
             }
         }
         try {
-            for (client in clients) for (id in 1L..2L) {
-                data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
-                assertNotNull(entered.poll(5, TimeUnit.SECONDS))
-                data.binder.closeTailscaleSession(client.callback, id)
+            for (client in clients) {
+                for (id in 1L..2L) {
+                    data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
+                    assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+                    data.binder.closeTailscaleSession(client.callback, id)
+                }
             }
             repeat(8) {
                 val newcomer = Client()

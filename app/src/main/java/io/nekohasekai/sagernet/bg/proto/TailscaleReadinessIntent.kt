@@ -8,7 +8,9 @@ internal class TailscaleReadinessIntent {
     private val overrides = ConcurrentHashMap<Long, Boolean>()
 
     fun get(nodeId: Long, configured: Boolean): Boolean = overrides[nodeId] ?: configured
-    fun set(nodeId: Long, enabled: Boolean) { overrides[nodeId] = enabled }
+    fun set(nodeId: Long, enabled: Boolean) {
+        overrides[nodeId] = enabled
+    }
     fun clear() = overrides.clear()
 
     companion object {

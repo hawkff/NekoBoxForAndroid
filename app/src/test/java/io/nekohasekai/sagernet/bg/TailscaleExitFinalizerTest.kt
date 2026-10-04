@@ -8,15 +8,29 @@ import org.junit.Test
 class TailscaleExitFinalizerTest {
     private class Change(private val events: MutableList<String>, private val failRollback: Boolean = false, private val failCommit: Boolean = false) : TailscaleExitChange {
         override fun savedValue() = "100.64.0.2"
-        override fun commit() { events += "commit"; if (failCommit) error("closed") }
-        override fun rollback() { events += "rollback-exact"; if (failRollback) error("closed") }
+        override fun commit() {
+            events += "commit"
+            if (failCommit) error("closed")
+        }
+        override fun rollback() {
+            events += "rollback-exact"
+            if (failRollback) error("closed")
+        }
     }
 
     @Test
     fun publishesSuccessOnlyAfterDurableSaveAndCommit() = runTest {
         val events = mutableListOf<String>()
-        val result = finalizeTailscaleExit("old", { events += "begin"; Change(events) },
-            { events += "save:$it" }, { events += "intent:$it" }, { events += "restore-intent" })
+        val result = finalizeTailscaleExit(
+            "old",
+            {
+                events += "begin"
+                Change(events)
+            },
+            { events += "save:$it" },
+            { events += "intent:$it" },
+            { events += "restore-intent" },
+        )
         assertEquals(listOf("begin", "intent:true", "save:100.64.0.2", "commit"), events)
         assertEquals("applied-and-saved", result.outcome)
     }
@@ -60,10 +74,16 @@ class TailscaleExitFinalizerTest {
     @Test
     fun beginDivergencePublishesDivergedWithoutSavingOrClaimingRollback() = runTest {
         val completed = mutableListOf<TailscaleExitResult>()
-        val result = finalizeTailscaleExit("old", {
-            error("tailscale:diverged: exit preferences diverged after restoration failed")
-        }, { fail("save") }, { fail("intent") }, { fail("rollback without handle") },
-            completed = { completed += it })
+        val result = finalizeTailscaleExit(
+            "old",
+            {
+                error("tailscale:diverged: exit preferences diverged after restoration failed")
+            },
+            { fail("save") },
+            { fail("intent") },
+            { fail("rollback without handle") },
+            completed = { completed += it },
+        )
         assertEquals("diverged", result.outcome)
         assertEquals("tailscale:apply-diverged", result.errorCode)
         assertEquals("old", result.savedExit)
@@ -119,8 +139,12 @@ class TailscaleExitFinalizerTest {
         val result = finalizeTailscaleExit("old", {
             object : TailscaleExitChange {
                 override fun savedValue() = ""
-                override fun commit() { events += "commit" }
-                override fun rollback() { fail("rollback") }
+                override fun commit() {
+                    events += "commit"
+                }
+                override fun rollback() {
+                    fail("rollback")
+                }
             }
         }, { events += "save:$it" }, { events += "intent:$it" }, {})
         assertEquals(listOf("intent:false", "save:", "commit"), events)
@@ -148,7 +172,10 @@ class TailscaleExitFinalizerTest {
         var applied = false
         val owner = launch(start = CoroutineStart.LAZY) {
             ensureActive()
-            finalizeTailscaleExit("old", { applied = true; Change(mutableListOf()) }, {}, {}, {})
+            finalizeTailscaleExit("old", {
+                applied = true
+                Change(mutableListOf())
+            }, {}, {}, {})
         }
         owner.cancelAndJoin()
         assertFalse(applied)

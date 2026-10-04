@@ -27,7 +27,10 @@ class TailscaleEditorBaselineTest {
 
     @Test fun unrelatedDraftSaveKeepsExitCommittedWhileEditorWasOpen() = ConfigBuilderTestEnv.io {
         val original = setup()
-        val draft = original.tailscaleBean!!.clone().apply { name = "unsaved name"; acceptRoutes = true }
+        val draft = original.tailscaleBean!!.clone().apply {
+            name = "unsaved name"
+            acceptRoutes = true
+        }
         TailscaleProfileStore.compareAndSetExit(original.id, original.uuid, "100.64.0.2", "100.64.0.3")
         val saved = TailscaleProfileStore.saveEditor(original.id, original.uuid, "100.64.0.2", draft, false)
         assertEquals("100.64.0.3", saved.tailscaleBean!!.exitNode)
@@ -38,7 +41,10 @@ class TailscaleEditorBaselineTest {
 
     @Test fun manualExitEditConflictsWithoutDiscardingOtherDrafts() = ConfigBuilderTestEnv.io {
         val original = setup()
-        val draft = original.tailscaleBean!!.clone().apply { name = "keep this draft"; exitNode = "100.64.0.4" }
+        val draft = original.tailscaleBean!!.clone().apply {
+            name = "keep this draft"
+            exitNode = "100.64.0.4"
+        }
         TailscaleProfileStore.compareAndSetExit(original.id, original.uuid, "100.64.0.2", "100.64.0.3")
         val failure = runCatching {
             TailscaleProfileStore.saveEditor(original.id, original.uuid, "100.64.0.2", draft, true)
@@ -73,11 +79,13 @@ class TailscaleEditorBaselineTest {
 
     private fun setup(): ProxyEntity {
         ConfigBuilderTestEnv.reset()
-        val entity = ProxyEntity(id = 42, groupId = 1).putBean(TailscaleBean().apply {
-            initializeDefaultValues()
-            name = "original"
-            exitNode = "100.64.0.2"
-        })
+        val entity = ProxyEntity(id = 42, groupId = 1).putBean(
+            TailscaleBean().apply {
+                initializeDefaultValues()
+                name = "original"
+                exitNode = "100.64.0.2"
+            },
+        )
         SagerDatabase.proxyDao.addProxy(entity)
         return SagerDatabase.proxyDao.getById(entity.id)!!
     }

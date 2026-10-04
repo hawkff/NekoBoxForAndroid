@@ -27,7 +27,9 @@ class TailscaleStatusModelsTest {
             "https://example.test\\@other.test", "https://example.test/\nsecret", "https://example.test/%0d%0a",
             "https://example.test/%7F", "https://example.test:99999/", "https://example.test/ white",
             " https://example.test/", "https://example.test\u0000/", "https://example.test:0/",
-        )) assertNull(url, TailscaleLoginLink.parse(url))
+        )) {
+            assertNull(url, TailscaleLoginLink.parse(url))
+        }
     }
 
     @Test fun parserRetainsIncompleteInventoryAuthApprovalAndExpiryUnknown() {
@@ -58,10 +60,12 @@ class TailscaleStatusModelsTest {
     }
 
     @Test fun unknownAndPeerRelayPathsRemainHonestAndErrorsDropLatency() {
-        fun result(path: String, error: String = "") = TailscaleStatusParser.result("""
+        fun result(path: String, error: String = "") = TailscaleStatusParser.result(
+            """
             {"kind":"ping","done":true,"errorCode":"","sample":{"peerId":"p","peerIp":"100.64.0.2",
             "sequence":1,"latencyMs":4.2,"path":"$path","derpRegionId":4,"derpRegionCode":"test","error":"$error"}}
-        """) as TailscaleStatusResult.Ping
+        """,
+        ) as TailscaleStatusResult.Ping
         assertEquals("unknown", result("future-path").sample!!.path)
         assertEquals("peer-relay", result("peer-relay").sample!!.path)
         val failed = result("direct", "timeout").sample!!

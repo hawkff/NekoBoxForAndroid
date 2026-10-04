@@ -24,7 +24,9 @@ import io.nekohasekai.sagernet.R
 import kotlinx.coroutines.launch
 
 class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status) {
-    companion object { const val EXTRA_PROFILE_ID = "profileId" }
+    companion object {
+        const val EXTRA_PROFILE_ID = "profileId"
+    }
     private val model by viewModels<TailscaleStatusViewModel>()
     private val browser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
 
@@ -41,8 +43,10 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
             setDisplayHomeAsUpEnabled(true)
         }
         model.initialize(intent.getLongExtra(EXTRA_PROFILE_ID, 0L))
-        if (savedInstanceState == null) supportFragmentManager.beginTransaction()
-            .replace(R.id.settings, StatusFragment()).commit()
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.settings, StatusFragment()).commit()
+        }
     }
 
     override fun onStart() {
@@ -83,7 +87,12 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
                 val preference = newPreference(key).apply {
                     setTitle(title)
                     isSelectable = action != null
-                    if (action != null) setOnPreferenceClickListener { action(); true }
+                    if (action != null) {
+                        setOnPreferenceClickListener {
+                            action()
+                            true
+                        }
+                    }
                 }
                 rows[key] = preference
                 preferenceScreen.addPreference(preference)
@@ -110,7 +119,10 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
                 isIconSpaceReserved = false
             }
             preferenceScreen.addPreference(peerCategory)
-            val inventory = newPreference("inventory").apply { isSelectable = false; order = 0 }
+            val inventory = newPreference("inventory").apply {
+                isSelectable = false
+                order = 0
+            }
             rows["inventory"] = inventory
             peerCategory.addPreference(inventory)
         }
@@ -118,8 +130,10 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
         private class StatusPreference(context: Context) : Preference(context) {
             override fun onBindViewHolder(holder: PreferenceViewHolder) {
                 super.onBindViewHolder(holder)
-                holder.itemView.minimumHeight = maxOf(holder.itemView.minimumHeight,
-                    (48 * context.resources.displayMetrics.density).toInt())
+                holder.itemView.minimumHeight = maxOf(
+                    holder.itemView.minimumHeight,
+                    (48 * context.resources.displayMetrics.density).toInt(),
+                )
                 (holder.findViewById(android.R.id.summary) as? TextView)?.maxLines = Int.MAX_VALUE
             }
         }
@@ -160,8 +174,11 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
             rows.getValue("login").apply {
                 isVisible = node?.needsLogin == true || !node?.authUrl.isNullOrEmpty()
                 isEnabled = link != null
-                summary = if (link == null) getString(R.string.tailscale_status_login_invalid)
-                else getString(R.string.tailscale_status_login_origin, link.origin)
+                summary = if (link == null) {
+                    getString(R.string.tailscale_status_login_invalid)
+                } else {
+                    getString(R.string.tailscale_status_login_origin, link.origin)
+                }
             }
             rows.getValue("loginWarning").isVisible = rows.getValue("login").isVisible
             rows.getValue("self").summary = node?.self?.let {

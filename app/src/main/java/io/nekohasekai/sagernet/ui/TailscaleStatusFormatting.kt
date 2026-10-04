@@ -19,8 +19,13 @@ internal class TailscaleStatusFormatting(private val context: Context) {
         peer.ips.joinToString(", ").takeIf { it.isNotEmpty() },
         text(if (peer.online) R.string.tailscale_status_online else R.string.tailscale_status_offline),
         expiry(peer),
-        if (peer.exitNodeSelected) text(R.string.tailscale_status_exit_selected)
-        else if (peer.exitNodeOption) text(R.string.tailscale_status_exit_offer) else null,
+        if (peer.exitNodeSelected) {
+            text(R.string.tailscale_status_exit_selected)
+        } else if (peer.exitNodeOption) {
+            text(R.string.tailscale_status_exit_offer)
+        } else {
+            null
+        },
     ).joinToString("\n")
 
     fun state(state: TailscaleStatusUiState): String {
@@ -66,14 +71,16 @@ internal class TailscaleStatusFormatting(private val context: Context) {
         return text(R.string.tailscale_status_ping_result, sample.peerIp, latency, path)
     }
 
-    fun exitOutcome(outcome: String): String = text(when (outcome) {
-        "applied-and-saved" -> R.string.tailscale_status_exit_saved
-        "saved-for-next-start" -> R.string.tailscale_status_exit_next_start
-        "failed-unchanged" -> R.string.tailscale_status_exit_unchanged
-        "failed-rolled-back" -> R.string.tailscale_status_exit_rolled_back
-        "conflict" -> R.string.tailscale_status_exit_conflict
-        "diverged" -> R.string.tailscale_status_exit_diverged
-        "cancelled-before-apply" -> R.string.tailscale_status_exit_cancelled
-        else -> R.string.tailscale_status_error
-    })
+    fun exitOutcome(outcome: String): String = text(
+        when (outcome) {
+            "applied-and-saved" -> R.string.tailscale_status_exit_saved
+            "saved-for-next-start" -> R.string.tailscale_status_exit_next_start
+            "failed-unchanged" -> R.string.tailscale_status_exit_unchanged
+            "failed-rolled-back" -> R.string.tailscale_status_exit_rolled_back
+            "conflict" -> R.string.tailscale_status_exit_conflict
+            "diverged" -> R.string.tailscale_status_exit_diverged
+            "cancelled-before-apply" -> R.string.tailscale_status_exit_cancelled
+            else -> R.string.tailscale_status_error
+        },
+    )
 }

@@ -14,8 +14,16 @@ class TailscaleStatusBoundaryTest {
     @Test fun statusPathHasNoVpnEditorOrLoggingSideEffects() {
         val sources = listOf("TailscaleStatusActivity", "TailscaleStatusViewModel", "TailscaleStatusSession", "TailscaleStatusClient")
             .joinToString("\n") { source(it) }
-        for (forbidden in listOf("startService(", "stopService(", "reloadService(", "saveAndExit(",
-            "DataStore.editingId", "VpnRequestActivity", "Logs.", "SavedStateHandle")) {
+        for (forbidden in listOf(
+            "startService(",
+            "stopService(",
+            "reloadService(",
+            "saveAndExit(",
+            "DataStore.editingId",
+            "VpnRequestActivity",
+            "Logs.",
+            "SavedStateHandle",
+        )) {
             assertFalse(forbidden, sources.contains(forbidden))
         }
         assertTrue(source("TailscaleStatusActivity").contains("ThemedActivity(R.layout.layout_tailscale_status)"))

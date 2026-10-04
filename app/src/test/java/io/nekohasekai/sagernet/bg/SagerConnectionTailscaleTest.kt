@@ -29,13 +29,25 @@ class SagerConnectionTailscaleTest {
         val api = Proxy.newProxyInstance(ISagerNetService::class.java.classLoader, arrayOf(ISagerNetService::class.java)) { _, method, args ->
             when (method.name) {
                 "asBinder" -> binder
+
                 "getState" -> BaseService.State.Stopped.ordinal
-                "registerCallback" -> { callback = args!![0] as ISagerNetServiceCallback; null }
+
+                "registerCallback" -> {
+                    callback = args!![0] as ISagerNetServiceCallback
+                    null
+                }
+
                 "unregisterCallback" -> null
-                else -> { calls += method.name to args.orEmpty().toList(); null }
+
+                else -> {
+                    calls += method.name to args.orEmpty().toList()
+                    null
+                }
             }
         } as ISagerNetService
-        init { binder.attachInterface(api, "io.nekohasekai.sagernet.aidl.ISagerNetService") }
+        init {
+            binder.attachInterface(api, "io.nekohasekai.sagernet.aidl.ISagerNetService")
+        }
     }
 
     @Test
@@ -48,12 +60,19 @@ class SagerConnectionTailscaleTest {
         }
         val received = mutableListOf<String>()
         val connection = SagerConnection(SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
-        connection.connect(context, object : SagerConnection.Callback {
-            override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) = Unit
-            override fun onServiceConnected(service: ISagerNetService) = Unit
-            override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) { received += json }
-            override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) { received += json }
-        })
+        connection.connect(
+            context,
+            object : SagerConnection.Callback {
+                override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) = Unit
+                override fun onServiceConnected(service: ISagerNetService) = Unit
+                override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) {
+                    received += json
+                }
+                override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) {
+                    received += json
+                }
+            },
+        )
         try {
             val first = Service()
             connection.onServiceConnected(null, first.binder)

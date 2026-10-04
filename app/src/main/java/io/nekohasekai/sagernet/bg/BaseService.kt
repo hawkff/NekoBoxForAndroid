@@ -65,6 +65,7 @@ class BaseService {
 
     class Data internal constructor(private val service: Interface) {
         @Volatile var state = State.Stopped
+
         @Volatile var proxy: ProxyInstance? = null
         var notification: ServiceNotification? = null
 
@@ -244,8 +245,12 @@ class BaseService {
                 while (true) {
                     check(data?.state == State.Connected && data?.proxy === proxy) { "core not started" }
                     try {
-                        Libcore.tailscaleWaitReady(proxy.box, endpoint.tag,
-                            proxy.tailscaleReadiness.get(nodeId, endpoint.waitForExitNode), 1_000)
+                        Libcore.tailscaleWaitReady(
+                            proxy.box,
+                            endpoint.tag,
+                            proxy.tailscaleReadiness.get(nodeId, endpoint.waitForExitNode),
+                            1_000,
+                        )
                         break
                     } catch (e: Exception) {
                         if (SystemClock.elapsedRealtime() >= deadline) throw e

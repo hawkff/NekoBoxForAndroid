@@ -24,18 +24,35 @@ class TailscaleStatusSessionTest {
         val startedSessions = mutableListOf<Long>()
         val closedSessions = mutableListOf<Long>()
         var cancelFails = false
-        override fun connect(listener: TailscaleStatusTransport.Listener) { this.listener = listener; calls += "connect" }
-        override fun disconnect() { calls += "disconnect" }
+        override fun connect(listener: TailscaleStatusTransport.Listener) {
+            this.listener = listener
+            calls += "connect"
+        }
+        override fun disconnect() {
+            calls += "disconnect"
+        }
         override fun observe(sessionId: Long, profileId: Long, identity: String) {
-            session = sessionId; observedSessions += sessionId; calls += "observe"
+            session = sessionId
+            observedSessions += sessionId
+            calls += "observe"
         }
         override fun start(sessionId: Long, profileId: Long, identity: String) {
-            session = sessionId; startedSessions += sessionId; calls += "start"
+            session = sessionId
+            startedSessions += sessionId
+            calls += "start"
         }
-        override fun close(sessionId: Long) { closedSessions += sessionId; calls += "close" }
-        override fun ping(sessionId: Long, requestId: Long, peerId: String) { request = requestId; calls += "ping:$peerId" }
+        override fun close(sessionId: Long) {
+            closedSessions += sessionId
+            calls += "close"
+        }
+        override fun ping(sessionId: Long, requestId: Long, peerId: String) {
+            request = requestId
+            calls += "ping:$peerId"
+        }
         override fun selectExit(sessionId: Long, requestId: Long, peerId: String, expectedExit: String) {
-            request = requestId; this.expectedExit = expectedExit; calls += "exit:$peerId"
+            request = requestId
+            this.expectedExit = expectedExit
+            calls += "exit:$peerId"
         }
         override fun cancel(sessionId: Long, requestId: Long) {
             calls += "cancel"
@@ -130,7 +147,9 @@ class TailscaleStatusSessionTest {
             6L to status(generation = 1, savedExit = "stale"),
             7L to JSONObject(status()).put("identity", "other").toString(),
             8L to JSONObject(status()).put("profileId", 99).toString(),
-        )) transport.listener.status(transport.session, sequence, json)
+        )) {
+            transport.listener.status(transport.session, sequence, json)
+        }
         assertEquals("100.64.0.2", session.state.value.status?.savedExit)
         assertEquals(2L, session.state.value.status?.generation)
     }
@@ -457,16 +476,18 @@ class TailscaleStatusSessionTest {
         session.cancelRequest()
         assertEquals("ping", session.state.value.pending)
         assertFalse(session.state.value.canOperate)
-        transport.listener.result(transport.session, transport.request,
-            """{"kind":"ping","done":true,"sample":null,"errorCode":"tailscale:cancelled","message":""}""")
+        transport.listener.result(
+            transport.session,
+            transport.request,
+            """{"kind":"ping","done":true,"sample":null,"errorCode":"tailscale:cancelled","message":""}""",
+        )
         assertNull(session.state.value.pending)
         assertTrue(session.state.value.canOperate)
     }
 
     companion object {
-        private fun terminal(stage: String, errorCode: String = "", generation: Long = 1): String =
-            JSONObject(status(stage = stage, source = "none", generation = generation))
-                .put("node", JSONObject.NULL).put("errorCode", errorCode).toString()
+        private fun terminal(stage: String, errorCode: String = "", generation: Long = 1): String = JSONObject(status(stage = stage, source = "none", generation = generation))
+            .put("node", JSONObject.NULL).put("errorCode", errorCode).toString()
 
         internal fun status(stage: String = "observing", source: String = "running", generation: Long = 1, savedExit: String = "100.64.0.2"): String = """
             {"version":1,"profileId":42,"identity":"identity","generation":$generation,

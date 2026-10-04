@@ -44,9 +44,11 @@ internal class TailscaleSessionController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessions = mutableMapOf<Pair<IBinder, Long>, Session>()
     private val retiringSessions = mutableMapOf<Pair<IBinder, Long>, Session>()
+
     // Eight retained sessions per controller, two per Binder owner, each with at most four
     // request senders. Authority can end immediately; a blocked Binder call still owns its slot.
     private val deliverySessions = mutableSetOf<Session>()
+
     // Retain closing jobs until their finalizers complete so lifecycle drains cannot miss them.
     private val closing = mutableSetOf<Job>()
     private var destroyed = false
@@ -67,7 +69,9 @@ internal class TailscaleSessionController(
         private var temporaryOwner: Session? = null
         private fun snapshot() = synchronized(registryLock) { controllers.toList() }
 
-        fun stopAllAdmission() { snapshot().forEach { it.stopAdmission() } }
+        fun stopAllAdmission() {
+            snapshot().forEach { it.stopAdmission() }
+        }
 
         fun resumeAllAdmission() {
             val current = snapshot()
@@ -89,9 +93,8 @@ internal class TailscaleSessionController(
             ?: states.firstOrNull { it == BaseService.State.Connected } ?: BaseService.State.Stopped
     }
 
-    private fun runningData(): BaseService.Data? =
-        DataStore.baseService?.data?.takeIf { it.state == BaseService.State.Connected }
-            ?: snapshot().firstOrNull { it.data.state == BaseService.State.Connected }?.data
+    private fun runningData(): BaseService.Data? = DataStore.baseService?.data?.takeIf { it.state == BaseService.State.Connected }
+        ?: snapshot().firstOrNull { it.data.state == BaseService.State.Connected }?.data
 
     private class Session(val cb: ISagerNetServiceCallback, val id: Long, val profileId: Long, val identity: String, val temporary: Boolean, val sequence: AtomicLong) {
         val key = cb.asBinder() to id
@@ -101,10 +104,15 @@ internal class TailscaleSessionController(
         val requests = mutableMapOf<Long, Request>()
         var lastRequest = 0L
         var accepting = true
+
         @Volatile var completionStatus: StatusDelivery? = null
+
         @Volatile var target: Target? = null
+
         @Volatile var generation = 0L
+
         @Volatile var source = "none"
+
         @Volatile var savedExit = ""
     }
 
@@ -113,6 +121,7 @@ internal class TailscaleSessionController(
     private class Request(val kind: String) {
         lateinit var job: Job
         lateinit var delivery: Job
+
         // Native ping emits at most five samples, followed by one terminal acknowledgement.
         val events = Channel<JSONObject>(6)
         var terminal: JSONObject? = null
@@ -140,7 +149,9 @@ internal class TailscaleSessionController(
             val s = Session(cb, sessionId, profileId, identity, temporary, previous?.sequence ?: AtomicLong())
             deliverySessions.add(s)
             val temporaryBusy = mayStartTemporary && synchronized(registryLock) {
-                if (temporaryOwner != null) true else {
+                if (temporaryOwner != null) {
+                    true
+                } else {
                     temporaryOwner = s
                     false
                 }
@@ -242,8 +253,11 @@ internal class TailscaleSessionController(
     }
 
     private fun valid(s: Session, t: Target): Boolean = current(s) && s.target === t &&
-        if (t.temporary) managementState() == BaseService.State.Stopped
-        else t.owner.state == BaseService.State.Connected && t.owner.proxy === t.instance
+        if (t.temporary) {
+            managementState() == BaseService.State.Stopped
+        } else {
+            t.owner.state == BaseService.State.Connected && t.owner.proxy === t.instance
+        }
 
     private suspend fun observe(s: Session, target: Target) {
         synchronized(lock) {
@@ -327,8 +341,11 @@ internal class TailscaleSessionController(
                 // Also runs when a queued lazy body never entered. No Binder call in this handler.
                 scope.launch {
                     val terminal = synchronized(lock) {
-                        request.terminal ?: if (request.kind == "ping") pingResult(true, code = "tailscale:cancelled")
-                        else exitResult(TailscaleExitResult("cancelled-before-apply", s.savedExit))
+                        request.terminal ?: if (request.kind == "ping") {
+                            pingResult(true, code = "tailscale:cancelled")
+                        } else {
+                            exitResult(TailscaleExitResult("cancelled-before-apply", s.savedExit))
+                        }
                     }
                     request.events.trySend(terminal)
                     request.events.close()
@@ -383,8 +400,12 @@ internal class TailscaleSessionController(
         if (peerId.length > 256 || expectedExit.length > 4096) return
         request(cb, sessionId, requestId, "exit") { s, t ->
             if (t == null) {
-                result(s, requestId, JSONObject().put("kind", "exit").put("outcome", "failed-unchanged")
-                    .put("savedExit", s.savedExit).put("errorCode", "tailscale:not-running").put("message", ""))
+                result(
+                    s,
+                    requestId,
+                    JSONObject().put("kind", "exit").put("outcome", "failed-unchanged")
+                        .put("savedExit", s.savedExit).put("errorCode", "tailscale:not-running").put("message", ""),
+                )
                 return@request
             }
             val outcome = mutation.withLock {
@@ -407,8 +428,12 @@ internal class TailscaleSessionController(
                         val change = Libcore.setTailscaleExitNode(t.instance.box, t.tag, peerId)
                         object : TailscaleExitChange {
                             override fun savedValue() = change.savedValue()
-                            override fun commit() { change.commit() }
-                            override fun rollback() { change.rollback() }
+                            override fun commit() {
+                                change.commit()
+                            }
+                            override fun rollback() {
+                                change.rollback()
+                            }
                         }
                     },
                     save = { value ->
@@ -455,7 +480,10 @@ internal class TailscaleSessionController(
         synchronized(lock) {
             val key = cb.asBinder() to sessionId
             sessions[key]?.let { retire(it) }
-            retiringSessions.remove(key)?.let { it.statuses.close(); it.delivery.cancel() }
+            retiringSessions.remove(key)?.let {
+                it.statuses.close()
+                it.delivery.cancel()
+            }
         }
     }
 
@@ -473,7 +501,9 @@ internal class TailscaleSessionController(
     private fun retire(s: Session, lifecycle: Boolean = false) {
         s.accepting = false
         sessions.remove(s.key)
-        if (lifecycle) retiringSessions[s.key] = s else {
+        if (lifecycle) {
+            retiringSessions[s.key] = s
+        } else {
             s.statuses.close()
             s.delivery.cancel()
         }
@@ -525,7 +555,10 @@ internal class TailscaleSessionController(
     }
 
     fun destroy() {
-        synchronized(lock) { destroyed = true; draining = true }
+        synchronized(lock) {
+            destroyed = true
+            draining = true
+        }
         scope.launch {
             try {
                 drain()
