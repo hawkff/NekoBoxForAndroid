@@ -27,7 +27,10 @@ internal class TailscaleStatusFormatting(private val context: Context) {
         val status = state.status
         if (state.serviceState == State.Stopping) return text(R.string.stopping)
         if (state.serviceState == State.Connecting || state.refreshing) return text(R.string.connecting)
-        if (state.temporaryRequested || status?.stage == "starting") return text(R.string.tailscale_status_starting)
+        if (state.temporaryRequested || (status?.stage == "starting" && status.source == "temporary")) {
+            return text(R.string.tailscale_status_starting)
+        }
+        if (status?.stage == "starting") return text(R.string.connecting)
         if (!state.connected) return text(if (state.failed) R.string.tailscale_status_error else R.string.tailscale_status_connecting)
         if (status?.stage == "closed") return text(R.string.tailscale_status_closed)
         if (status?.stage == "error") return text(R.string.tailscale_status_error)

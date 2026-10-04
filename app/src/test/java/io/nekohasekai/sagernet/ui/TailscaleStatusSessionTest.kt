@@ -1,12 +1,14 @@
 package io.nekohasekai.sagernet.ui
 
 import android.app.Application
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService.State
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -302,6 +304,67 @@ class TailscaleStatusSessionTest {
         assertFalse(session.state.value.canCheck)
         assertTrue(transport.startedSessions.isEmpty())
         assertEquals(1, transport.calls.count { it.startsWith("exit:") })
+    }
+
+    @Test fun passiveStartingEnvelopeOnOldStoppedBindingShowsConnectionProgressWithoutStartingCheck() {
+        val (session, transport) = setup()
+        val context = RuntimeEnvironment.getApplication() as Application
+        val format = TailscaleStatusFormatting(context)
+        val old = transport.session
+        transport.listener.status(old, 1, status())
+        transport.listener.status(old, 2, terminal("closed", "tailscale:runtime-changed"))
+        val waiter = transport.session
+        val starting = """
+            {"version":1,"profileId":42,"identity":"identity","generation":0,
+             "source":"none","stage":"starting","savedExit":"100.64.0.2",
+             "node":null,"errorCode":"","message":""}
+        """.trimIndent()
+        transport.listener.status(waiter, 1, starting)
+        assertEquals(State.Stopped, session.state.value.serviceState)
+        assertEquals(context.getString(R.string.connecting), format.state(session.state.value))
+        assertFalse(session.state.value.temporary)
+        assertFalse(session.state.value.failed)
+        assertFalse(session.state.value.canCheck)
+        assertFalse(session.state.value.canOperate)
+        assertNull(session.openLogin())
+        session.check()
+        session.ping("peer-stable")
+        session.selectExit("peer-stable", "100.64.0.2")
+        session.background(true)
+        session.foreground()
+        transport.listener.serviceState(State.Stopped)
+        transport.listener.status(waiter, 2, starting)
+        assertEquals(waiter, transport.session)
+        assertEquals(context.getString(R.string.connecting), format.state(session.state.value))
+        assertEquals(listOf("connect", "observe", "close", "observe"), transport.calls)
+        assertEquals(listOf(old, waiter), transport.observedSessions)
+        assertEquals(listOf(old), transport.closedSessions)
+        assertTrue(transport.startedSessions.isEmpty())
+        transport.listener.status(waiter, 3, status())
+        assertTrue(session.state.value.canOperate)
+        assertFalse(session.state.value.canCheck)
+        assertEquals(2, transport.observedSessions.size)
+        assertTrue(transport.startedSessions.isEmpty())
+    }
+
+    @Test fun explicitCheckRetainsTemporaryStartupWordingBeforeAndAfterAcknowledgement() {
+        val (session, transport) = setup()
+        val context = RuntimeEnvironment.getApplication() as Application
+        val format = TailscaleStatusFormatting(context)
+        session.check()
+        val expected = context.getString(R.string.tailscale_status_starting)
+        assertEquals(expected, format.state(session.state.value))
+        for ((index, source) in listOf("none", "temporary").withIndex()) {
+            val starting = JSONObject(status(stage = "starting", source = source))
+                .put("node", JSONObject.NULL).toString()
+            transport.listener.status(transport.session, index + 1L, starting)
+            assertEquals(expected, format.state(session.state.value))
+            assertTrue(session.state.value.temporary)
+            assertFalse(session.state.value.canCheck)
+            assertFalse(session.state.value.canOperate)
+        }
+        assertEquals(1, transport.startedSessions.size)
+        assertEquals(1, transport.observedSessions.size)
     }
 
     @Test fun passiveDrainWaiterSurvivesLocalTransitionCallbacksWithoutDuplicateObserve() {
