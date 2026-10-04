@@ -58,6 +58,29 @@ class TailscaleExitFinalizerTest {
     }
 
     @Test
+    fun beginDivergencePublishesDivergedWithoutSavingOrClaimingRollback() = runTest {
+        val completed = mutableListOf<TailscaleExitResult>()
+        val result = finalizeTailscaleExit("old", {
+            error("tailscale:diverged: exit preferences diverged after restoration failed")
+        }, { fail("save") }, { fail("intent") }, { fail("rollback without handle") },
+            completed = { completed += it })
+        assertEquals("diverged", result.outcome)
+        assertEquals("tailscale:apply-diverged", result.errorCode)
+        assertEquals("old", result.savedExit)
+        assertEquals(listOf(result), completed)
+    }
+
+    @Test
+    fun divergenceTextWithoutExactPrefixRemainsOrdinaryBeginFailure() = runTest {
+        val result = finalizeTailscaleExit("old", {
+            error("wrapped tailscale:diverged: other error")
+        }, { fail("save") }, { fail("intent") }, { fail("rollback") })
+        assertEquals("failed-unchanged", result.outcome)
+        assertEquals("tailscale:apply-failed", result.errorCode)
+        assertEquals("old", result.savedExit)
+    }
+
+    @Test
     fun ownerCancellationAfterBeginStillSavesBeforeStopCanClose() = runTest {
         val events = mutableListOf<String>()
         lateinit var owner: Job

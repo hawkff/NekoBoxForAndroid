@@ -24,8 +24,13 @@ internal suspend fun finalizeTailscaleExit(
     withTimeout(30_000) {
         val change = try {
             begin()
-        } catch (_: Exception) {
-            return@withTimeout TailscaleExitResult("failed-unchanged", oldExit, "tailscale:apply-failed").also(completed)
+        } catch (e: Exception) {
+            val outcome = if (e.message?.startsWith("tailscale:diverged:") == true) {
+                TailscaleExitResult("diverged", oldExit, "tailscale:apply-diverged")
+            } else {
+                TailscaleExitResult("failed-unchanged", oldExit, "tailscale:apply-failed")
+            }
+            return@withTimeout outcome.also(completed)
         }
         val saved = change.savedValue()
         applied(saved.isNotEmpty())
