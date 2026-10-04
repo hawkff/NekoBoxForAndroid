@@ -19,19 +19,20 @@ internal suspend fun finalizeTailscaleExit(
     save: (String) -> Unit,
     applied: (Boolean) -> Unit,
     rolledBack: () -> Unit,
+    completed: (TailscaleExitResult) -> Unit = {},
 ): TailscaleExitResult = withContext(NonCancellable) {
     withTimeout(30_000) {
         val change = try {
             begin()
         } catch (_: Exception) {
-            return@withTimeout TailscaleExitResult("failed-unchanged", oldExit, "tailscale:apply-failed")
+            return@withTimeout TailscaleExitResult("failed-unchanged", oldExit, "tailscale:apply-failed").also(completed)
         }
         val saved = change.savedValue()
         applied(saved.isNotEmpty())
         try {
             save(saved)
         } catch (e: Exception) {
-            return@withTimeout try {
+            return@withTimeout (try {
                 change.rollback()
                 rolledBack()
                 TailscaleExitResult(
@@ -41,14 +42,16 @@ internal suspend fun finalizeTailscaleExit(
                 )
             } catch (_: Exception) {
                 TailscaleExitResult("diverged", oldExit, "tailscale:rollback-failed")
-            }
+            }).also(completed)
         }
-        try {
+        val outcome = try {
             change.commit()
             TailscaleExitResult("applied-and-saved", saved)
         } catch (_: Exception) {
             // The DB is authoritative after this point. Never undo a durable or newer choice.
             TailscaleExitResult("diverged", saved, "tailscale:commit-failed")
         }
+        // Publish while still shielded, before cancellation can discard the return value.
+        outcome.also(completed)
     }
 }

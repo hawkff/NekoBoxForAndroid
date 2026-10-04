@@ -105,6 +105,22 @@ class TailscaleExitFinalizerTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun completionRecordsActualOutcomeBeforeExpiredDeadlineDiscardsReturn() = runTest {
+        val events = mutableListOf<String>()
+        val outcomes = mutableListOf<TailscaleExitResult>()
+        runCatching {
+            finalizeTailscaleExit("old", { Change(events) }, {
+                events += "save"
+                testScheduler.advanceTimeBy(30_001)
+            }, {}, {}, completed = { outcomes += it })
+        }
+        assertEquals(listOf("save", "commit"), events)
+        assertEquals(listOf("applied-and-saved"), outcomes.map { it.outcome })
+        assertEquals("100.64.0.2", outcomes.single().savedExit)
+    }
+
+    @Test
     fun cancelledQueuedMutationNeverApplies() = runTest {
         var applied = false
         val owner = launch(start = CoroutineStart.LAZY) {

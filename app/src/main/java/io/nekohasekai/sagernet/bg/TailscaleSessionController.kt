@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import libcore.Libcore
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicLong
 
 /** Owns only Tailscale management resources, never the running service's box. */
 internal class TailscaleSessionController(
@@ -26,6 +27,7 @@ internal class TailscaleSessionController(
     private val lock = Any()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessions = mutableMapOf<Pair<IBinder, Long>, Session>()
+    private val retiringSessions = mutableMapOf<Pair<IBinder, Long>, Session>()
     // Retain closing jobs until their finalizers complete so lifecycle drains cannot miss them.
     private val closing = mutableSetOf<Job>()
     private var destroyed = false
@@ -55,10 +57,10 @@ internal class TailscaleSessionController(
             }
         }
 
-        suspend fun drainAll() {
-            val current = snapshot()
-            current.forEach { it.stopAdmission() }
-            current.forEach { it.drain() }
+        suspend fun drainAll() = withContext(NonCancellable + Dispatchers.IO) {
+            // Capture every old owner before any terminal callback can open a replacement.
+            val batches = snapshot().map { it to it.beginDrain() }
+            batches.forEach { (controller, batch) -> controller.finishDrain(batch) }
         }
     }
 
@@ -72,19 +74,32 @@ internal class TailscaleSessionController(
         DataStore.baseService?.data?.takeIf { it.state == BaseService.State.Connected }
             ?: snapshot().firstOrNull { it.data.state == BaseService.State.Connected }?.data
 
-    private class Session(val cb: ISagerNetServiceCallback, val id: Long, val profileId: Long, val identity: String, val temporary: Boolean) {
+    private class Session(val cb: ISagerNetServiceCallback, val id: Long, val profileId: Long, val identity: String, val temporary: Boolean, val sequence: AtomicLong) {
         val key = cb.asBinder() to id
         lateinit var job: Job
-        val statuses = Channel<String>(Channel.CONFLATED)
-        val requests = mutableMapOf<Long, Job>()
+        val statuses = Channel<StatusDelivery>(Channel.CONFLATED)
+        lateinit var delivery: Job
+        val requests = mutableMapOf<Long, Request>()
         var lastRequest = 0L
         var accepting = true
-        var sequence = 0L
+        @Volatile var completionStatus: StatusDelivery? = null
         @Volatile var target: Target? = null
         @Volatile var generation = 0L
         @Volatile var source = "none"
         @Volatile var savedExit = ""
     }
+
+    private data class StatusDelivery(val json: String, val terminal: Boolean = false)
+
+    private class Request(val kind: String) {
+        lateinit var job: Job
+        lateinit var delivery: Job
+        // Native ping emits at most five samples, followed by one terminal acknowledgement.
+        val events = Channel<JSONObject>(6)
+        var terminal: JSONObject? = null
+    }
+
+    private data class Drain(val sessions: List<Session>, val jobs: List<Job>)
 
     private data class Target(val owner: BaseService.Data, val instance: BoxInstance, val snapshot: ProxyEntity, val tag: String, val intent: TailscaleReadinessIntent, val temporary: Boolean) {
         val generation get() = intent.generation
@@ -95,14 +110,16 @@ internal class TailscaleSessionController(
             if (destroyed || !registered(cb.asBinder()) || sessionId <= 0 || profileId <= 0 || identity.length > 128) return
             val mayStartTemporary = temporary && !draining && managementState() == BaseService.State.Stopped
             val key = cb.asBinder() to sessionId
+            if (retiringSessions.containsKey(key)) return
             val previous = sessions[key]
             if (previous != null) {
                 if (previous.profileId != profileId || previous.identity != identity) return
                 if (!temporary || previous.temporary || previous.target != null) return
                 retire(previous)
             }
-            if (sessions.size >= 8 || sessions.keys.count { it.first == cb.asBinder() } >= 2) return
-            val s = Session(cb, sessionId, profileId, identity, temporary)
+            val owned = sessions.keys + retiringSessions.keys
+            if (owned.size >= 8 || owned.count { it.first == cb.asBinder() } >= 2) return
+            val s = Session(cb, sessionId, profileId, identity, temporary, previous?.sequence ?: AtomicLong())
             val temporaryBusy = mayStartTemporary && synchronized(registryLock) {
                 if (temporaryOwner != null) true else {
                     temporaryOwner = s
@@ -110,16 +127,22 @@ internal class TailscaleSessionController(
                 }
             }
             sessions[key] = s
+            s.delivery = scope.launch(start = CoroutineStart.LAZY) {
+                for (event in s.statuses) {
+                    val owned = synchronized(lock) {
+                        !destroyed && registered(s.key.first) &&
+                            if (event.terminal) retiringSessions[s.key] === s else sessions[s.key] === s
+                    }
+                    if (owned) runCatching { s.cb.cbTailscaleStatus(s.id, s.sequence.incrementAndGet(), event.json) }
+                }
+            }
+            s.delivery.invokeOnCompletion {
+                synchronized(lock) { if (retiringSessions[s.key] === s) retiringSessions.remove(s.key) }
+            }
             s.job = scope.launch(start = CoroutineStart.LAZY) {
                 supervisorScope {
-                    val delivery = launch {
-                        for (json in s.statuses) {
-                            if (current(s)) runCatching { s.cb.cbTailscaleStatus(s.id, ++s.sequence, json) }
-                        }
-                    }
                     try {
                         previous?.job?.join()
-                        if (previous != null) s.sequence = previous.sequence
                         val profile = read(s)
                         s.savedExit = profile.tailscaleBean!!.exitNode.orEmpty()
                         if (temporaryBusy) {
@@ -130,7 +153,7 @@ internal class TailscaleSessionController(
                             status(s, "error", code = "tailscale:not-stopped")
                             return@supervisorScope
                         }
-                        while (!temporary && (managementState() == BaseService.State.Connecting || managementState() == BaseService.State.Stopping)) {
+                        while (!temporary && (synchronized(lock) { draining } || managementState() == BaseService.State.Connecting || managementState() == BaseService.State.Stopping)) {
                             status(s, "starting")
                             delay(250)
                         }
@@ -170,15 +193,15 @@ internal class TailscaleSessionController(
                             synchronized(lock) { s.accepting = false }
                             drainRequests(s)
                             s.target = null
-                            s.statuses.close()
-                            delivery.join()
                         }
                     }
                 }
             }
             s.job.invokeOnCompletion {
                 synchronized(registryLock) { if (temporaryOwner === s) temporaryOwner = null }
+                s.completionStatus?.let { s.statuses.trySend(it) }
             }
+            s.delivery.start()
             s.job.start()
         }
     }
@@ -228,37 +251,71 @@ internal class TailscaleSessionController(
         }
     }
 
-    private fun status(s: Session, stage: String, node: String? = null, code: String = "") {
+    private fun status(s: Session, stage: String, node: String? = null, code: String = "", terminal: Boolean = false) {
         val json = JSONObject().put("version", 1).put("profileId", s.profileId).put("identity", s.identity)
-            .put("generation", s.generation).put("source", s.source)
+            .put("generation", s.generation).put("source", if (terminal) "none" else s.source)
             .put("stage", stage).put("savedExit", s.savedExit).put("node", node?.let { JSONObject(it) } ?: JSONObject.NULL)
             .put("errorCode", code).put("message", "").toString()
-        s.statuses.trySend(json)
-    }
-
-    private fun result(s: Session, requestId: Long, json: JSONObject) {
-        if (current(s) && synchronized(lock) { s.requests[requestId]?.isActive == true }) {
-            runCatching { s.cb.cbTailscaleResult(s.id, requestId, json.toString()) }
+        val event = StatusDelivery(json, terminal)
+        if (!terminal && (stage == "closed" || stage == "error")) {
+            // A fresh explicit check may follow immediately; release native ownership first.
+            s.completionStatus = event
+        } else {
+            s.statuses.trySend(event)
         }
     }
 
-    private fun request(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, block: suspend (Session, Target?) -> Unit) {
+    private fun result(s: Session, requestId: Long, json: JSONObject) {
+        synchronized(lock) {
+            val request = s.requests[requestId] ?: return
+            if (request.terminal != null) return
+            if (json.getString("kind") == "exit" || json.optBoolean("done")) {
+                // Retain the authoritative outcome even when cancellation made the Job inactive.
+                request.terminal = json
+            } else if (request.job.isActive) {
+                request.events.trySend(json)
+            }
+        }
+    }
+
+    private fun request(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, kind: String, block: suspend (Session, Target?) -> Unit) {
         synchronized(lock) {
             val s = sessions[cb.asBinder() to sessionId] ?: return
             if (destroyed || draining || !s.accepting || !registered(cb.asBinder()) || !s.job.isActive || requestId <= s.lastRequest || s.requests.size >= 4) return
             val target = s.target
             if (target != null && !valid(s, target)) return
             s.lastRequest = requestId
-            val job = scope.launch(s.job + Dispatchers.IO, start = CoroutineStart.LAZY) { block(s, target) }
-            s.requests[requestId] = job
-            job.invokeOnCompletion { synchronized(lock) { s.requests.remove(requestId) } }
-            job.start()
+            val request = Request(kind)
+            s.requests[requestId] = request
+            request.delivery = scope.launch(start = CoroutineStart.LAZY) {
+                for (json in request.events) {
+                    val owned = synchronized(lock) { current(s) && s.requests[requestId] === request }
+                    if (owned) runCatching { s.cb.cbTailscaleResult(s.id, requestId, json.toString()) }
+                }
+            }
+            request.delivery.invokeOnCompletion {
+                synchronized(lock) { if (s.requests[requestId] === request) s.requests.remove(requestId) }
+            }
+            request.job = scope.launch(s.job + Dispatchers.IO, start = CoroutineStart.LAZY) { block(s, target) }
+            request.job.invokeOnCompletion {
+                // Also runs when a queued lazy body never entered. No Binder call in this handler.
+                scope.launch {
+                    val terminal = synchronized(lock) {
+                        request.terminal ?: if (request.kind == "ping") pingResult(true, code = "tailscale:cancelled")
+                        else exitResult(TailscaleExitResult("cancelled-before-apply", s.savedExit))
+                    }
+                    request.events.trySend(terminal)
+                    request.events.close()
+                }
+            }
+            request.delivery.start()
+            request.job.start()
         }
     }
 
     fun ping(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, peerId: String, timeoutMs: Int) {
         if (peerId.length > 256) return
-        request(cb, sessionId, requestId) { s, t ->
+        request(cb, sessionId, requestId, "ping") { s, t ->
             if (t == null) {
                 result(s, requestId, pingResult(true, code = "tailscale:not-running"))
                 return@request
@@ -298,7 +355,7 @@ internal class TailscaleSessionController(
 
     fun setExit(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long, peerId: String, expectedExit: String) {
         if (peerId.length > 256 || expectedExit.length > 4096) return
-        request(cb, sessionId, requestId) { s, t ->
+        request(cb, sessionId, requestId, "exit") { s, t ->
             if (t == null) {
                 result(s, requestId, JSONObject().put("kind", "exit").put("outcome", "failed-unchanged")
                     .put("savedExit", s.savedExit).put("errorCode", "tailscale:not-running").put("message", ""))
@@ -316,7 +373,7 @@ internal class TailscaleSessionController(
                 }
                 val oldIntent = t.intent.get(s.profileId, t.snapshot.tailscaleBean!!.exitNode.orEmpty().isNotEmpty())
                 // This is the application admission point shared with stop and owner cleanup.
-                val admitted = synchronized(lock) { !draining && valid(s, t) && s.requests[requestId]?.isActive == true }
+                val admitted = synchronized(lock) { !draining && valid(s, t) && s.requests[requestId]?.job?.isActive == true }
                 if (!admitted) return@withLock TailscaleExitResult("cancelled-before-apply", s.savedExit)
                 finalizeTailscaleExit(
                     profile.tailscaleBean!!.exitNode.orEmpty(),
@@ -334,51 +391,73 @@ internal class TailscaleSessionController(
                     },
                     applied = { t.intent.set(s.profileId, it) },
                     rolledBack = { t.intent.set(s.profileId, oldIntent) },
+                    completed = { finishExit(s, requestId, t, it) },
                 )
             }
-            // Refresh both sides after success, conflict or divergence, without restarting anything.
-            runCatching {
-                s.savedExit = read(s).tailscaleBean!!.exitNode.orEmpty()
-                val actual = Libcore.tailscaleStatus(t.instance.box, t.tag)
-                if (outcome.outcome == "diverged") {
-                    t.intent.set(s.profileId, !JSONObject(actual).isNull("currentExit"))
-                }
-                val observers = synchronized(lock) {
-                    sessions.values.filter { it.profileId == s.profileId && it.identity == s.identity && it.target?.instance === t.instance }
-                }
-                for (observer in observers) {
-                    observer.savedExit = s.savedExit
-                    status(observer, "observing", actual)
-                }
-            }
-            val name = if (outcome.outcome == "applied-and-saved" && !valid(s, t)) "saved-for-next-start" else outcome.outcome
-            result(s, requestId, JSONObject().put("kind", "exit").put("outcome", name)
-                .put("savedExit", s.savedExit).put("errorCode", outcome.errorCode).put("message", ""))
+            if (synchronized(lock) { s.requests[requestId]?.terminal == null }) finishExit(s, requestId, t, outcome)
         }
     }
 
+    private fun exitResult(outcome: TailscaleExitResult) = JSONObject().put("kind", "exit").put("outcome", outcome.outcome)
+        .put("savedExit", outcome.savedExit).put("errorCode", outcome.errorCode).put("message", "")
+
+    private fun finishExit(s: Session, requestId: Long, t: Target, outcome: TailscaleExitResult) {
+        // Refresh both sides after success, conflict or divergence, without restarting anything.
+        runCatching {
+            s.savedExit = read(s).tailscaleBean!!.exitNode.orEmpty()
+            val actual = Libcore.tailscaleStatus(t.instance.box, t.tag)
+            if (outcome.outcome == "diverged") {
+                t.intent.set(s.profileId, !JSONObject(actual).isNull("currentExit"))
+            }
+            val observers = synchronized(lock) {
+                sessions.values.filter { it.profileId == s.profileId && it.identity == s.identity && it.target?.instance === t.instance }
+            }
+            for (observer in observers) {
+                observer.savedExit = s.savedExit
+                status(observer, "observing", actual)
+            }
+        }
+        val name = if (outcome.outcome == "applied-and-saved" && !valid(s, t)) "saved-for-next-start" else outcome.outcome
+        result(s, requestId, exitResult(outcome.copy(outcome = name, savedExit = s.savedExit)))
+    }
+
     fun cancelRequest(cb: ISagerNetServiceCallback, sessionId: Long, requestId: Long) {
-        synchronized(lock) { sessions[cb.asBinder() to sessionId]?.requests?.get(requestId)?.cancel() }
+        synchronized(lock) { sessions[cb.asBinder() to sessionId]?.requests?.get(requestId)?.job?.cancel() }
     }
 
     fun closeSession(cb: ISagerNetServiceCallback, sessionId: Long) {
-        synchronized(lock) { sessions[cb.asBinder() to sessionId]?.let(::retire) }
+        synchronized(lock) {
+            val key = cb.asBinder() to sessionId
+            sessions[key]?.let { retire(it) }
+            retiringSessions.remove(key)?.let { it.statuses.close(); it.delivery.cancel() }
+        }
     }
 
     fun releaseOwner(owner: IBinder) {
-        synchronized(lock) { sessions.values.filter { it.key.first == owner }.forEach(::retire) }
+        synchronized(lock) {
+            sessions.values.filter { it.key.first == owner }.forEach { retire(it) }
+            retiringSessions.values.filter { it.key.first == owner }.toList().forEach {
+                retiringSessions.remove(it.key)
+                it.statuses.close()
+                it.delivery.cancel()
+            }
+        }
     }
 
-    private fun retire(s: Session) {
+    private fun retire(s: Session, lifecycle: Boolean = false) {
         s.accepting = false
         sessions.remove(s.key)
+        if (lifecycle) retiringSessions[s.key] = s else {
+            s.statuses.close()
+            s.delivery.cancel()
+        }
         closing.add(s.job)
         s.job.invokeOnCompletion { synchronized(lock) { closing.remove(s.job) } }
         s.job.cancel()
     }
 
     private suspend fun drainRequests(s: Session) {
-        val jobs = synchronized(lock) { s.requests.values.toList().also { jobs -> jobs.forEach { it.cancel() } } }
+        val jobs = synchronized(lock) { s.requests.values.map { it.job }.also { jobs -> jobs.forEach { it.cancel() } } }
         jobs.joinAll()
     }
 
@@ -390,13 +469,24 @@ internal class TailscaleSessionController(
         synchronized(lock) { if (!destroyed) draining = false }
     }
 
-    suspend fun drain() = withContext(NonCancellable + Dispatchers.IO) {
-        val jobs = synchronized(lock) {
-            draining = true
-            sessions.values.toList().forEach(::retire)
-            closing.toList()
+    private fun beginDrain(): Drain = synchronized(lock) {
+        draining = true
+        val old = sessions.values.toList()
+        old.forEach { retire(it, lifecycle = !destroyed) }
+        Drain(old, closing.toList())
+    }
+
+    private suspend fun finishDrain(batch: Drain) {
+        batch.jobs.joinAll()
+        for (s in batch.sessions) {
+            // A single sender orders the terminal after old status delivery, without joining Binder.
+            status(s, "closed", code = "tailscale:runtime-changed", terminal = true)
+            s.statuses.close()
         }
-        jobs.joinAll()
+    }
+
+    suspend fun drain() = withContext(NonCancellable + Dispatchers.IO) {
+        finishDrain(beginDrain())
     }
 
     fun destroy() {

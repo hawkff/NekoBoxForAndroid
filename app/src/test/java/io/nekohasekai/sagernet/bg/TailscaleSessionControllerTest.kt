@@ -10,6 +10,8 @@ import io.nekohasekai.sagernet.database.TailscaleProfileStore
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -22,6 +24,8 @@ import java.lang.reflect.Proxy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -32,12 +36,26 @@ class TailscaleSessionControllerTest {
     private class Client(val binder: IBinder = Binder()) {
         val statuses = LinkedBlockingQueue<JSONObject>()
         val results = LinkedBlockingQueue<JSONObject>()
+        val statusEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
+        val resultEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
+        @Volatile var onStatus: ((Long, JSONObject) -> Unit)? = null
         val callback = Proxy.newProxyInstance(ISagerNetServiceCallback::class.java.classLoader,
             arrayOf(ISagerNetServiceCallback::class.java)) { _, method, args ->
             when (method.name) {
                 "asBinder" -> binder
-                "cbTailscaleStatus" -> { statuses.add(JSONObject(args!![2] as String)); null }
-                "cbTailscaleResult" -> { results.add(JSONObject(args!![2] as String)); null }
+                "cbTailscaleStatus" -> {
+                    val json = JSONObject(args!![2] as String)
+                    statuses.add(json)
+                    statusEvents.add(Triple(args[0] as Long, args[1] as Long, json))
+                    onStatus?.invoke(args[0] as Long, json)
+                    null
+                }
+                "cbTailscaleResult" -> {
+                    val json = JSONObject(args!![2] as String)
+                    results.add(json)
+                    resultEvents.add(Triple(args[0] as Long, args[1] as Long, json))
+                    null
+                }
                 else -> null
             }
         } as ISagerNetServiceCallback
@@ -144,6 +162,7 @@ class TailscaleSessionControllerTest {
         open(client)
         client.status()
         runBlocking { data.tailscale.drain() }
+        assertEquals("tailscale:runtime-changed", client.status().getString("errorCode"))
         data.binder.startTailscaleCheck(client.callback, 2, profile.id, profile.uuid)
         assertEquals("tailscale:not-stopped", client.status().getString("errorCode"))
         assertNull(data.proxy)
@@ -208,6 +227,287 @@ class TailscaleSessionControllerTest {
             otherMode.state = BaseService.State.Stopped
             otherMode.binder.close()
         }
+    }
+
+    // Exercise the real owner/admission/completion path with bounded fake native work.
+    private fun request(client: Client, id: Long, kind: String, block: suspend (Any, Any?) -> Unit) {
+        TailscaleSessionController::class.java.declaredMethods.single { it.name == "request" }.apply {
+            isAccessible = true
+            invoke(data.tailscale, client.callback, 1L, id, kind, block)
+        }
+    }
+
+    private fun publish(session: Any, id: Long, json: JSONObject) {
+        TailscaleSessionController::class.java.declaredMethods.single { it.name == "result" }.apply {
+            isAccessible = true
+            invoke(data.tailscale, session, id, json)
+        }
+    }
+
+    private fun exitJson(result: TailscaleExitResult) = JSONObject().put("kind", "exit")
+        .put("outcome", result.outcome).put("savedExit", result.savedExit)
+        .put("errorCode", result.errorCode).put("message", "")
+
+    private fun terminal(client: Client, id: Long): JSONObject {
+        val event = checkNotNull(client.resultEvents.poll(5, TimeUnit.SECONDS))
+        assertEquals(1L, event.first)
+        assertEquals(id, event.second)
+        return event.third
+    }
+
+    @Test
+    fun cancelledQueuedExitAcknowledgesOnceWithoutApplying() = runBlocking {
+        val client = Client()
+        open(client)
+        client.status()
+        val gate = Mutex(locked = true)
+        val queued = CompletableDeferred<Unit>()
+        val applications = AtomicInteger()
+        request(client, 11, "exit") { _, _ ->
+            queued.complete(Unit)
+            gate.withLock { applications.incrementAndGet() }
+        }
+        queued.await()
+        data.binder.cancelTailscaleRequest(client.callback, 1, 11)
+        data.binder.cancelTailscaleRequest(client.callback, 1, 11)
+        assertEquals("cancelled-before-apply", terminal(client, 11).getString("outcome"))
+        gate.unlock()
+        request(client, 11, "exit") { _, _ -> applications.incrementAndGet() }
+        assertNull(client.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+        assertEquals(0, applications.get())
+    }
+
+    @Test
+    fun cancelledPingAcknowledgesDoneAfterProducerCleanup() = runBlocking {
+        val client = Client()
+        open(client)
+        client.status()
+        val entered = CompletableDeferred<Unit>()
+        val closed = AtomicBoolean()
+        request(client, 12, "ping") { session, _ ->
+            try {
+                publish(session, 12, JSONObject().put("kind", "ping").put("done", false).put("sample", JSONObject()))
+                entered.complete(Unit)
+                awaitCancellation()
+            } finally {
+                closed.set(true)
+            }
+        }
+        entered.await()
+        assertFalse(terminal(client, 12).getBoolean("done"))
+        data.binder.cancelTailscaleRequest(client.callback, 1, 12)
+        val result = terminal(client, 12)
+        assertTrue(result.getBoolean("done"))
+        assertEquals("tailscale:cancelled", result.getString("errorCode"))
+        assertTrue(closed.get())
+        assertNull(client.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+    }
+
+    private fun cancelledAdmittedExit(failSave: Boolean) = runBlocking {
+        val client = Client()
+        open(client)
+        client.status()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val finalizations = AtomicInteger()
+        request(client, 13, "exit") { session, _ ->
+            finalizeTailscaleExit("", {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                object : TailscaleExitChange {
+                    override fun savedValue() = "100.64.0.2"
+                    override fun commit() { finalizations.incrementAndGet() }
+                    override fun rollback() { finalizations.incrementAndGet() }
+                }
+            }, {
+                if (failSave) error("disk")
+                TailscaleProfileStore.compareAndSetExit(profile.id, profile.uuid, "", it)
+            }, {}, {}, completed = { publish(session, 13, exitJson(it)) })
+        }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            data.binder.cancelTailscaleRequest(client.callback, 1, 13)
+            data.binder.cancelTailscaleRequest(client.callback, 1, 13)
+            assertNull(client.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+            release.countDown()
+            val result = terminal(client, 13)
+            assertEquals(if (failSave) "failed-rolled-back" else "applied-and-saved", result.getString("outcome"))
+            assertEquals(1, finalizations.get())
+            assertEquals(if (failSave) "" else "100.64.0.2", ConfigBuilderTestEnv.io { TailscaleProfileStore.read(profile.id).tailscaleBean!!.exitNode })
+            assertNull(client.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            release.countDown()
+        }
+    }
+
+    @Test
+    fun cancelledAdmittedExitAcknowledgesActualCommit() = cancelledAdmittedExit(false)
+
+    @Test
+    fun cancelledAdmittedExitAcknowledgesActualRollback() = cancelledAdmittedExit(true)
+
+    @Test
+    fun replacedOwnerDoesNotReceiveLateRequestCompletion() = runBlocking {
+        val client = Client()
+        open(client)
+        client.status()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        request(client, 14, "exit") { session, _ ->
+            withContext(NonCancellable) {
+                entered.complete(Unit)
+                release.await()
+                publish(session, 14, exitJson(TailscaleExitResult("applied-and-saved", "100.64.0.2")))
+            }
+        }
+        entered.await()
+        data.binder.unregisterCallback(client.callback)
+        val replacement = Client()
+        open(replacement)
+        replacement.status()
+        release.complete(Unit)
+        data.tailscale.drain()
+        assertNull(client.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+        assertNull(replacement.resultEvents.poll(100, TimeUnit.MILLISECONDS))
+    }
+
+    @Test
+    fun lifecycleTerminalIsSequencedAndFreshPassiveOwnerSurvivesSameDrain() = runBlocking {
+        val first = Client()
+        val second = Client()
+        open(first)
+        val firstStatus = checkNotNull(first.statusEvents.poll(5, TimeUnit.SECONDS))
+        val otherMode = newData()
+        otherMode.binder.registerCallback(second.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        otherMode.binder.observeTailscale(second.callback, 1, profile.id, profile.uuid)
+        second.status()
+        val sessionsField = TailscaleSessionController::class.java.getDeclaredField("sessions").apply { isAccessible = true }
+        val oldSession = (sessionsField.get(otherMode.tailscale) as Map<*, *>).values.single()!!
+        val owner = oldSession.javaClass.getDeclaredField("job").apply { isAccessible = true }.get(oldSession) as Job
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val pending = CoroutineScope(owner + Dispatchers.IO).launch {
+            withContext(NonCancellable) { entered.complete(Unit); release.await() }
+        }
+        entered.await()
+        val reobserved = CountDownLatch(1)
+        first.onStatus = { id, json ->
+            if (id == 1L && json.optString("errorCode") == "tailscale:runtime-changed") {
+                otherMode.binder.observeTailscale(second.callback, 2, profile.id, profile.uuid)
+                reobserved.countDown()
+            }
+        }
+        val drain = async(Dispatchers.IO) { TailscaleSessionController.drainAll() }
+        try {
+            assertTrue(reobserved.await(5, TimeUnit.SECONDS))
+            val closed = checkNotNull(first.statusEvents.poll(5, TimeUnit.SECONDS))
+            assertEquals(1L, closed.first)
+            assertTrue(closed.second > firstStatus.second)
+            assertEquals("closed", closed.third.getString("stage"))
+            assertEquals("none", closed.third.getString("source"))
+            assertTrue(closed.third.isNull("node"))
+            assertFalse(drain.isCompleted)
+            release.complete(Unit)
+            drain.await()
+            TailscaleSessionController.resumeAllAdmission()
+            var event: Triple<Long, Long, JSONObject>
+            do {
+                event = checkNotNull(second.statusEvents.poll(5, TimeUnit.SECONDS))
+            } while (event.first != 2L || event.third.getString("stage") == "starting")
+            assertEquals("not-running", event.third.getString("stage"))
+            assertEquals("none", event.third.getString("source"))
+            otherMode.binder.pingTailscalePeer(second.callback, 2, 1, "peer", 100)
+            val result = checkNotNull(second.resultEvents.poll(5, TimeUnit.SECONDS))
+            assertEquals(2L, result.first)
+            assertEquals("tailscale:not-running", result.third.getString("errorCode"))
+            assertNull(data.proxy)
+            assertNull(otherMode.proxy)
+        } finally {
+            release.complete(Unit)
+            drain.join()
+            pending.join()
+            otherMode.binder.close()
+        }
+    }
+
+    @Test
+    fun lifecycleDrainStillJoinsCancelledAdmittedRequest() = runBlocking {
+        val client = Client()
+        open(client)
+        client.status()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val committed = AtomicBoolean()
+        request(client, 15, "exit") { session, _ ->
+            finalizeTailscaleExit("", {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                object : TailscaleExitChange {
+                    override fun savedValue() = "100.64.0.2"
+                    override fun commit() { committed.set(true) }
+                    override fun rollback() = Unit
+                }
+            }, { TailscaleProfileStore.compareAndSetExit(profile.id, profile.uuid, "", it) }, {}, {},
+                completed = { publish(session, 15, exitJson(it)) })
+        }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        data.binder.cancelTailscaleRequest(client.callback, 1, 15)
+        val drain = async(Dispatchers.IO) { data.tailscale.drain() }
+        try {
+            delay(100)
+            assertFalse(drain.isCompleted)
+            assertFalse(committed.get())
+            release.countDown()
+            drain.await()
+            assertTrue(committed.get())
+            assertEquals("100.64.0.2", ConfigBuilderTestEnv.io { TailscaleProfileStore.read(profile.id).tailscaleBean!!.exitNode })
+            assertEquals("tailscale:runtime-changed", client.status().getString("errorCode"))
+        } finally {
+            release.countDown()
+            drain.join()
+        }
+    }
+
+    @Test
+    fun explicitFreshAttemptAfterTerminalFailureSeesReleasedTemporaryReservation() {
+        val client = Client()
+        data.binder.registerCallback(client.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        client.onStatus = { id, json ->
+            if (id == 1L && json.getString("stage") == "error") {
+                data.binder.closeTailscaleSession(client.callback, 1)
+                data.binder.startTailscaleCheck(client.callback, 2, profile.id, "stale-identity")
+            }
+        }
+        data.binder.startTailscaleCheck(client.callback, 1, profile.id, "stale-identity")
+        val first = checkNotNull(client.statusEvents.poll(5, TimeUnit.SECONDS))
+        val retry = checkNotNull(client.statusEvents.poll(5, TimeUnit.SECONDS))
+        assertEquals(1L, first.first)
+        assertEquals(2L, retry.first)
+        assertEquals("tailscale:unavailable", retry.third.getString("errorCode"))
+        assertNull(client.statusEvents.poll(100, TimeUnit.MILLISECONDS))
+        assertNull(data.proxy)
+    }
+
+    @Test
+    fun nativeDrainDoesNotJoinBlockedStatusBinderDelivery() = runBlocking {
+        val client = Client()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        client.onStatus = { _, json ->
+            if (json.getString("stage") == "not-running") {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+        }
+        open(client)
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            withTimeout(2_000) { data.tailscale.drain() }
+        } finally {
+            release.countDown()
+        }
+        assertEquals("not-running", client.status().getString("stage"))
+        assertEquals("tailscale:runtime-changed", client.status().getString("errorCode"))
     }
 
     @Test
