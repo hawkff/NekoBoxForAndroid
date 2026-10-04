@@ -204,20 +204,34 @@ func (r *httpRequest) SetHeader(key string, value string) {
 }
 
 // checkRedirect keeps Go's ten-hop limit and drops the headers set through SetHeader when a
-// redirect leaves the original host name or downgrades from HTTPS, so a device identifier meant
-// for the subscription server reaches neither third parties nor the network in the clear. Only
-// the name is compared: an explicit default port or a different port still means the same host.
+// redirect leaves the original origin or downgrades from HTTPS, so a device identifier meant for
+// the subscription server reaches neither third parties nor the network in the clear.
 func (r *httpRequest) checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
 	first := via[0].URL
-	if !strings.EqualFold(req.URL.Hostname(), first.Hostname()) || (first.Scheme == "https" && req.URL.Scheme != "https") {
+	if !strings.EqualFold(req.URL.Hostname(), first.Hostname()) || effectivePort(req.URL) != effectivePort(first) ||
+		(first.Scheme == "https" && req.URL.Scheme != "https") {
 		for _, key := range r.customHeaders {
 			req.Header.Del(key)
 		}
 	}
 	return nil
+}
+
+// effectivePort is the explicit port or the scheme default, so https://h and https://h:443 match.
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch u.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
 }
 
 func (r *httpRequest) Execute() (HTTPResponse, error) {
