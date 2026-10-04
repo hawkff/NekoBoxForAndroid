@@ -390,11 +390,19 @@ class TailscaleSessionControllerTest {
             withContext(NonCancellable) { entered.complete(Unit); release.await() }
         }
         entered.await()
+        otherMode.state = BaseService.State.Connecting
         val reobserved = CountDownLatch(1)
+        val notices = AtomicInteger()
         first.onStatus = { id, json ->
-            if (id == 1L && json.optString("errorCode") == "tailscale:runtime-changed") {
-                otherMode.binder.observeTailscale(second.callback, 2, profile.id, profile.uuid)
-                reobserved.countDown()
+            if (json.optString("errorCode") == "tailscale:runtime-changed") {
+                notices.incrementAndGet()
+                if (id == 1L) {
+                    data.binder.closeTailscaleSession(first.callback, 1)
+                    data.binder.observeTailscale(first.callback, 2, profile.id, profile.uuid)
+                    // Also force a fresh owner on the controller whose old native work still drains.
+                    otherMode.binder.observeTailscale(second.callback, 2, profile.id, profile.uuid)
+                    reobserved.countDown()
+                }
             }
         }
         val drain = async(Dispatchers.IO) { TailscaleSessionController.drainAll() }
@@ -407,9 +415,27 @@ class TailscaleSessionControllerTest {
             assertEquals("none", closed.third.getString("source"))
             assertTrue(closed.third.isNull("node"))
             assertFalse(drain.isCompleted)
+            assertEquals(BaseService.State.Stopped, data.state)
+            val waiting = checkNotNull(first.statusEvents.poll(5, TimeUnit.SECONDS))
+            assertEquals(2L, waiting.first)
+            assertEquals("starting", waiting.third.getString("stage"))
+            assertEquals("none", waiting.third.getString("source"))
+            assertTrue(waiting.third.isNull("node"))
+            assertNull(data.proxy)
+            assertNull(otherMode.proxy)
             release.complete(Unit)
             drain.await()
+            // No state callback is delivered to the old bound service; only global admission resumes.
+            otherMode.state = BaseService.State.Stopped
             TailscaleSessionController.resumeAllAdmission()
+            var oldBindingEvent: Triple<Long, Long, JSONObject>
+            do {
+                oldBindingEvent = checkNotNull(first.statusEvents.poll(5, TimeUnit.SECONDS))
+            } while (oldBindingEvent.third.getString("stage") == "starting")
+            assertEquals(2L, oldBindingEvent.first)
+            assertEquals("not-running", oldBindingEvent.third.getString("stage"))
+            assertEquals(1, notices.get())
+            assertEquals(BaseService.State.Stopped, data.state)
             var event: Triple<Long, Long, JSONObject>
             do {
                 event = checkNotNull(second.statusEvents.poll(5, TimeUnit.SECONDS))
@@ -426,6 +452,7 @@ class TailscaleSessionControllerTest {
             release.complete(Unit)
             drain.join()
             pending.join()
+            otherMode.state = BaseService.State.Stopped
             otherMode.binder.close()
         }
     }
