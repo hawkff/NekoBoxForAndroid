@@ -11,10 +11,26 @@ import io.nekohasekai.sagernet.bg.proto.TailscaleSessionInstance
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.TailscaleProfileStore
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import libcore.Libcore
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicLong
@@ -240,7 +256,7 @@ internal class TailscaleSessionController(
             val stream = Libcore.observeTailscaleStatus(target.instance.box, target.tag)
             try {
                 status(s, "observing", Libcore.tailscaleStatus(target.instance.box, target.tag))
-                while (currentCoroutineContext().isActive && valid(s, target)) {
+                while (currentCoroutineContext()[Job]?.isActive != false && valid(s, target)) {
                     val json = stream.next(500)
                     if (json.isNotEmpty()) {
                         s.savedExit = checkRuntime(s, target.snapshot).tailscaleBean!!.exitNode.orEmpty()
@@ -515,7 +531,7 @@ internal class TailscaleSessionController(
                 drain()
             } finally {
                 synchronized(registryLock) { controllers.remove(this@TailscaleSessionController) }
-                scope.cancel()
+                scope.coroutineContext[Job]?.cancel()
             }
         }
     }
