@@ -30,8 +30,12 @@ func registerTailscaleInterfaces() {
 }
 
 func platformInterfaces() ([]netmon.Interface, error) {
+	content, err := intfBox.NetworkInterfaces()
+	if err != nil {
+		return nil, err
+	}
 	var list []platformNetworkInterface
-	if err := json.Unmarshal([]byte(intfBox.NetworkInterfaces()), &list); err != nil {
+	if err := json.Unmarshal([]byte(content), &list); err != nil {
 		return nil, err
 	}
 	interfaces := make([]netmon.Interface, 0, len(list))

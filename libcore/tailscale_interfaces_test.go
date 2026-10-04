@@ -1,6 +1,7 @@
 package libcore
 
 import (
+	"errors"
 	"net"
 	"testing"
 )
@@ -8,9 +9,10 @@ import (
 type fakeInterfacePlatform struct {
 	BoxPlatformInterface
 	list string
+	err  error
 }
 
-func (f fakeInterfacePlatform) NetworkInterfaces() string { return f.list }
+func (f fakeInterfacePlatform) NetworkInterfaces() (string, error) { return f.list, f.err }
 
 func TestPlatformInterfacesFromJava(t *testing.T) {
 	previous := intfBox
@@ -45,5 +47,9 @@ func TestPlatformInterfacesFromJava(t *testing.T) {
 	intfBox = fakeInterfacePlatform{list: "not json"}
 	if _, err := platformInterfaces(); err == nil {
 		t.Fatal("malformed list did not fail")
+	}
+	intfBox = fakeInterfacePlatform{err: errors.New("enumeration failed")}
+	if _, err := platformInterfaces(); err == nil || err.Error() != "enumeration failed" {
+		t.Fatalf("enumeration error = %v", err)
 	}
 }

@@ -120,7 +120,8 @@ class NativeInterface :
     }
 
     // Tailscale's interface list. Go's net.Interfaces needs a netlink bind that Android 11+
-    // denies to apps; this API still works there, only without hardware addresses.
+    // denies to apps; this API still works there, only without hardware addresses. An
+    // enumeration failure reaches the core as an error.
     override fun networkInterfaces(): String = JSONArray().apply {
         for (nif in NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()) {
             val addresses = nif.interfaceAddresses.mapNotNull { address ->
