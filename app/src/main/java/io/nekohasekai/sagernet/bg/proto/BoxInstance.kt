@@ -207,20 +207,24 @@ abstract class BoxInstance(val profile: ProxyEntity) : Closeable {
                 if (failure.isCompleted) failure.await()
                 query()
             }
+            var ended: Throwable? = null
             try {
                 select {
                     failure.onAwait { it }
                     worker.onAwait { it }
                 }
+            } catch (e: Throwable) {
+                ended = e
+                throw e
             } finally {
                 withContext(NonCancellable) {
                     worker.cancelAndJoin()
                     try {
                         close()
                     } catch (e: Exception) {
-                        // A box that failed to start may already be half closed. Its close error
-                        // must not replace the probe's result or the failure that ended it.
-                        Logs.w("Probe cleanup failed", e)
+                        // A cleanup error is the outcome of a successful query, but it must not
+                        // replace the failure that ended the probe.
+                        ended?.addSuppressed(e) ?: throw e
                     } finally {
                         processes.coroutineContext[Job]?.join()
                     }

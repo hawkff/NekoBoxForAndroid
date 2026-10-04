@@ -232,6 +232,26 @@ class BoxProbeLifecycleTest {
     }
 
     @Test
+    fun closeFailureIsTheOutcomeOnlyAfterASuccessfulQuery() = runBlocking {
+        val node = node()
+        fun failingClose() = object : BoxInstance(node) {
+            override suspend fun init() {
+                config = prepared(node)
+            }
+
+            override fun launch() = Unit
+
+            override fun close() {
+                super.close()
+                throw IOException("close failed")
+            }
+        }
+        assertEquals("close failed", runCatching { failingClose().runProbe { 1 } }.exceptionOrNull()?.message)
+        val thrown = runCatching { failingClose().runProbe { error("start failed") } }.exceptionOrNull()
+        assertTrue(generateSequence(thrown) { it.cause }.any { it.message == "start failed" })
+    }
+
+    @Test
     fun propagatedPruneFailurePreservesSuccessfulResultAndOriginalQueryError() = runBlocking {
         val node = node()
         val state = tailscaleStateFile(node.id).apply { mkdirs() }
