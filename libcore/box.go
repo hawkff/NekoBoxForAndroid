@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -141,6 +142,7 @@ func (b *BoxInstance) Start() (err error) {
 
 	if b.state == 0 {
 		b.state = 1
+		registerTailscaleInterfaces()
 		err = b.Box.Start()
 		b.running = err == nil
 		return err
@@ -179,9 +181,12 @@ func (b *BoxInstance) Close() (err error) {
 		goServeProtect(false)
 	}
 
-	// close box
+	// close box. A box whose Start failed has already closed itself, and closing it again
+	// reports os.ErrClosed; that must not replace the start error or fail the teardown.
 	if b.Box != nil {
-		return b.Box.Close()
+		if err := b.Box.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			return err
+		}
 	}
 
 	return nil

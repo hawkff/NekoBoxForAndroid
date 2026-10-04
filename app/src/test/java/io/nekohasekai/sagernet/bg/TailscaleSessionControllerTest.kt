@@ -9,6 +9,7 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.TailscaleProfileStore
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,8 +74,12 @@ class TailscaleSessionControllerTest {
         fun result(): JSONObject = checkNotNull(results.poll(5, TimeUnit.SECONDS))
     }
 
+    // The default sink writes through the native core, which JVM tests do not load.
+    private val originalLogSink = Logs.sink
+
     @Before
     fun setup() {
+        Logs.sink = {}
         ConfigBuilderTestEnv.reset()
         data = newData()
         profile = ProxyEntity(groupId = 1).putBean(TailscaleBean().apply { initializeDefaultValues() })
@@ -97,6 +102,7 @@ class TailscaleSessionControllerTest {
     fun cleanup() {
         runBlocking { data.tailscale.drain() }
         data.binder.close()
+        Logs.sink = originalLogSink
     }
 
     private fun open(client: Client) {

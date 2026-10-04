@@ -5,15 +5,18 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -24,6 +27,19 @@ import java.lang.reflect.Proxy
 @Config(sdk = [35], application = Application::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 class TailscaleAccessTest {
+    // The default sink writes through the native core, which JVM tests do not load.
+    private val originalLogSink = Logs.sink
+
+    @Before
+    fun stubLogs() {
+        Logs.sink = {}
+    }
+
+    @After
+    fun restoreLogs() {
+        Logs.sink = originalLogSink
+    }
+
     @Test
     fun stoppingBinderRefusesProbeEvenWhenCacheIsIdle() = runTest {
         ConfigBuilderTestEnv.reset()

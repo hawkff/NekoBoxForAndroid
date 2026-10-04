@@ -217,6 +217,10 @@ abstract class BoxInstance(val profile: ProxyEntity) : Closeable {
                     worker.cancelAndJoin()
                     try {
                         close()
+                    } catch (e: Exception) {
+                        // A box that failed to start may already be half closed. Its close error
+                        // must not replace the probe's result or the failure that ended it.
+                        Logs.w("Probe cleanup failed", e)
                     } finally {
                         processes.coroutineContext[Job]?.join()
                     }

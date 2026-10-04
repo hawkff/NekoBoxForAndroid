@@ -11,6 +11,7 @@ import io.nekohasekai.sagernet.bg.proto.TailscaleSessionInstance
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.TailscaleProfileStore
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -219,7 +220,9 @@ internal class TailscaleSessionController(
                         status(s, "closed", code = "tailscale:expired")
                     } catch (e: CancellationException) {
                         throw e
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        // The status reply carries only a code; keep the cause for diagnosis.
+                        Logs.w("Tailscale status session failed", e)
                         status(s, "error", code = "tailscale:unavailable")
                     } finally {
                         withContext(NonCancellable) {
