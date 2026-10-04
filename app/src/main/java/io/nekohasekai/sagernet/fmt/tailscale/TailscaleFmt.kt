@@ -137,14 +137,20 @@ internal fun retainsTailscaleIdentity(previous: ProxyEntity?, restored: ProxyEnt
 
 // Adding provenance to a legacy local node does not change or remove its credentials.
 internal fun profilesForBackup(): List<ProxyEntity> {
+    val legacyIds = SagerDatabase.proxyDao.getAll()
+        .filter { it.type == ProxyEntity.TYPE_TAILSCALE && it.uuid.isBlank() }.map { it.id }.toSet()
     var profiles = emptyList<ProxyEntity>()
-    SagerDatabase.instance.runInTransaction {
-        profiles = SagerDatabase.proxyDao.getAll()
-        profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE && it.uuid.isBlank() }.forEach {
-            // Do not change legacy provenance while an interrupted restore still refers to it.
-            if (tailscaleRestoreDirectory(it.id).exists()) acquireTailscaleState(listOf(it.id)).close()
-            it.uuid = UUID.randomUUID().toString()
-            SagerDatabase.proxyDao.setTailscaleMarker(it.id, it.uuid)
+    // Acquire before entering Room, and retain ownership until the markers commit.
+    val lease = if (legacyIds.isEmpty()) null else acquireTailscaleState(legacyIds)
+    lease.use {
+        SagerDatabase.instance.runInTransaction {
+            profiles = SagerDatabase.proxyDao.getAll()
+            val legacy = profiles.filter { it.type == ProxyEntity.TYPE_TAILSCALE && it.uuid.isBlank() }
+            check(legacy.all { it.id in legacyIds }) { "Tailscale profiles changed. Retry the backup." }
+            legacy.forEach {
+                it.uuid = UUID.randomUUID().toString()
+                check(SagerDatabase.proxyDao.setTailscaleMarker(it.id, it.uuid) == 1) { "Tailscale profile changed. Retry the backup." }
+            }
         }
     }
     return profiles
@@ -154,10 +160,26 @@ internal fun resetTailscaleIdentity(profileId: Long): String {
     check(!DataStore.serviceState.ownsTailscaleState) { "Stop the service before resetting the Tailscale identity." }
     return acquireTailscaleState(listOf(profileId)).use {
         val marker = UUID.randomUUID().toString()
-        SagerDatabase.instance.runInTransaction {
-            check(SagerDatabase.proxyDao.getById(profileId)?.type == ProxyEntity.TYPE_TAILSCALE) { "Tailscale profile no longer exists" }
-            check(tailscaleStateFile(profileId).deleteRecursively()) { "Cannot remove Tailscale identity" }
-            SagerDatabase.proxyDao.setTailscaleMarker(profileId, marker)
+        try {
+            SagerDatabase.instance.runInTransaction {
+                val current = SagerDatabase.proxyDao.getById(profileId)
+                check(current != null && current.type == ProxyEntity.TYPE_TAILSCALE) { "Tailscale profile no longer exists" }
+                stageTailscaleRestore(profileId, current.uuid, marker)
+                check(SagerDatabase.proxyDao.setTailscaleMarker(profileId, marker) == 1) { "Tailscale profile changed during reset" }
+            }
+        } catch (failure: Throwable) {
+            try {
+                recoverTailscaleRestore(profileId)
+            } catch (recoveryFailure: Throwable) {
+                recoveryFailure.addSuppressed(failure)
+                throw recoveryFailure
+            }
+            throw failure
+        }
+        try {
+            recoverTailscaleRestore(profileId)
+        } catch (failure: Throwable) {
+            throw IllegalStateException("Tailscale identity reset committed; recovery is required before restarting this node.", failure)
         }
         marker
     }

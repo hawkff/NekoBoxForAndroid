@@ -10,6 +10,8 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import io.nekohasekai.sagernet.fmt.tailscale.acquireTailscaleState
+import io.nekohasekai.sagernet.fmt.tailscale.recoverTailscaleRestore
+import io.nekohasekai.sagernet.fmt.tailscale.resetTailscaleIdentity
 import io.nekohasekai.sagernet.fmt.tailscale.stageTailscaleRestore
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleRestoreDirectory
 import io.nekohasekai.sagernet.fmt.tailscale.tailscaleStateFile
@@ -375,6 +377,92 @@ class TailscaleRestoreTest {
                 DataStore.serviceState = BaseService.State.Idle
             }
         }
+    }
+
+    @Test
+    fun resetMarkerWriteFailuresRestoreExactCredentialsAndRows() {
+        for ((timing, action) in listOf("BEFORE" to "IGNORE", "BEFORE" to "ABORT, 'reset rejection'", "AFTER" to "ABORT, 'reset rollback'")) {
+            val local = setup()
+            val rows = databaseRows()
+            val files = credentialFiles(local.id)
+            ConfigBuilderTestEnv.io {
+                val db = SagerDatabase.instance.openHelper.writableDatabase
+                db.execSQL("CREATE TRIGGER reject_reset $timing UPDATE OF uuid ON proxy_entities BEGIN SELECT RAISE($action); END")
+                try {
+                    assertNotNull(runCatching { resetTailscaleIdentity(local.id) }.exceptionOrNull())
+                } finally {
+                    db.execSQL("DROP TRIGGER reject_reset")
+                }
+            }
+            assertEquals(rows, databaseRows())
+            assertEquals(files, credentialFiles(local.id))
+            assertFalse(tailscaleRestoreDirectory(local.id).exists())
+            repeat(2) { ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() } }
+            assertEquals(files, credentialFiles(local.id))
+        }
+    }
+
+    @Test
+    fun committedResetChangesOnlyMarkerAndNeverRevivesOldCredentials() {
+        val local = setup()
+        val marker = ConfigBuilderTestEnv.io { resetTailscaleIdentity(local.id) }
+        assertNotEquals(local.uuid, marker)
+        assertEquals(local.copy(uuid = marker), stored(local.id))
+        assertFalse(tailscaleStateFile(local.id).exists())
+        assertFalse(tailscaleRestoreDirectory(local.id).exists())
+        repeat(2) { ConfigBuilderTestEnv.io { acquireTailscaleState(listOf(local.id)).close() } }
+        assertFalse(tailscaleStateFile(local.id).exists())
+        assertEquals(marker, stored(local.id).uuid)
+    }
+
+    @Test
+    fun resetStagingFailureRecoveryPreservesOriginalBytes() {
+        val local = setup()
+        val files = credentialFiles(local.id)
+        val rows = databaseRows()
+        ConfigBuilderTestEnv.io {
+            acquireTailscaleState(listOf(local.id)).use {
+                // Inject at the existing staging helper after acquisition, before any marker write.
+                assertTrue(tailscaleRestoreDirectory(local.id).mkdirs())
+                assertNotNull(runCatching { stageTailscaleRestore(local.id, local.uuid, "reset-marker") }.exceptionOrNull())
+                recoverTailscaleRestore(local.id)
+                recoverTailscaleRestore(local.id)
+            }
+        }
+        assertEquals(rows, databaseRows())
+        assertEquals(files, credentialFiles(local.id))
+        assertFalse(tailscaleRestoreDirectory(local.id).exists())
+    }
+
+    @Test
+    fun resetPostCommitRecoveryFailurePreservesStagingWithoutResurrection() {
+        val local = setup()
+        val files = credentialFiles(local.id)
+        ConfigBuilderTestEnv.io {
+            acquireTailscaleState(listOf(local.id)).use {
+                stageTailscaleRestore(local.id, local.uuid, "reset-marker")
+                SagerDatabase.instance.runInTransaction {
+                    assertEquals(1, SagerDatabase.proxyDao.setTailscaleMarker(local.id, "reset-marker"))
+                }
+                val staging = tailscaleRestoreDirectory(local.id)
+                val unexpected = staging.resolve("unexpected").apply { writeText("preserve") }
+                try {
+                    repeat(2) {
+                        assertNotNull(runCatching { recoverTailscaleRestore(local.id) }.exceptionOrNull())
+                        assertFalse(tailscaleStateFile(local.id).exists())
+                        assertEquals(files, fileTree(staging.resolve("state")))
+                        assertEquals("reset-marker", SagerDatabase.proxyDao.getById(local.id)!!.uuid)
+                    }
+                } finally {
+                    assertTrue(unexpected.delete())
+                }
+                recoverTailscaleRestore(local.id)
+                recoverTailscaleRestore(local.id)
+                assertFalse(staging.exists())
+                assertFalse(tailscaleStateFile(local.id).exists())
+            }
+        }
+        assertEquals(local.copy(uuid = "reset-marker"), stored(local.id))
     }
 
     private fun setup(): ProxyEntity {

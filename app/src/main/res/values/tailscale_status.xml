@@ -58,6 +58,8 @@
     <string name="tailscale_status_cancel_request">Cancel request</string>
     <string name="tailscale_status_cancel_request_summary">An exit change already being saved must finish saving or roll back.</string>
     <string name="tailscale_status_login_origin">Login origin: %1$s</string>
+    <string name="tailscale_login_http_warning">This login page uses HTTP without HTTPS protection. The login link and sign-in data may be exposed to others on the network. Continue only if you trust this connection.</string>
+    <string name="tailscale_login_continue">Continue</string>
     <string name="tailscale_status_login_invalid">The login address is unavailable or unsafe. Check the saved control URL.</string>
     <string name="tailscale_status_login_warning">An unauthenticated default VPN route or Android VPN lockdown can prevent the browser from reaching this page. This screen does not change VPN or lockdown settings and does not bypass routing.</string>
     <string name="tailscale_editor_conflict">The identity or saved exit changed. Your drafts are still here. Reopen the editor to review the saved profile before changing the exit.</string>

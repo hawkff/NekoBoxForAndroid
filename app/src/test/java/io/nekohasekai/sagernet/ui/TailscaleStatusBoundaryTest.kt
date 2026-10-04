@@ -30,6 +30,16 @@ class TailscaleStatusBoundaryTest {
         assertFalse(source("TailscaleStatusActivity").contains("ProfileSettingsActivity"))
     }
 
+    @Test fun editorHttpConfirmationAddsWarningWithoutDisplayingFullLink() {
+        val editor = source("profile/TailscaleSettingsActivity").substringAfter("private suspend fun askToOpenLogin")
+        val message = editor.substringAfter(".setMessage(").substringBefore(".setPositiveButton(")
+        assertTrue(message.contains("tailscale_status_login_origin, link.origin"))
+        assertTrue(message.contains("tailscale_status_login_warning"))
+        assertTrue(message.contains("if (link.isHttp)"))
+        assertTrue(message.contains("tailscale_login_http_warning"))
+        assertFalse(message.contains("link.url"))
+    }
+
     @Test fun editorSavesUseExplicitMergeAndDoNotWriteCachedWholeRows() {
         val editor = source("profile/TailscaleSettingsActivity")
         assertTrue(editor.contains("TailscaleProfileStore.saveEditor("))

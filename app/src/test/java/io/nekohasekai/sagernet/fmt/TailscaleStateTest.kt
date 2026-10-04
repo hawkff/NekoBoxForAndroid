@@ -145,9 +145,18 @@ class TailscaleStateTest {
         state.writeText("local-state")
         DataStore.serviceState = BaseService.State.Connected
         try {
+            acquireTailscaleState(listOf(node.id)).use {
+                val failure = ConfigBuilderTestEnv.io { runCatching { profilesForBackup() }.exceptionOrNull() }
+                assertTrue(failure is IllegalStateException)
+                assertTrue(failure!!.message!!.contains("Stop the service or close the active probe and retry"))
+                assertEquals("", ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(node.id)!!.uuid })
+                assertEquals("local-state", state.readText())
+            }
             val exported = ConfigBuilderTestEnv.io { profilesForBackup().single() }
             assertTrue(exported.uuid.isNotBlank())
-            assertEquals(exported.uuid, ConfigBuilderTestEnv.io { profilesForBackup().single().uuid })
+            acquireTailscaleState(listOf(node.id)).use {
+                assertEquals(exported.uuid, ConfigBuilderTestEnv.io { profilesForBackup().single().uuid })
+            }
             assertEquals("local-state", state.readText())
             val clone = exported.copy(id = 0)
             ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.addProxy(clone) }
@@ -155,6 +164,25 @@ class TailscaleStateTest {
         } finally {
             DataStore.serviceState = BaseService.State.Idle
         }
+    }
+
+    @Test
+    fun busyLegacyNodePreventsPartialBackupMarkerUpgrades() {
+        ConfigBuilderTestEnv.reset()
+        val first = node()
+        val second = node()
+        ConfigBuilderTestEnv.io {
+            SagerDatabase.proxyDao.setTailscaleMarker(first.id, "")
+            SagerDatabase.proxyDao.setTailscaleMarker(second.id, "")
+        }
+        acquireTailscaleState(listOf(second.id)).use {
+            assertNotNull(ConfigBuilderTestEnv.io { runCatching { profilesForBackup() }.exceptionOrNull() })
+            assertEquals(listOf("", ""), ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getAll().map { it.uuid } })
+            acquireTailscaleState(listOf(first.id)).close()
+        }
+        val exported = ConfigBuilderTestEnv.io { profilesForBackup() }
+        assertTrue(exported.all { it.uuid.isNotBlank() })
+        assertEquals(exported.map { it.uuid }, ConfigBuilderTestEnv.io { profilesForBackup().map { it.uuid } })
     }
 
     private fun node() = ProxyEntity(groupId = 1L).putBean(TailscaleBean().apply { initializeDefaultValues() }).also {

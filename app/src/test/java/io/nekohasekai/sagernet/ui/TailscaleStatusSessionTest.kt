@@ -117,6 +117,44 @@ class TailscaleStatusSessionTest {
         assertTrue(transport.calls.contains("close"))
     }
 
+    @Test fun previewingHttpWarningWithoutConfirmationDoesNotRetainBrowserHandoff() {
+        val (session, transport) = setup()
+        val status = JSONObject(status(source = "temporary"))
+        status.getJSONObject("node").put("authUrl", "http://login.example.test/login?token=fixture")
+        transport.listener.status(transport.session, 1, status.toString())
+        assertTrue(session.loginLink()!!.isHttp)
+        session.background(false)
+        assertEquals(listOf("close", "disconnect"), transport.calls.takeLast(2))
+    }
+
+    @Test fun confirmedHttpLoginRetainsHandoffUntilOrdinaryBrowserReturn() {
+        val (session, transport) = setup()
+        val status = JSONObject(status(source = "temporary"))
+        status.getJSONObject("node").put("authUrl", "http://login.example.test/login?token=fixture")
+        transport.listener.status(transport.session, 1, status.toString())
+        val link = session.loginLink()!!
+        val closes = transport.closedSessions.size
+        assertNotNull(session.openLogin(link))
+        session.background(false)
+        assertEquals(closes, transport.closedSessions.size)
+        session.foreground()
+        session.background(false)
+        assertEquals(listOf("close", "disconnect"), transport.calls.takeLast(2))
+    }
+
+    @Test fun changedLoginLinkCannotConsumeEarlierHttpConfirmation() {
+        val (session, transport) = setup()
+        val status = JSONObject(status(source = "temporary"))
+        status.getJSONObject("node").put("authUrl", "http://login.example.test/login?token=first")
+        transport.listener.status(transport.session, 1, status.toString())
+        val link = session.loginLink()!!
+        status.getJSONObject("node").put("authUrl", "http://login.example.test/login?token=second")
+        transport.listener.status(transport.session, 2, status.toString())
+        assertNull(session.openLogin(link))
+        session.background(false)
+        assertEquals(listOf("close", "disconnect"), transport.calls.takeLast(2))
+    }
+
     @Test fun browserReturnDoesNotGrantUnrelatedBackgroundPermission() {
         val (session, transport) = setup()
         transport.listener.status(transport.session, 1, status(source = "temporary"))

@@ -55,8 +55,11 @@ internal class TailscaleStatusSession(
         if (!changingConfiguration && !browserHandoff) close()
     }
 
-    fun openLogin(): TailscaleLoginLink? {
-        val link = mutableState.value.status?.node?.authUrl?.let(TailscaleLoginLink::parse) ?: return null
+    fun loginLink(): TailscaleLoginLink? = mutableState.value.status?.node?.authUrl?.let(TailscaleLoginLink::parse)
+
+    fun openLogin(expectedLink: TailscaleLoginLink? = null): TailscaleLoginLink? {
+        val link = loginLink() ?: return null
+        if (expectedLink != null && expectedLink.url != link.url) return null
         browserHandoff = true
         return link
     }

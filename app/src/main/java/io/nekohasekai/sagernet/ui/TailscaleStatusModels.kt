@@ -142,6 +142,8 @@ internal object TailscaleStatusParser {
 
 // Deliberately not a data class: its string representation must not expose the login token.
 internal class TailscaleLoginLink private constructor(val url: String, val origin: String) {
+    val isHttp get() = origin.startsWith("http://")
+
     companion object {
         fun parse(url: String): TailscaleLoginLink? = runCatching {
             require(url.none { it.isWhitespace() || it.isISOControl() || it == '\\' })

@@ -65,11 +65,16 @@ class TailscaleStatusActivity : ThemedActivity(R.layout.layout_tailscale_status)
     }
 
     internal fun openLogin() {
-        val link = model.session?.openLogin() ?: return
-        try {
-            browser.launch(Intent(Intent.ACTION_VIEW, link.url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
-        } catch (_: Exception) {
-            model.session?.browserFailed()
+        val owner = model.session ?: return
+        val link = owner.loginLink() ?: return
+        confirmTailscaleLogin(this, link) {
+            if (isFinishing || isDestroyed || model.session !== owner) return@confirmTailscaleLogin
+            val confirmed = owner.openLogin(link) ?: return@confirmTailscaleLogin
+            try {
+                browser.launch(Intent(Intent.ACTION_VIEW, confirmed.url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+            } catch (_: Exception) {
+                owner.browserFailed()
+            }
         }
     }
 

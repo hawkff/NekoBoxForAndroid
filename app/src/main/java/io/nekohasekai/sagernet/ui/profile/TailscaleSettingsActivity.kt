@@ -294,7 +294,8 @@ class TailscaleSettingsActivity :
             .setTitle(R.string.tailscale_login_required)
             .setMessage(
                 getString(R.string.tailscale_status_login_origin, link.origin) + "\n\n" +
-                    getString(R.string.tailscale_status_login_warning),
+                    getString(R.string.tailscale_status_login_warning) +
+                    if (link.isHttp) "\n\n" + getString(R.string.tailscale_login_http_warning) else "",
             )
             .setPositiveButton(R.string.tailscale_login_open) { _, _ ->
                 if (continuation.isActive) {

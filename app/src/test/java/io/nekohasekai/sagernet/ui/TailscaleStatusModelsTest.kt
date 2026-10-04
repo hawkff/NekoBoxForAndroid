@@ -21,7 +21,8 @@ class TailscaleStatusModelsTest {
         val link = TailscaleLoginLink.parse("https://login.example.test:8443/signin?token=secret#fragment")!!
         assertEquals("https://login.example.test:8443", link.origin)
         assertFalse(link.toString().contains("secret"))
-        assertNotNull(TailscaleLoginLink.parse("http://localhost:8080/login"))
+        assertFalse(link.isHttp)
+        assertTrue(TailscaleLoginLink.parse("http://localhost:8080/login")!!.isHttp)
         for (url in listOf(
             "javascript:alert(1)", "file:///secret", "https:///no-host", "https://user:pass@example.test/",
             "https://example.test\\@other.test", "https://example.test/\nsecret", "https://example.test/%0d%0a",
