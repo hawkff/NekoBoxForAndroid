@@ -39,6 +39,7 @@ class TailscaleSessionControllerTest {
         val statusEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
         val resultEvents = LinkedBlockingQueue<Triple<Long, Long, JSONObject>>()
         @Volatile var onStatus: ((Long, JSONObject) -> Unit)? = null
+        @Volatile var onResult: ((Long, JSONObject) -> Unit)? = null
         val callback = Proxy.newProxyInstance(ISagerNetServiceCallback::class.java.classLoader,
             arrayOf(ISagerNetServiceCallback::class.java)) { _, method, args ->
             when (method.name) {
@@ -54,6 +55,7 @@ class TailscaleSessionControllerTest {
                     val json = JSONObject(args!![2] as String)
                     results.add(json)
                     resultEvents.add(Triple(args[0] as Long, args[1] as Long, json))
+                    onResult?.invoke(args[0] as Long, json)
                     null
                 }
                 else -> null
@@ -499,7 +501,13 @@ class TailscaleSessionControllerTest {
     fun explicitFreshAttemptAfterTerminalFailureSeesReleasedTemporaryReservation() {
         val client = Client()
         data.binder.registerCallback(client.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        val reservationAtTerminal = LinkedBlockingQueue<Boolean>()
         client.onStatus = { id, json ->
+            if (json.getString("stage") == "error") {
+                val field = TailscaleSessionController::class.java.getDeclaredField("temporaryOwner").apply { isAccessible = true }
+                val registryLock = TailscaleSessionController::class.java.getDeclaredField("registryLock").apply { isAccessible = true }.get(null)
+                reservationAtTerminal.add(synchronized(registryLock) { field.get(null) == null })
+            }
             if (id == 1L && json.getString("stage") == "error") {
                 data.binder.closeTailscaleSession(client.callback, 1)
                 data.binder.startTailscaleCheck(client.callback, 2, profile.id, "stale-identity")
@@ -511,6 +519,9 @@ class TailscaleSessionControllerTest {
         assertEquals(1L, first.first)
         assertEquals(2L, retry.first)
         assertEquals("tailscale:unavailable", retry.third.getString("errorCode"))
+        // Stale identity fails before the busy check; inspect the reservation itself at delivery.
+        assertEquals(true, reservationAtTerminal.poll(5, TimeUnit.SECONDS))
+        assertEquals(true, reservationAtTerminal.poll(5, TimeUnit.SECONDS))
         assertNull(client.statusEvents.poll(100, TimeUnit.MILLISECONDS))
         assertNull(data.proxy)
     }
@@ -535,6 +546,221 @@ class TailscaleSessionControllerTest {
         }
         assertEquals("not-running", client.status().getString("stage"))
         assertEquals("tailscale:runtime-changed", client.status().getString("errorCode"))
+    }
+
+    private data class DeliveryCounts(val sessions: Int, val statuses: Int, val results: Int)
+
+    private fun deliveryCounts(): DeliveryCounts {
+        val lock = TailscaleSessionController::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(data.tailscale)
+        return synchronized(lock) {
+            val sessions = TailscaleSessionController::class.java.getDeclaredField("deliverySessions").apply { isAccessible = true }
+                .get(data.tailscale) as Set<*>
+            var statuses = 0
+            var results = 0
+            for (session in sessions.filterNotNull()) {
+                val sender = session.javaClass.getDeclaredField("delivery").apply { isAccessible = true }.get(session) as Job
+                if (!sender.isCompleted) statuses++
+                val requests = session.javaClass.getDeclaredField("requests").apply { isAccessible = true }.get(session) as Map<*, *>
+                results += requests.size
+            }
+            DeliveryCounts(sessions.size, statuses, results)
+        }
+    }
+
+    private suspend fun awaitReleasedDeliveryBudget() = withTimeout(5_000) {
+        while (deliveryCounts() != DeliveryCounts(0, 0, 0)) delay(10)
+    }
+
+    private fun blockStatus(close: (Client, Int) -> Unit) = runBlocking {
+        val client = Client()
+        val entered = LinkedBlockingQueue<Unit>()
+        val release = CountDownLatch(1)
+        client.onStatus = { _, json ->
+            if (json.getString("stage") == "not-running") {
+                entered.add(Unit)
+                check(release.await(15, TimeUnit.SECONDS))
+            }
+        }
+        try {
+            repeat(2) { attempt ->
+                // Deliberately reuse the same owner and ID: resource accounting must use instances.
+                open(client)
+                assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+                close(client, attempt)
+            }
+            data.binder.registerCallback(client.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+            for (id in 2L..12L) {
+                data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
+                assertEquals(2, deliveryCounts().sessions)
+                data.binder.closeTailscaleSession(client.callback, id)
+            }
+            withTimeout(2_000) { data.tailscale.drain() }
+            assertEquals(DeliveryCounts(2, 2, 0), deliveryCounts())
+            assertNull(entered.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            release.countDown()
+        }
+        awaitReleasedDeliveryBudget()
+        data.tailscale.resumeAdmission()
+        client.statuses.clear()
+        data.binder.observeTailscale(client.callback, 99, profile.id, profile.uuid)
+        assertEquals("not-running", client.status().getString("stage"))
+    }
+
+    @Test
+    fun blockedStatusCloseAndSameIdReplacementRetainOwnerBudget() = blockStatus { client, _ ->
+        data.binder.closeTailscaleSession(client.callback, 1)
+    }
+
+    @Test
+    fun blockedStatusUnregisterAndDeathRetainOwnerBudget() = blockStatus { client, attempt ->
+        if (attempt == 0) data.binder.unregisterCallback(client.callback) else {
+            val field = BaseService.Binder::class.java.getDeclaredField("callbacks").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val callbacks = field.get(data.binder) as RemoteCallbackList<ISagerNetServiceCallback>
+            callbacks.onCallbackDied(client.callback)
+        }
+    }
+
+    @Test
+    fun sameIdUpgradeRetainsBothBlockedStatusSenders() = runBlocking {
+        val client = Client()
+        val entered = LinkedBlockingQueue<Unit>()
+        val release = CountDownLatch(1)
+        client.onStatus = { _, _ ->
+            entered.add(Unit)
+            check(release.await(15, TimeUnit.SECONDS))
+        }
+        open(client)
+        try {
+            assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+            data.tailscale.stopAdmission()
+            // Upgrade the existing passive ID, but reject native start at the admission barrier.
+            data.binder.startTailscaleCheck(client.callback, 1, profile.id, profile.uuid)
+            assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+            assertEquals(DeliveryCounts(2, 2, 0), deliveryCounts())
+            withTimeout(2_000) { data.tailscale.drain() }
+            data.binder.closeTailscaleSession(client.callback, 1)
+            assertEquals(DeliveryCounts(2, 2, 0), deliveryCounts())
+            assertNull(data.proxy)
+        } finally {
+            release.countDown()
+        }
+        awaitReleasedDeliveryBudget()
+    }
+
+    @Test
+    fun blockedLifecycleNoticeRetainsBudgetAfterExplicitClose() = runBlocking {
+        val client = Client()
+        val entered = LinkedBlockingQueue<Unit>()
+        val release = CountDownLatch(1)
+        client.onStatus = { _, json ->
+            if (json.optString("errorCode") == "tailscale:runtime-changed") {
+                entered.add(Unit)
+                check(release.await(15, TimeUnit.SECONDS))
+            }
+        }
+        try {
+            repeat(2) {
+                data.tailscale.resumeAdmission()
+                open(client)
+                assertEquals("not-running", client.status().getString("stage"))
+                withTimeout(2_000) { data.tailscale.drain() }
+                assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+                data.binder.closeTailscaleSession(client.callback, 1)
+                client.statuses.clear()
+            }
+            data.tailscale.resumeAdmission()
+            for (id in 2L..12L) {
+                data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
+                assertEquals(2, deliveryCounts().sessions)
+                data.binder.closeTailscaleSession(client.callback, id)
+            }
+            assertEquals(DeliveryCounts(2, 2, 0), deliveryCounts())
+            assertNull(client.statuses.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            release.countDown()
+        }
+        awaitReleasedDeliveryBudget()
+    }
+
+    @Test
+    fun blockedResultsRetainRequestAndSessionBudgetsWithoutHoldingNativeDrain() = runBlocking {
+        val client = Client()
+        val entered = LinkedBlockingQueue<Unit>()
+        val release = CountDownLatch(1)
+        client.onResult = { _, _ ->
+            entered.add(Unit)
+            check(release.await(15, TimeUnit.SECONDS))
+        }
+        data.binder.registerCallback(client.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        try {
+            for (sessionId in 1L..2L) {
+                data.binder.observeTailscale(client.callback, sessionId, profile.id, profile.uuid)
+                assertEquals("not-running", client.status().getString("stage"))
+                for (id in 1L..4L) {
+                    data.binder.pingTailscalePeer(client.callback, sessionId, id, "peer", 100)
+                    assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+                }
+                // Completed native Jobs must not free the four still-blocked request senders.
+                data.binder.pingTailscalePeer(client.callback, sessionId, 5, "peer", 100)
+                assertNull(entered.poll(100, TimeUnit.MILLISECONDS))
+                data.binder.closeTailscaleSession(client.callback, sessionId)
+            }
+            for (id in 3L..12L) {
+                data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
+                assertEquals(2, deliveryCounts().sessions)
+                data.binder.closeTailscaleSession(client.callback, id)
+            }
+            withTimeout(2_000) { data.tailscale.drain() }
+            withTimeout(2_000) { while (deliveryCounts().statuses != 0) delay(10) }
+            assertEquals(DeliveryCounts(2, 0, 8), deliveryCounts())
+            assertNull(entered.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            release.countDown()
+        }
+        awaitReleasedDeliveryBudget()
+        data.tailscale.resumeAdmission()
+        data.binder.observeTailscale(client.callback, 99, profile.id, profile.uuid)
+        assertEquals("not-running", client.status().getString("stage"))
+        data.binder.pingTailscalePeer(client.callback, 99, 1, "peer", 100)
+        assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun blockedStatusesAcrossOwnersRetainControllerBudget() = runBlocking {
+        val entered = LinkedBlockingQueue<Unit>()
+        val release = CountDownLatch(1)
+        val clients = List(4) {
+            Client().also { client ->
+                client.onStatus = { _, _ ->
+                    entered.add(Unit)
+                    check(release.await(15, TimeUnit.SECONDS))
+                }
+                data.binder.registerCallback(client.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+            }
+        }
+        try {
+            for (client in clients) for (id in 1L..2L) {
+                data.binder.observeTailscale(client.callback, id, profile.id, profile.uuid)
+                assertNotNull(entered.poll(5, TimeUnit.SECONDS))
+                data.binder.closeTailscaleSession(client.callback, id)
+            }
+            repeat(8) {
+                val newcomer = Client()
+                data.binder.registerCallback(newcomer.callback, SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+                data.binder.observeTailscale(newcomer.callback, 1, profile.id, profile.uuid)
+                assertEquals(8, deliveryCounts().sessions)
+                data.binder.closeTailscaleSession(newcomer.callback, 1)
+                data.binder.unregisterCallback(newcomer.callback)
+            }
+            withTimeout(2_000) { data.tailscale.drain() }
+            assertEquals(DeliveryCounts(8, 8, 0), deliveryCounts())
+            assertNull(entered.poll(100, TimeUnit.MILLISECONDS))
+        } finally {
+            release.countDown()
+        }
+        awaitReleasedDeliveryBudget()
     }
 
     @Test

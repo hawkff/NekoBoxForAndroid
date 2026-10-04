@@ -28,6 +28,9 @@ internal class TailscaleSessionController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessions = mutableMapOf<Pair<IBinder, Long>, Session>()
     private val retiringSessions = mutableMapOf<Pair<IBinder, Long>, Session>()
+    // Eight retained sessions per controller, two per Binder owner, each with at most four
+    // request senders. Authority can end immediately; a blocked Binder call still owns its slot.
+    private val deliverySessions = mutableSetOf<Session>()
     // Retain closing jobs until their finalizers complete so lifecycle drains cannot miss them.
     private val closing = mutableSetOf<Job>()
     private var destroyed = false
@@ -115,11 +118,11 @@ internal class TailscaleSessionController(
             if (previous != null) {
                 if (previous.profileId != profileId || previous.identity != identity) return
                 if (!temporary || previous.temporary || previous.target != null) return
-                retire(previous)
             }
-            val owned = sessions.keys + retiringSessions.keys
-            if (owned.size >= 8 || owned.count { it.first == cb.asBinder() } >= 2) return
+            if (deliverySessions.size >= 8 || deliverySessions.count { it.key.first == cb.asBinder() } >= 2) return
+            previous?.let { retire(it) }
             val s = Session(cb, sessionId, profileId, identity, temporary, previous?.sequence ?: AtomicLong())
+            deliverySessions.add(s)
             val temporaryBusy = mayStartTemporary && synchronized(registryLock) {
                 if (temporaryOwner != null) true else {
                     temporaryOwner = s
@@ -137,7 +140,10 @@ internal class TailscaleSessionController(
                 }
             }
             s.delivery.invokeOnCompletion {
-                synchronized(lock) { if (retiringSessions[s.key] === s) retiringSessions.remove(s.key) }
+                synchronized(lock) {
+                    if (retiringSessions[s.key] === s) retiringSessions.remove(s.key)
+                    releaseDeliveryBudget(s)
+                }
             }
             s.job = scope.launch(start = CoroutineStart.LAZY) {
                 supervisorScope {
@@ -200,6 +206,7 @@ internal class TailscaleSessionController(
             s.job.invokeOnCompletion {
                 synchronized(registryLock) { if (temporaryOwner === s) temporaryOwner = null }
                 s.completionStatus?.let { s.statuses.trySend(it) }
+                synchronized(lock) { releaseDeliveryBudget(s) }
             }
             s.delivery.start()
             s.job.start()
@@ -294,7 +301,10 @@ internal class TailscaleSessionController(
                 }
             }
             request.delivery.invokeOnCompletion {
-                synchronized(lock) { if (s.requests[requestId] === request) s.requests.remove(requestId) }
+                synchronized(lock) {
+                    if (s.requests[requestId] === request) s.requests.remove(requestId)
+                    releaseDeliveryBudget(s)
+                }
             }
             request.job = scope.launch(s.job + Dispatchers.IO, start = CoroutineStart.LAZY) { block(s, target) }
             request.job.invokeOnCompletion {
@@ -454,6 +464,15 @@ internal class TailscaleSessionController(
         closing.add(s.job)
         s.job.invokeOnCompletion { synchronized(lock) { closing.remove(s.job) } }
         s.job.cancel()
+    }
+
+    // Called under lock only by completion handlers, never by cancellation or authority removal.
+    private fun releaseDeliveryBudget(s: Session) {
+        if (sessions[s.key] !== s && retiringSessions[s.key] !== s &&
+            s.job.isCompleted && s.delivery.isCompleted && s.requests.isEmpty()
+        ) {
+            deliverySessions.remove(s)
+        }
     }
 
     private suspend fun drainRequests(s: Session) {
