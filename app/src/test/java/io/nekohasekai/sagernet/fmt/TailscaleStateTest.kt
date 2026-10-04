@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.fmt
 
+import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -19,6 +20,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -65,6 +68,38 @@ class TailscaleStateTest {
         DataStore.serviceState = BaseService.State.Idle
         ConfigBuilderTestEnv.io { pruneTailscaleState() }
         assertFalse(live.exists())
+    }
+
+    @Test
+    fun pruneRetainsNodeWithLockIoFailureAndContinuesToNextCandidate() {
+        ConfigBuilderTestEnv.reset()
+        DataStore.serviceState = BaseService.State.Idle
+        val blockedId = 91_001L
+        val removableId = 91_002L
+        val blocked = tailscaleStateFile(blockedId).apply { mkdirs() }
+        val removable = tailscaleStateFile(removableId).apply { mkdirs() }
+        blocked.resolve("tailscaled.state").writeText("retained-state")
+        removable.resolve("tailscaled.state").writeText("orphan-state")
+        val badLock = File(SagerNet.application.noBackupFilesDir, "tailscale-locks/$blockedId.lock")
+        assertTrue(badLock.mkdirs())
+        try {
+            val failure = runCatching { acquireTailscaleState(listOf(blockedId)).close() }.exceptionOrNull()
+            assertTrue(failure is IOException)
+            ConfigBuilderTestEnv.io {
+                pruneTailscaleState(keep = emptySet(), profileIds = listOf(blockedId, removableId))
+            }
+            assertEquals("retained-state", blocked.resolve("tailscaled.state").readText())
+            assertFalse(removable.exists())
+            assertTrue(badLock.delete())
+            ConfigBuilderTestEnv.io {
+                pruneTailscaleState(keep = emptySet(), profileIds = listOf(blockedId))
+            }
+            assertFalse(blocked.exists())
+        } finally {
+            badLock.delete()
+            blocked.deleteRecursively()
+            removable.deleteRecursively()
+        }
     }
 
     @Test

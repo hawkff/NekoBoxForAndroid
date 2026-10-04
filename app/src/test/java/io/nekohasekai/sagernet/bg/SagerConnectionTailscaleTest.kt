@@ -6,6 +6,7 @@ import android.content.ServiceConnection
 import android.os.Binder
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.ISagerNetServiceCallback
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,6 +48,85 @@ class SagerConnectionTailscaleTest {
         } as ISagerNetService
         init {
             binder.attachInterface(api, "io.nekohasekai.sagernet.aidl.ISagerNetService")
+        }
+    }
+
+    @Test
+    fun stateUpdatesWithoutUiCallbackStillRequireConnectedService() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
+            override fun bindService(intent: Intent, connection: ServiceConnection, flags: Int) = true
+            override fun unbindService(connection: ServiceConnection) = Unit
+        }
+        val connection = SagerConnection(SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        connection.connect(context, null)
+        try {
+            val service = Service()
+            connection.onServiceConnected(null, service.binder)
+            service.callback.stateChanged(BaseService.State.Connecting.ordinal, null, null)
+            assertEquals(BaseService.State.Stopped, DataStore.serviceState)
+            runCurrent()
+            assertEquals(BaseService.State.Connecting, DataStore.serviceState)
+            service.callback.stateChanged(-1, null, null)
+            runCurrent()
+            assertEquals(BaseService.State.Connecting, DataStore.serviceState)
+            service.callback.stateChanged(BaseService.State.Connected.ordinal, null, null)
+            connection.service = null
+            runCurrent()
+            assertEquals(BaseService.State.Connecting, DataStore.serviceState)
+            connection.service = service.api
+        } finally {
+            connection.disconnect(context)
+            DataStore.serviceState = BaseService.State.Idle
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun staleStateCallbacksCannotChangeCacheOrUiAfterReconnect() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
+            override fun bindService(intent: Intent, connection: ServiceConnection, flags: Int) = true
+            override fun unbindService(connection: ServiceConnection) = Unit
+        }
+        val received = mutableListOf<BaseService.State>()
+        val connection = SagerConnection(SagerConnection.CONNECTION_ID_TAILSCALE_STATUS)
+        connection.connect(
+            context,
+            object : SagerConnection.Callback {
+                override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
+                    assertEquals(state, DataStore.serviceState)
+                    received += state
+                }
+                override fun onServiceConnected(service: ISagerNetService) = Unit
+            },
+        )
+        try {
+            val first = Service()
+            connection.onServiceConnected(null, first.binder)
+            first.callback.stateChanged(BaseService.State.Connected.ordinal, null, null)
+            connection.onServiceDisconnected(null)
+            val second = Service()
+            connection.onServiceConnected(null, second.binder)
+            runCurrent()
+            assertEquals(BaseService.State.Stopped, DataStore.serviceState)
+            assertTrue(received.isEmpty())
+            first.callback.stateChanged(BaseService.State.Connected.ordinal, null, null)
+            second.callback.stateChanged(BaseService.State.Connecting.ordinal, null, null)
+            runCurrent()
+            assertEquals(BaseService.State.Connecting, DataStore.serviceState)
+            assertEquals(listOf(BaseService.State.Connecting), received)
+            connection.disconnect(context)
+            second.callback.stateChanged(BaseService.State.Connected.ordinal, null, null)
+            runCurrent()
+            assertEquals(BaseService.State.Connecting, DataStore.serviceState)
+            assertEquals(listOf(BaseService.State.Connecting), received)
+        } finally {
+            connection.disconnect(context)
+            DataStore.serviceState = BaseService.State.Idle
+            Dispatchers.resetMain()
         }
     }
 

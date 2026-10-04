@@ -13,6 +13,7 @@ import org.json.JSONObject
 import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 
 // Per-profile node identity. Relative to the core working directory (no_backup),
@@ -178,6 +179,8 @@ fun pruneTailscaleState(keep: Set<Long>? = null, profileIds: Collection<Long>? =
             acquireTailscaleState(listOf(id))
         } catch (_: IllegalStateException) {
             continue // Busy or unrecoverable nodes must keep their state.
+        } catch (_: IOException) {
+            continue // A failed lock acquisition must not remove this node or block later nodes.
         }
         lease.use {
             // A profile can be created/restored after the candidate scan; recheck under its lock.

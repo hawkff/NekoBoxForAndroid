@@ -26,9 +26,12 @@ class TailscaleStatusViewModel(application: Application) : AndroidViewModel(appl
         initialized = true
         viewModelScope.launch {
             val profile = withContext(Dispatchers.IO) {
-                runCatching { SagerDatabase.proxyDao.getById(profileId) }.getOrNull()
+                runCatching {
+                    require(profileId > 0)
+                    SagerDatabase.proxyDao.getById(profileId)?.takeIf { it.requireBean() is TailscaleBean }
+                }.getOrNull()
             }
-            if (profile == null || profileId <= 0 || profile.requireBean() !is TailscaleBean) {
+            if (profile == null) {
                 mutableState.value = TailscaleStatusUiState(failed = true)
                 return@launch
             }

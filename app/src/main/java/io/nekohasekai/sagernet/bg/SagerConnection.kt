@@ -86,9 +86,10 @@ class SagerConnection(
         override fun stateChanged(state: Int, profileName: String?, msg: String?) {
             if (state < 0) return // skip private
             val s = BaseService.State.values()[state]
-            deliver {
+            runOnMainDispatcher {
+                if (epoch != callbackEpoch || service == null) return@runOnMainDispatcher
                 DataStore.serviceState = s
-                it.stateChanged(s, profileName, msg)
+                callback?.stateChanged(s, profileName, msg)
             }
         }
 
