@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
 
 import android.content.Context
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.bg.BaseService.State
 import java.text.DateFormat
 import java.util.Date
 
@@ -24,6 +25,8 @@ internal class TailscaleStatusFormatting(private val context: Context) {
 
     fun state(state: TailscaleStatusUiState): String {
         val status = state.status
+        if (state.serviceState == State.Stopping) return text(R.string.stopping)
+        if (state.serviceState == State.Connecting || state.refreshing) return text(R.string.connecting)
         if (state.temporaryRequested || status?.stage == "starting") return text(R.string.tailscale_status_starting)
         if (!state.connected) return text(if (state.failed) R.string.tailscale_status_error else R.string.tailscale_status_connecting)
         if (status?.stage == "closed") return text(R.string.tailscale_status_closed)

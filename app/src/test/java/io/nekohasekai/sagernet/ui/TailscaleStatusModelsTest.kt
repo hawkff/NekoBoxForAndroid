@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.ui
 
 import android.app.Application
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.bg.BaseService.State
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -79,6 +80,15 @@ class TailscaleStatusModelsTest {
         repeat(256) { peers.put(peer) }
         assertTrue(runCatching { TailscaleStatusParser.status(json.toString()) }.isFailure)
         assertTrue(runCatching { TailscaleStatusParser.status(" ".repeat(133 * 1024)) }.isFailure)
+    }
+
+    @Test fun serviceTransitionsAndPassiveRefreshRenderAsProgressNotStaleNodeState() {
+        val status = TailscaleStatusParser.status(TailscaleStatusSessionTest.status())
+        val state = TailscaleStatusUiState(connected = true, serviceState = State.Connected, status = status)
+        assertEquals(context.getString(R.string.stopping), format.state(state.copy(serviceState = State.Stopping)))
+        assertEquals(context.getString(R.string.connecting), format.state(state.copy(serviceState = State.Connecting)))
+        assertEquals(context.getString(R.string.connecting), format.state(state.copy(serviceState = State.Stopped, refreshing = true)))
+        assertEquals(context.getString(R.string.tailscale_status_stopped), format.state(state.copy(serviceState = State.Stopped, status = null)))
     }
 
     @Test fun onlyDurableExitOutcomesRenderAsSuccess() {

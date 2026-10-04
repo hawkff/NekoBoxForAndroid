@@ -1,12 +1,14 @@
 package io.nekohasekai.sagernet.ui
 
+import io.nekohasekai.sagernet.bg.BaseService.State
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicLong
 
 internal data class TailscaleStatusUiState(
     val connected: Boolean = false,
-    val stopped: Boolean = false,
+    val serviceState: State = State.Idle,
+    val refreshing: Boolean = false,
     val status: TailscaleStatusEnvelope? = null,
     val temporaryRequested: Boolean = false,
     val pending: String? = null,
@@ -14,9 +16,10 @@ internal data class TailscaleStatusUiState(
     val exitOutcome: String? = null,
     val failed: Boolean = false,
 ) {
-    val canCheck get() = connected && stopped && !temporaryRequested &&
-        status?.source != "temporary" && status?.stage != "starting"
-    val canOperate get() = connected && status?.stage == "observing" && status.node != null && pending == null
+    val settled get() = serviceState == State.Stopped || serviceState == State.Connected
+    val canCheck get() = connected && serviceState == State.Stopped && !refreshing && !temporaryRequested &&
+        status?.source !in setOf("temporary", "running") && status?.stage != "starting"
+    val canOperate get() = connected && settled && !refreshing && status?.stage == "observing" && status.node != null && pending == null
     val temporary get() = temporaryRequested || status?.source == "temporary"
 }
 
@@ -36,6 +39,7 @@ internal class TailscaleStatusSession(
     private var requestedPeer = ""
     private var browserHandoff = false
     private var attached = false
+    private var observationPending = false
 
     fun foreground() {
         browserHandoff = false
@@ -60,30 +64,65 @@ internal class TailscaleStatusSession(
         mutableState.value = mutableState.value.copy(failed = true)
     }
 
-    override fun connected(stopped: Boolean) {
-        sessionId = ids.incrementAndGet()
-        sequence = -1
-        generation = -1
-        requestId = 0
-        browserHandoff = false
-        mutableState.value = TailscaleStatusUiState(connected = true, stopped = stopped)
-        attempt { transport.observe(sessionId, profileId, identity) }
+    override fun connected(state: State) {
+        if (mutableState.value.connected) {
+            serviceState(state)
+            return
+        }
+        mutableState.value = TailscaleStatusUiState(connected = true, serviceState = state)
+        observe(refreshing = !mutableState.value.settled)
     }
 
     override fun disconnected() {
         sessionId = 0
         requestId = 0
+        observationPending = false
         browserHandoff = false
         mutableState.value = TailscaleStatusUiState(failed = true)
     }
 
-    override fun serviceState(stopped: Boolean) {
-        mutableState.value = mutableState.value.copy(stopped = stopped)
+    override fun serviceState(state: State) {
+        val previous = mutableState.value
+        if (previous.serviceState == state) return
+        mutableState.value = previous.copy(serviceState = state)
+        if (!previous.connected) return
+        if (!mutableState.value.settled) {
+            // Keep a passive transition waiter: another service may own the runtime.
+            if (!observationPending) retireOwnership()
+            mutableState.value = TailscaleStatusUiState(connected = true, serviceState = state, refreshing = true)
+        } else if (!observationPending) {
+            observe(refreshing = true)
+        }
+    }
+
+    private fun retireOwnership() {
+        val previous = sessionId
+        sessionId = 0
+        sequence = -1
+        generation = -1
+        requestId = 0
+        observationPending = false
+        browserHandoff = false
+        if (previous != 0L) runCatching { transport.close(previous) }
+    }
+
+    private fun observe(refreshing: Boolean) {
+        retireOwnership()
+        sessionId = ids.incrementAndGet()
+        observationPending = true
+        mutableState.value = TailscaleStatusUiState(
+            connected = true, serviceState = mutableState.value.serviceState, refreshing = refreshing,
+        )
+        attempt { transport.observe(sessionId, profileId, identity) }
     }
 
     fun check() {
         if (!mutableState.value.canCheck) return
-        mutableState.value = mutableState.value.copy(temporaryRequested = true, failed = false)
+        retireOwnership()
+        sessionId = ids.incrementAndGet()
+        mutableState.value = TailscaleStatusUiState(
+            connected = true, serviceState = mutableState.value.serviceState, temporaryRequested = true,
+        )
         attempt { transport.start(sessionId, profileId, identity) }
     }
 
@@ -110,7 +149,13 @@ internal class TailscaleStatusSession(
     }
 
     fun cancelRequest() {
-        if (requestId != 0L) attempt { transport.cancel(sessionId, requestId) }
+        if (requestId != 0L) {
+            try {
+                transport.cancel(sessionId, requestId)
+            } catch (_: Exception) {
+                mutableState.value = mutableState.value.copy(failed = true)
+            }
+        }
         // An exit finalizer may already be saving; await its authoritative result.
     }
 
@@ -120,12 +165,8 @@ internal class TailscaleStatusSession(
     }
 
     fun close() {
-        val oldSession = sessionId
-        sessionId = 0
-        requestId = 0
-        browserHandoff = false
+        retireOwnership()
         attached = false
-        if (oldSession != 0L) runCatching { transport.close(oldSession) }
         transport.disconnect()
         mutableState.value = TailscaleStatusUiState()
     }
@@ -138,6 +179,14 @@ internal class TailscaleStatusSession(
         }
         if (status.profileId != profileId || status.identity != identity || status.generation < generation) return
         this.sequence = sequence
+        if (status.stage == "closed" && status.source == "none" && status.node == null &&
+            status.errorCode == "tailscale:runtime-changed") {
+            // Backend retains this lightweight observer across the global admission barrier.
+            observe(refreshing = true)
+            return
+        }
+        observationPending = false
+        if (!mutableState.value.settled) return
         val changedGeneration = generation >= 0 && generation != status.generation
         generation = status.generation
         val terminal = status.stage in setOf("closed", "error", "not-running")
@@ -147,6 +196,7 @@ internal class TailscaleStatusSession(
         }
         mutableState.value = mutableState.value.copy(
             status = if (terminal) status.copy(node = null, source = "none") else status,
+            refreshing = false,
             temporaryRequested = if (terminal || status.source in setOf("temporary", "running")) false else mutableState.value.temporaryRequested,
             pending = if (terminal || changedGeneration) null else mutableState.value.pending,
             samples = if (terminal || changedGeneration) emptyList() else mutableState.value.samples,
@@ -177,7 +227,7 @@ internal class TailscaleStatusSession(
                 if (state.pending != "exit") return
                 this.requestId = 0
                 mutableState.value = state.copy(
-                    pending = null, exitOutcome = result.outcome,
+                    pending = null, exitOutcome = result.outcome, failed = false,
                     status = state.status?.copy(savedExit = result.savedExit),
                 )
             }
@@ -188,7 +238,8 @@ internal class TailscaleStatusSession(
         try {
             action()
         } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(failed = true, temporaryRequested = false, pending = null)
+            mutableState.value = mutableState.value.copy(failed = true, refreshing = false, temporaryRequested = false, pending = null)
+            observationPending = false
             requestId = 0
         }
     }

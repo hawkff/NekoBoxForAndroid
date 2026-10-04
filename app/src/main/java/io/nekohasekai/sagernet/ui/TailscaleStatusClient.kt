@@ -4,13 +4,12 @@ import android.content.Context
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
-import io.nekohasekai.sagernet.database.DataStore
 
 internal interface TailscaleStatusTransport {
     interface Listener {
-        fun connected(stopped: Boolean)
+        fun connected(state: BaseService.State)
         fun disconnected()
-        fun serviceState(stopped: Boolean)
+        fun serviceState(state: BaseService.State)
         fun status(sessionId: Long, sequence: Long, json: String)
         fun result(sessionId: Long, requestId: Long, json: String)
     }
@@ -35,10 +34,10 @@ internal class TailscaleStatusClient(private val context: Context) : TailscaleSt
         connection = client
         client.connect(context, object : SagerConnection.Callback {
             override fun onServiceConnected(service: ISagerNetService) {
-                if (capturedEpoch == epoch) listener.connected(!DataStore.serviceState.ownsTailscaleState)
+                if (capturedEpoch == epoch) listener.connected(BaseService.State.values()[service.state])
             }
             override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-                if (capturedEpoch == epoch) listener.serviceState(!state.ownsTailscaleState)
+                if (capturedEpoch == epoch) listener.serviceState(state)
             }
             override fun onServiceDisconnected() {
                 if (capturedEpoch == epoch) listener.disconnected()
