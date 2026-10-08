@@ -232,7 +232,10 @@ private fun WireGuardSettings.serverPeer(number: Int) = SingBoxOptions.WireGuard
     }
     require(keepalive in 0..65535) { string(R.string.wireguard_invalid_keepalive, name) }
     persistent_keepalive_interval = keepalive.takeIf { it > 0 }
-    if (this@serverPeer.reserved.isNotBlank()) reserved = genReserved(this@serverPeer.reserved)
+    if (this@serverPeer.reserved.isNotBlank()) {
+        reserved = normalizeReserved(this@serverPeer.reserved)
+            ?: throw IllegalArgumentException(string(R.string.wireguard_invalid_peer, name, number))
+    }
 }
 
 private fun WireGuardSettings.extraPeer(section: IniConfig.Section, number: Int) = SingBoxOptions.WireGuardPeer().apply {

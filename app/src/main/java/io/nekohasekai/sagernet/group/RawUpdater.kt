@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.core.net.toUri
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SubscriptionFilterMode
+import io.nekohasekai.sagernet.bg.NetworkAutomation
 import io.nekohasekai.sagernet.bg.SubscriptionUpdater
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.fmt.AbstractBean
@@ -203,6 +204,7 @@ object RawUpdater : GroupUpdater() {
      */
     internal fun referencedProfileIds(): Set<Long> {
         val ids = hashSetOf(DataStore.selectedProxy, DataStore.currentProfile)
+        NetworkAutomation.rules().mapTo(ids) { it.profileId }
         SagerDatabase.rulesDao.allRules().mapTo(ids) { it.outbound }
         for (profile in RoutingProfiles.list()) {
             runCatching { BackupFormatV2.decodeRules(profile.content.getJSONArray("rules")) }.getOrNull()?.mapTo(ids) { it.outbound }

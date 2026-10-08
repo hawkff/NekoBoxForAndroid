@@ -292,9 +292,8 @@ class NetworkAutomationLifecycleTest {
         val second = Robolectric.buildService(NetworkAutomationService::class.java).create()
         second.get().onStartCommand(Intent(), 0, 1)
         assertNotNull(await { manager.networkCallbacks.singleOrNull() })
-        await(300) { null }
         // The live watcher shows its status.
-        assertFalse(shadowOf(notifications).allNotifications.isEmpty())
+        assertNotNull(await { shadowOf(notifications).allNotifications.takeIf { it.isNotEmpty() } })
         second.destroy()
         idle()
         // A listener registered by the first watcher would still be there.
@@ -587,7 +586,8 @@ class NetworkAutomationLifecycleTest {
             // Robolectric would otherwise remove the shared notice along with the older instance itself.
             older.get().stopForeground(Service.STOP_FOREGROUND_DETACH)
             newer.get().onStartCommand(Intent(), 0, 1)
-            await(300) { null }
+            assertNotNull(await { manager.networkCallbacks.singleOrNull() })
+            assertNotNull(await { shadowOf(notifications).allNotifications.takeIf { it.isNotEmpty() } })
 
             older.destroy()
             olderDestroyed = true
@@ -757,6 +757,16 @@ class NetworkAutomationLifecycleTest {
             NetworkAutomation.onNetwork(null)
             idle()
         }
+    }
+
+    @Test
+    fun manualStartupHoldsTheAlreadyReportedNetworkNotTheNextOne() = withServiceUnderTest { service ->
+        NetworkAutomation.onNetwork(mobileNetwork(140))
+        idle()
+        service.onStartCommand(Intent().putExtra(Action.EXTRA_AUTOMATED, false), 0, 1)
+        NetworkAutomation.onNetwork(wifiNetwork(141))
+        assertEquals(1, await { broadcasts(Action.CLOSE, automated = true).takeIf { it > 0 } })
+        assertFalse(DataStore.automationPaused)
     }
 
     @Test

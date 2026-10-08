@@ -112,9 +112,9 @@ object NetworkAutomation {
             private set
 
         /** A manual start: the network it runs on is left alone until that network changes. */
-        fun userStarted() {
-            holdNext = true
-            held = null
+        fun userStarted(network: Long? = null) {
+            holdNext = network == null
+            held = network
             unprotected = false
         }
 
@@ -371,7 +371,7 @@ object NetworkAutomation {
     fun onServiceStart(byUser: Boolean) {
         if (!byUser) return
         val unprotected = tracker.unprotected
-        tracker.userStarted()
+        tracker.userStarted(lastNetwork?.networkHandle)
         if (unprotected) NetworkAutomationService.refresh()
     }
 

@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SubscriptionFilterMode
+import io.nekohasekai.sagernet.bg.NetworkAutomation
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupManager
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -351,6 +352,30 @@ class RawUpdaterTransactionTest {
             RawUpdater.updateFromContent(group, subscription, "socks://192.0.2.4:1080#added")
             assertEquals(listOf("added"), SagerDatabase.proxyDao.getByGroup(group.id).map { it.displayName() })
             assertEquals("", subscription.importWarning)
+        }
+    }
+
+    @Test
+    fun networkRuleTargetsSurviveCompleteSubscriptionUpdates() = runTest {
+        withContext(Dispatchers.IO) {
+            val target = SagerDatabase.proxyDao.getByGroup(group.id).single { it.displayName() == "stale" }
+            DataStore.selectedProxy = 0L
+            DataStore.currentProfile = 0L
+            DataStore.networkAutomation = false
+            NetworkAutomation.saveRules(listOf(NetworkAutomation.Rule(NetworkAutomation.Kind.MOBILE, action = NetworkAutomation.Action.CONNECT, profileId = target.id)))
+
+            RawUpdater.updateFromContent(group, subscription, validContent)
+
+            val kept = SagerDatabase.proxyDao.getById(target.id)!!
+            assertArrayEquals(KryoConverters.serialize(target.requireBean()), KryoConverters.serialize(kept.requireBean()))
+            assertEquals(target.lifetimeTx, kept.lifetimeTx)
+            assertEquals(target.lifetimeRx, kept.lifetimeRx)
+            assertEquals(target.id, NetworkAutomation.rules().single().profileId)
+            assertEquals(app.getString(R.string.subscription_kept_referenced, 1), subscription.importWarning)
+
+            NetworkAutomation.saveRules(emptyList())
+            RawUpdater.updateFromContent(group, subscription, validContent)
+            assertNull(SagerDatabase.proxyDao.getById(target.id))
         }
     }
 

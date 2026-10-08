@@ -296,6 +296,18 @@ class NetworkAutomationTest {
     }
 
     @Test
+    fun aKnownNetworkHoldDoesNotConsumeTheFirstChangedNetwork() {
+        val tracker = Tracker()
+        tracker.userStarted(1)
+        assertEquals(Command.Stop, tracker.report(2, atHome, State.Connecting))
+        assertNull(tracker.report(2, atHome, State.Connected))
+
+        val switching = Tracker()
+        switching.userStarted(1)
+        assertEquals(Command.Switch(7), switching.report(3, Snapshot(Kind.WIFI, "Cafe"), State.Connecting, runningProfile = 5))
+    }
+
+    @Test
     fun aUserStartKeepsTheChosenProfile() {
         val tracker = Tracker()
         tracker.userStarted()

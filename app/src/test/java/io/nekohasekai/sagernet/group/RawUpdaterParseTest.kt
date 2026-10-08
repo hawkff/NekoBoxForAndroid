@@ -573,6 +573,26 @@ class RawUpdaterParseTest {
     }
 
     @Test
+    fun aRefusedCompleteLinkDoesNotDiscardItsValidNeighbors() = runTest {
+        val uuid = "00000000-0000-4000-8000-000000000001"
+        val firsts = listOf("socks5://192.0.2.1:1080", "socks5://192.0.2.1:1080#first${" ".repeat(2048)}server")
+        val last = "socks5://192.0.2.3:1080"
+        for (option in listOf("pcs=pin", "vcn=verify.example", "fm=%7B%7D")) {
+            for (query in listOf("security=tls&$option", "security=tls &$option")) {
+                val refused = "vless://$uuid@192.0.2.2:443?$query"
+                for (separator in listOf(" ", "  ", "\t")) {
+                    for (first in firsts) {
+                        val report = ImportReport()
+                        val beans = parseProxies(listOf(first, refused, last).joinToString(separator), report)
+                        assertEquals(listOf("192.0.2.1", "192.0.2.3"), beans.map { it.serverAddress })
+                        assertEquals(listOf<String?>("vless"), report.failed)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun equallySizedParsesKeepTheReportedFailure() = runTest {
         val uuid = "00000000-0000-4000-8000-000000000001"
         val valid = "vless://$uuid@192.0.2.1:443?x=1"

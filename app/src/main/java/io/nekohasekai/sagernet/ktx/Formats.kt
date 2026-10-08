@@ -105,6 +105,9 @@ internal fun String.linesNoComments(): List<String> = removePrefix("\uFEFF").lin
     .map { it.trim() }.filterNot { it.startsWith('#') || it.isEmpty() }.toList()
 
 private val LINK_SCHEME = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
+
+// Start at the first whitespace character to avoid rescanning long runs.
+private val LINK_SEPARATOR = Regex("(?<!\\s)\\s+(?=[A-Za-z][A-Za-z0-9+.-]*://)")
 private val TELEGRAM_HOSTS = setOf("t.me", "telegram.me")
 private val TELEGRAM_NODES = setOf("proxy", "socks")
 
@@ -145,8 +148,10 @@ suspend fun parseProxies(text: String, report: ImportReport? = null): List<Abstr
         val scheme = substringBefore("://").lowercase()
         return (scheme != "http" && scheme != "https") || runCatching { parseHttp(this) }.isSuccess
     }
-    // Splitting a rejected line could turn its prefix into a profile without its verification options.
-    val links = linksByLine.flatMap { if (it.hasUnsupportedOptions()) listOf(it) else it.split(' ') }
+    // Keep a rejected link's query intact without discarding neighboring links.
+    val links = linksByLine.flatMap { line ->
+        line.split(LINK_SEPARATOR).flatMap { if (it.hasUnsupportedOptions()) listOf(it) else it.split(' ') }
+    }
 
     val entities = ArrayList<AbstractBean>()
     val entitiesByLine = ArrayList<AbstractBean>()

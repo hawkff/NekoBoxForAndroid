@@ -493,6 +493,29 @@ class WireGuardConfigTest {
     }
 
     @Test
+    fun serverPeerReservedBytesAreValidatedWithoutChangingStoredValues() {
+        for (value in listOf("1, 2", "AQI=", "not-base64")) {
+            val profile = add(
+                wg("bad-server-reserved") {
+                    allowedIPs = "10.0.0.0/8"
+                    reserved = value
+                },
+            )
+            assertTrue(failure(profile).contains("peer 1 is invalid"))
+            val stored = ConfigBuilderTestEnv.io { SagerDatabase.proxyDao.getById(profile.id) }!!
+            assertEquals(value, (stored.requireBean() as WireGuardBean).reserved)
+        }
+        val valid = add(
+            wg("server-reserved") {
+                allowedIPs = "10.0.0.0/8"
+                reserved = "1, 2, 3"
+            },
+        )
+        val peers = outbound(save("server-reserved", build(valid)), "server-reserved").objects("peers")
+        assertEquals("AQID", peers.single().getString("reserved"))
+    }
+
+    @Test
     fun oversizedStoredProfilesFailTheBuildInsteadOfBeingCut() {
         val peers = (1..MAX_WIREGUARD_PEERS).joinToString("\n") { "[Peer]\nPublicKey = $secondKey\nAllowedIPs = 10.${it / 256}.${it % 256}.0/24\n" }
         val tooMany = add(wg("too-many-peers") { extraPeers = peers })
