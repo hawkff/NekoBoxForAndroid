@@ -71,12 +71,12 @@ type BoxInstance struct {
 	access sync.Mutex
 
 	*box.Box
-	ctx           context.Context
-	cancel        context.CancelFunc
-	state         int
-	running       bool
-	tailscaleWork sync.WaitGroup
-	closeDone     chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	state     int
+	running   bool
+	coreWork  sync.WaitGroup
+	closeDone chan struct{}
 
 	v2api        *boxapi.SbV2rayServer
 	connections  *connectionTracker
@@ -173,7 +173,7 @@ func (b *BoxInstance) Close() (err error) {
 	if b.cancel != nil {
 		b.cancel()
 	}
-	b.tailscaleWork.Wait()
+	b.coreWork.Wait()
 
 	// clear main instance
 	if mainInstance == b {

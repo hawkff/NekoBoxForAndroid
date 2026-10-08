@@ -19,6 +19,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.tailscale.pruneTailscaleState
+import io.nekohasekai.sagernet.fmt.wireguard.wireGuardServiceStatus
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.plugin.PluginManager
 import io.nekohasekai.sagernet.utils.DefaultNetworkListener
@@ -68,6 +69,7 @@ class BaseService {
 
         @Volatile var proxy: ProxyInstance? = null
         var notification: ServiceNotification? = null
+        var locationSpoofing: LocationSpoofing? = null
 
         val receiver = broadcastReceiverWithSelf { self, ctx, intent ->
             when (intent.action) {
@@ -103,9 +105,13 @@ class BaseService {
                     }
                 }
 
+                NetworkAutomationService.ACTION_RECHECK -> NetworkAutomation.onRecheck(
+                    intent.getBooleanExtra(NetworkAutomationService.EXTRA_REEVALUATE, false),
+                )
+
                 else -> {
-                    // A stop the user asked for pauses network automation until the next start.
-                    if (!intent.getBooleanExtra(Action.EXTRA_AUTOMATED, false)) DataStore.automationPaused = true
+                    // A manual stop pauses network automation until the next manual start.
+                    if (!intent.getBooleanExtra(Action.EXTRA_AUTOMATED, false)) NetworkAutomation.onUserStop(ctx)
                     service.stopRunner()
                 }
             }
@@ -124,6 +130,10 @@ class BaseService {
         // ServiceStopGate for the invariants and threading contract.
         val stopGate = ServiceStopGate()
 
+        // From the end of a restart's teardown until the onStartCommand of its new start: stopped,
+        // but only on the way to running again. Main thread only.
+        var restarting = false
+
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
             if (s == State.Stopping || s == State.Stopped) {
@@ -134,6 +144,9 @@ class BaseService {
             if (s == State.Connected || s == State.Stopped) TailscaleSessionController.resumeAllAdmission()
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
+            // Network automation decides only on a settled service: not during a teardown, nor once
+            // stopped while a restart is on its way. A kill switch block ends a teardown in Connecting.
+            NetworkAutomation.onServiceState(settled = s != State.Stopping && !(s == State.Stopped && restarting))
         }
     }
 
@@ -288,6 +301,14 @@ class BaseService {
         override fun runningTailscaleProfiles(): String = JSONArray(runningProxy().config.tailscaleEndpoints.keys.toList()).toString()
 
         override fun connections(includeClosed: Boolean): String = data?.proxy?.takeIf { it.isInitialized() }?.box?.connections(includeClosed) ?: "[]"
+
+        override fun wireguardStatus(profileId: Long): String {
+            val proxy = data?.takeIf { it.state == State.Connected }?.proxy?.takeIf { it.isInitialized() }
+                ?: return wireGuardServiceStatus(false, emptyList()) { "" }
+            return wireGuardServiceStatus(true, proxy.config.wireguardInstances[profileId].orEmpty()) {
+                Libcore.wireGuardStatus(proxy.box, it)
+            }
+        }
 
         fun stateChanged(s: State, msg: String?) = launch {
             val profileName = profileName
@@ -451,6 +472,7 @@ class BaseService {
         }
 
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
+            data.locationSpoofing?.stop()
             DataStore.baseService = null
             DataStore.vpnService = null
             DataStore.mixedInboundAuthed = false
@@ -515,13 +537,16 @@ class BaseService {
                 }
                 Libcore.serveProtect(false)
 
+                // Re-read pendingRestart: an explicit CLOSE that raced this teardown may have
+                // cleared it. Read before the state change, which tells network automation whether
+                // this stop is only the gap before a restart.
+                data.restarting = data.stopGate.consumeRestart()
                 // change the state
                 data.changeState(State.Stopped, msg)
                 // The core is gone: identities of profiles deleted while it ran can go now.
                 runOnDefaultDispatcher { pruneTailscaleState() }
-                // stop the service if nothing has bound to it. Re-read pendingRestart: an explicit
-                // CLOSE that raced this teardown may have cleared it.
-                if (data.stopGate.consumeRestart()) {
+                // stop the service if nothing has bound to it.
+                if (data.restarting) {
                     startRunner()
                 } else {
                     stopSelf()
@@ -570,7 +595,7 @@ class BaseService {
 
         suspend fun preInit() {
             DefaultNetworkListener.start(this) {
-                NetworkAutomation.onNetwork(it, serviceRunning = true)
+                NetworkAutomation.onNetwork(it)
                 SagerNet.connectivity.getLinkProperties(it)?.also { link ->
                     SagerNet.underlyingNetwork = it
                     DataStore.vpnService?.updateUnderlyingNetwork()
@@ -612,6 +637,11 @@ class BaseService {
             val data = data
             if (data.state != State.Stopped) return Service.START_NOT_STICKY
             this as Context
+            // This start ends the gap of a restart, if there was one.
+            data.restarting = false
+            // Only SagerNet.startService marks a manual start: a start without the mark, such as a
+            // restart, is not manual.
+            NetworkAutomation.onServiceStart(byUser = intent?.getBooleanExtra(Action.EXTRA_AUTOMATED, true) == false)
 
             // The IPC-carried profile id (when >= 0) is authoritative for a cold start triggered
             // right after a UI profile selection, so :bg does not depend on the UI's async
@@ -678,6 +708,7 @@ class BaseService {
                 addAction(Action.CLOSE)
                 addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
                 addAction(Action.RESET_UPSTREAM_CONNECTIONS)
+                addAction(NetworkAutomationService.ACTION_RECHECK)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(
@@ -708,7 +739,7 @@ class BaseService {
             }
 
             data.proxy = proxy
-            BootReceiver.enabled = DataStore.persistAcrossReboot
+            BootReceiver.enabled = BootReceiver.wanted
 
             return runOnMainDispatcher {
                 try {
@@ -735,6 +766,9 @@ class BaseService {
                     data.stopGate.holdTun = false
                     data.retryDelayMs = KILL_SWITCH_RETRY_INITIAL_MS
                     data.changeState(State.Connected)
+                    // Even with spoofing off, a simulated location a killed process left behind brings up
+                    // the notice that asks to remove it in the app.
+                    (data.locationSpoofing ?: LocationSpoofing(this@Interface).also { data.locationSpoofing = it }).start(proxy)
 
                     lateInit()
                 } catch (_: CancellationException) { // if the job was cancelled, it is canceller's responsibility to call stopRunner

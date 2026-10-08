@@ -39,6 +39,7 @@ const (
 )
 
 type HTTPClient interface {
+	SetTimeoutMs(timeoutMs int32) error
 	RestrictedTLS()
 	ModernTLS()
 	TrySocks5(port int32, username string, password string)
@@ -89,6 +90,16 @@ func NewHttpClient() HTTPClient {
 	// Bound the full request (including body read) so callers cannot hang forever.
 	client.h1h2Client.Timeout = defaultHTTPRequestTimeout
 	return client
+}
+
+// SetTimeoutMs bounds each request, body read included, on every path: direct, SOCKS and the
+// direct HTTPS/HTTP3 race.
+func (c *httpClient) SetTimeoutMs(timeoutMs int32) error {
+	if timeoutMs < 1 || timeoutMs > 600000 {
+		return errors.New("HTTP timeout must be between 1 and 600000 ms")
+	}
+	c.h1h2Client.Timeout = time.Duration(timeoutMs) * time.Millisecond
+	return nil
 }
 
 func (c *httpClient) ModernTLS() {
@@ -203,21 +214,49 @@ func (r *httpRequest) SetHeader(key string, value string) {
 	r.customHeaders = append(r.customHeaders, key)
 }
 
-// checkRedirect keeps Go's ten-hop limit and drops the headers set through SetHeader when a
-// redirect leaves the original origin or downgrades from HTTPS, so a device identifier meant for
-// the subscription server reaches neither third parties nor the network in the clear.
+// errRedirectDowngrade stops a redirect chain that would leave HTTPS, so a request that started
+// encrypted, such as a subscription link or its backup, never continues in the clear.
+var errRedirectDowngrade = errors.New("redirect from HTTPS to plain HTTP refused")
+
+// credentialHeaders are dropped, with the headers set through SetHeader, when a redirect leaves
+// the original origin. Go's own policy keeps some of them for subdomains and other ports.
+var credentialHeaders = []string{"Authorization", "Proxy-Authorization", "Cookie", "Cookie2"}
+
+// checkRedirect keeps Go's ten-hop limit and refuses any hop to plain HTTP once the chain used
+// HTTPS. A hop to another scheme, host or port than the first request loses the credentials and
+// the headers set through SetHeader, so neither the subscription credentials nor a device
+// identifier reach a third party. The Referer Go adds is the previous hop's URL, whose path or
+// query may hold a token, so it goes too unless the hop stays on the origin of both the first
+// request and the previous one.
 func (r *httpRequest) checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	first := via[0].URL
-	if !strings.EqualFold(req.URL.Hostname(), first.Hostname()) || effectivePort(req.URL) != effectivePort(first) ||
-		(first.Scheme == "https" && req.URL.Scheme != "https") {
+	if req.URL.Scheme != "https" {
+		for _, previous := range via {
+			if previous.URL.Scheme == "https" {
+				return errRedirectDowngrade
+			}
+		}
+	}
+	sameAsFirst := sameOrigin(req.URL, via[0].URL)
+	if !sameAsFirst {
 		for _, key := range r.customHeaders {
 			req.Header.Del(key)
 		}
+		for _, key := range credentialHeaders {
+			req.Header.Del(key)
+		}
+	}
+	if !sameAsFirst || !sameOrigin(req.URL, via[len(via)-1].URL) {
+		req.Header.Del("Referer")
 	}
 	return nil
+}
+
+// sameOrigin compares scheme, host name and effective port.
+func sameOrigin(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && strings.EqualFold(a.Hostname(), b.Hostname()) && effectivePort(a) == effectivePort(b)
 }
 
 // effectivePort is the explicit port or the scheme default, so https://h and https://h:443 match.
@@ -411,7 +450,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			request: func(ctx context.Context) (response *http.Response, err error) {
 				request := r.request.Clone(ctx)
 				echClient := &http.Client{
-					Timeout:       defaultHTTPRequestTimeout,
+					Timeout:       r.h1h2Client.Timeout,
 					CheckRedirect: r.checkRedirect,
 					Transport: &http.Transport{
 						DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -438,7 +477,7 @@ func (r *httpRequest) doH3Direct() (HTTPResponse, error) {
 			request: func(ctx context.Context) (response *http.Response, err error) {
 				request := r.request.Clone(ctx)
 				h3Client := &http.Client{
-					Timeout:       defaultHTTPRequestTimeout,
+					Timeout:       r.h1h2Client.Timeout,
 					CheckRedirect: r.checkRedirect,
 					Transport: &http3.Transport{
 						TLSClientConfig: r.tls.Clone(),

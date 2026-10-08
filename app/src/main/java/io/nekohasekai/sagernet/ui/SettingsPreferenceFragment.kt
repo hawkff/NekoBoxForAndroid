@@ -1,7 +1,10 @@
 package io.nekohasekai.sagernet.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -18,12 +21,17 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.LocationSpoofing
+import io.nekohasekai.sagernet.bg.LocationTurnOffReceiver
+import io.nekohasekai.sagernet.bg.NetworkAutomation
+import io.nekohasekai.sagernet.bg.parseMockCoordinates
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.preference.EditTextPreferenceModifiers
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.utils.AppLocale
 import io.nekohasekai.sagernet.utils.Theme
 import moe.matsuri.nb4a.ui.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 
 /**
@@ -85,6 +93,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         setupAppearance()
         setupConnection()
         setupProtection()
+        setupLocationSpoofing()
         setupRoute()
         setupDns()
         setupInbound()
@@ -161,10 +170,16 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         findPreference<Preference>(Key.METERED_NETWORK)?.let {
             if (Build.VERSION.SDK_INT < 28) it.remove()
         }
+        findPreference<SwitchPreference>(Key.NETWORK_AUTOMATION)?.setOnPreferenceChangeListener { preference, newValue ->
+            NetworkAutomation.onSwitched(preference.context.applicationContext, newValue as Boolean)
+            refreshAutomation()
+            true
+        }
         findPreference<Preference>(Key.NETWORK_AUTOMATION_RULES)?.setOnPreferenceClickListener {
             startActivity(Intent(activity, NetworkAutomationActivity::class.java))
             true
         }
+        refreshAutomation()
         for (key in listOf(
             Key.TUN_IMPLEMENTATION,
             Key.MTU,
@@ -193,6 +208,106 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         refreshProtection()
     }
 
+    // ACTION_APP_NOTIFICATION_SETTINGS is API 26; on older releases openSystemSettings falls back.
+    @SuppressLint("InlinedApi")
+    private fun setupLocationSpoofing() {
+        findPreference<SwitchPreference>(Key.GPS_SPOOFING)?.apply {
+            setOnPreferenceChangeListener { _, newValue ->
+                val context = requireContext()
+                if (newValue == false) {
+                    // Stops spoofing at once; the VPN stays connected.
+                    context.sendBroadcast(Intent(context, LocationTurnOffReceiver::class.java))
+                    return@setOnPreferenceChangeListener true
+                }
+                val dialog = MaterialAlertDialogBuilder(context)
+                    .setTitle(R.string.gps_spoofing)
+                    .setNegativeButton(android.R.string.cancel, null)
+                when {
+                    !LocationSpoofing.supported(context) -> dialog.setMessage(R.string.gps_spoofing_unsupported)
+                        .setNegativeButton(android.R.string.ok, null)
+
+                    // Nothing is added while an earlier simulated location may remain, so the switch
+                    // would show spoofing that cannot run.
+                    LocationSpoofing.mayRemain(context) -> dialog.setMessage(R.string.gps_spoofing_remove_first)
+                        .setPositiveButton(R.string.gps_spoofing_remove_action) { _, _ -> askToRemoveSimulatedLocation() }
+
+                    !LocationSpoofing.mockLocationAllowed(context) -> dialog.setMessage(R.string.gps_spoofing_setup)
+                        .setPositiveButton(R.string.settings) { _, _ -> openSystemSettings(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) }
+
+                    !LocationSpoofing.notificationsAllowed(context) -> dialog.setMessage(R.string.gps_spoofing_notifications)
+                        .setPositiveButton(R.string.settings) { _, _ ->
+                            openSystemSettings(Settings.ACTION_APP_NOTIFICATION_SETTINGS) {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            }
+                        }
+
+                    else -> dialog.setMessage(getString(R.string.gps_spoofing_warning, DataStore.gpsLookupUrl))
+                        .setPositiveButton(R.string.enable_anyway) { _, _ ->
+                            isChecked = true
+                            needReload()
+                        }
+                }
+                dialog.show()
+                false
+            }
+        }
+        findPreference<Preference>(Key.GPS_SPOOFING_REMOVE)?.setOnPreferenceClickListener {
+            askToRemoveSimulatedLocation()
+            true
+        }
+        findPreference<EditTextPreference>(Key.GPS_COORDINATES)?.setOnPreferenceChangeListener { _, newValue ->
+            if (runCatching { parseMockCoordinates(newValue as String) }.isFailure) {
+                MaterialAlertDialogBuilder(requireContext()).setMessage(R.string.gps_spoofing_invalid_coordinates)
+                    .setPositiveButton(android.R.string.ok, null).show()
+                false
+            } else {
+                needReload()
+                true
+            }
+        }
+        findPreference<EditTextPreference>(Key.GPS_LOOKUP_URL)?.setOnPreferenceChangeListener { _, newValue ->
+            val url = (newValue as String).toHttpUrlOrNull()
+            if (url == null || !url.isHttps || url.username.isNotEmpty() || url.password.isNotEmpty() || url.fragment != null) {
+                MaterialAlertDialogBuilder(requireContext()).setMessage(R.string.gps_spoofing_invalid_url)
+                    .setPositiveButton(android.R.string.ok, null).show()
+                false
+            } else {
+                needReload()
+                true
+            }
+        }
+    }
+
+    private fun askToRemoveSimulatedLocation() {
+        val context = requireContext()
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setTitle(R.string.gps_spoofing_remove)
+            .setNegativeButton(android.R.string.cancel, null)
+        // Only the mock location app can remove a test provider.
+        if (LocationSpoofing.mockLocationAllowed(context)) {
+            dialog.setMessage(getString(R.string.gps_spoofing_remove_confirm, LocationSpoofing.standardProviders.joinToString(", ")))
+                .setPositiveButton(R.string.gps_spoofing_remove_action) { _, _ -> removeSimulatedLocation() }
+        } else {
+            dialog.setMessage(R.string.gps_spoofing_remove_setup)
+                .setPositiveButton(R.string.settings) { _, _ -> openSystemSettings(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) }
+        }
+        dialog.show()
+    }
+
+    // The background process removes it and turns spoofing off; it reports whether nothing remains.
+    private fun removeSimulatedLocation() {
+        val context = requireContext()
+        findPreference<SwitchPreference>(Key.GPS_SPOOFING)?.isChecked = false
+        val outcome = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!isAdded) return
+                snackbar(if (resultCode == Activity.RESULT_OK) R.string.gps_spoofing_removed else R.string.gps_spoofing_remove_failed).show()
+                refreshProtection()
+            }
+        }
+        context.sendOrderedBroadcast(LocationSpoofing.confirmedRemoval(context), null, outcome, null, Activity.RESULT_CANCELED, null, null)
+    }
+
     // Summaries reflect system state that changes outside the app, so they are recomputed on
     // every resume (after the user returns from the system settings).
     private fun refreshProtection() {
@@ -201,6 +316,11 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         val vpnMode = DataStore.serviceMode == Key.MODE_VPN
         findPreference<Preference>(Key.KILL_SWITCH)?.isEnabled = vpnMode
         findPreference<Preference>(Key.WEBRTC_LEAK_PROTECTION)?.isEnabled = vpnMode
+        findPreference<SwitchPreference>(Key.GPS_SPOOFING)?.apply {
+            isEnabled = vpnMode
+            isChecked = DataStore.gpsSpoofing
+        }
+        findPreference<Preference>(Key.GPS_SPOOFING_REMOVE)?.isVisible = LocationSpoofing.mayRemain(requireContext())
         when {
             DataStore.serviceMode != Key.MODE_VPN -> {
                 alwaysOn.setSummary(R.string.protection_proxy_mode)
@@ -234,9 +354,14 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         )
     }
 
-    private fun openSystemSettings(action: String) {
+    // A refusal or a pause stays visible here until automation works again.
+    private fun refreshAutomation() {
+        findPreference<Preference>(Key.NETWORK_AUTOMATION)?.setSummary(NetworkAutomation.status())
+    }
+
+    private fun openSystemSettings(action: String, extras: Intent.() -> Unit = {}) {
         try {
-            startActivity(Intent(action))
+            startActivity(Intent(action).apply(extras))
         } catch (_: ActivityNotFoundException) {
             startActivity(Intent(Settings.ACTION_SETTINGS))
         }
@@ -446,6 +571,7 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
         isProxyApps?.isChecked = DataStore.proxyApps
         globalCustomConfig?.notifyChanged()
         refreshProtection()
+        refreshAutomation()
     }
 
     private fun clearAppCache() {

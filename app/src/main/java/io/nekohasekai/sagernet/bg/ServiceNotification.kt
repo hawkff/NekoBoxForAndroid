@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
 import android.os.Build
 import android.text.format.Formatter
@@ -227,7 +228,8 @@ class ServiceNotification(
                 (service as Service).startForeground(
                     notificationId,
                     it.build(),
-                    FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED,
+                    // systemExempted needs the VPN permission, which only the VPN service has to hold.
+                    if (service is VpnService) FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED else FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
                 )
             } else {
                 (service as Service).startForeground(notificationId, it.build())

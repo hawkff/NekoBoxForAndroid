@@ -15,6 +15,10 @@ object Key {
     const val PROTECTION_BATTERY = "protectionBattery"
     const val KILL_SWITCH = "killSwitch"
     const val WEBRTC_LEAK_PROTECTION = "webrtcLeakProtection"
+    const val GPS_SPOOFING = "gpsSpoofing"
+    const val GPS_COORDINATES = "gpsCoordinates"
+    const val GPS_LOOKUP_URL = "gpsLookupUrl"
+    const val GPS_SPOOFING_REMOVE = "gpsSpoofingRemove"
     const val PLUGIN_SIGNER_APPROVALS = "pluginSignerApprovals"
 
     const val APP_THEME = "appTheme"
@@ -86,6 +90,7 @@ object Key {
     const val NETWORK_AUTOMATION = "networkAutomation"
     const val NETWORK_AUTOMATION_RULES = "networkAutomationRules"
     const val NETWORK_AUTOMATION_PAUSED = "networkAutomationPaused"
+    const val NETWORK_AUTOMATION_BLOCKED = "networkAutomationBlocked"
     const val CONNECTION_DIAGNOSTICS = "connectionDiagnostics"
     const val RULES_UPDATE_INTERVAL = "rulesUpdateInterval"
 
@@ -188,6 +193,11 @@ object Key {
 
     const val GROUP_SUBSCRIPTION = "groupSubscription"
     const val SUBSCRIPTION_LINK = "subscriptionLink"
+    const val SUBSCRIPTION_FORMAT = "subscriptionFormat"
+    const val SUBSCRIPTION_IMPORT_WARNING = "subscriptionImportWarning"
+    const val SUBSCRIPTION_BACKUP_LINKS = "subscriptionBackupLinks"
+    const val SUBSCRIPTION_OFFERED_LINK = "subscriptionOfferedLink"
+    const val SUBSCRIPTION_OFFERED_BACKUP_LINK = "subscriptionOfferedBackupLink"
     const val SUBSCRIPTION_FORCE_RESOLVE = "subscriptionForceResolve"
     const val SUBSCRIPTION_DEDUPLICATION = "subscriptionDeduplication"
     const val SUBSCRIPTION_UPDATE = "subscriptionUpdate"
@@ -259,7 +269,8 @@ object Action {
     // (see RoomPreferenceDataStore cached mode). -1 / absent => read selectedProxy from the store.
     const val EXTRA_PROFILE_ID = "io.nekohasekai.sagernet.EXTRA_PROFILE_ID"
 
-    // Boolean extra on CLOSE: the stop came from network automation, not from the user.
+    // Boolean extra on CLOSE and on service starts: network automation or a boot start sent it,
+    // not the user.
     const val EXTRA_AUTOMATED = "io.nekohasekai.sagernet.EXTRA_AUTOMATED"
 
     const val RESET_UPSTREAM_CONNECTIONS = "moe.nb4a.RESET_UPSTREAM_CONNECTIONS"

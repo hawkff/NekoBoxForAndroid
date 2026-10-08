@@ -36,7 +36,10 @@ import io.nekohasekai.sagernet.fmt.tuic.buildSingBoxOutboundTuicBean
 import io.nekohasekai.sagernet.fmt.v2ray.StandardV2RayBean
 import io.nekohasekai.sagernet.fmt.v2ray.buildSingBoxOutboundStandardV2RayBean
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardBean
+import io.nekohasekai.sagernet.fmt.wireguard.WireGuardDnsMode
+import io.nekohasekai.sagernet.fmt.wireguard.WireGuardProfileDns
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
+import io.nekohasekai.sagernet.fmt.wireguard.wireGuardProfileDns
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.ktx.readableMessage
@@ -65,7 +68,7 @@ private fun sanitizeDnsEntry(value: String): String = value.filterNot { it.isISO
 // zeros and malformed IPv6 forms) and one bad value would fail the whole config
 // load. Embedded-IPv4 IPv6 forms (::ffff:1.2.3.4) are not supported; write the
 // plain IPv4 address instead. Returns the address, or null when not usable.
-private fun parseHostsAddress(token: String): String? {
+internal fun parseHostsAddress(token: String): String? {
     val value = token.unwrapIPV6Host()
     if (!value.isIpAddress()) return null
     if (value.contains(':')) {
@@ -85,7 +88,7 @@ private fun parseHostsAddress(token: String): String? {
     return value
 }
 
-private fun parseHostsDomain(token: String): String? {
+internal fun parseHostsDomain(token: String): String? {
     var domain = sanitizeDnsEntry(token).removeSuffix(".")
     if (domain.isEmpty()) return null
     // Internationalized domains: convert to punycode, which is what arrives in
@@ -192,10 +195,16 @@ class ConfigBuildResult(
     val tailscaleEndpoints: Map<Long, TailscaleEndpoint> = emptyMap(),
     // Profile id -> the Tailscale profiles among its hops (group front/landing included).
     val profileTailscaleNodes: Map<Long, Set<Long>> = emptyMap(),
+    // WireGuard/AmneziaWG profile id -> its outbounds. A profile that is a hop of several chains
+    // runs once per chain, each instance with its own handshakes.
+    val wireguardInstances: Map<Long, List<WireGuardInstance>> = emptyMap(),
 ) {
     data class IndexEntity(var chain: LinkedHashMap<Int, ProxyEntity>)
 
     data class TailscaleEndpoint(val tag: String, val waitForExitNode: Boolean)
+
+    // ownerProfileId: the profile whose chain built this outbound.
+    data class WireGuardInstance(val tag: String, val ownerProfileId: Long)
 }
 
 // Extracted from buildConfig as pure, capture-free helpers (Plan 028 seams).
@@ -313,6 +322,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
     val tailscaleProfiles = hashSetOf<Long>()
     val tailscaleEndpoints = HashMap<Long, ConfigBuildResult.TailscaleEndpoint>()
     val profileTailscaleNodes = HashMap<Long, Set<Long>>()
+    val wireguardInstances = LinkedHashMap<Long, MutableList<ConfigBuildResult.WireGuardInstance>>()
+    // Profile DNS of each WireGuard/AmneziaWG outbound, and whether a selected chain built it.
+    val profileDnsList = mutableListOf<Pair<Boolean, WireGuardProfileDns>>()
     if (buildSelector) {
         require(group.landingProxy?.let(lookupCache::proxy)?.requireBean() !is TailscaleBean) {
             SagerNet.application.getString(R.string.tailscale_selector_landing)
@@ -567,9 +579,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             }
         }.also { route = it }
 
-        // returns outbound tag
+        // returns outbound tag; selected: the main profile or a selector member, not a rule outbound
         @Suppress("UNCHECKED_CAST")
-        fun buildChain(chainId: Long, entity: ProxyEntity): String {
+        fun buildChain(chainId: Long, entity: ProxyEntity, selected: Boolean): String {
             val profileList = entity.resolveChain()
             // Validate before touching the shared lists: a chain skipped halfway would leave
             // outbounds with a detour to a tag that is never created. The first dialed hop is
@@ -596,6 +608,8 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             val externalChainMap = LinkedHashMap<Int, ProxyEntity>()
             externalIndexMap.add(IndexEntity(externalChainMap))
             val chainOutbounds = ArrayList<SingBoxOption>()
+            val chainWireGuard = mutableListOf<Pair<Long, ConfigBuildResult.WireGuardInstance>>()
+            val chainProfileDns = mutableListOf<WireGuardProfileDns>()
 
             // chainTagOut: v2ray outbound tag for this chain
             var chainTagOut = ""
@@ -821,6 +835,10 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
                     _hack_custom_config = bean.customOutboundJson
                 }
+                if (bean is WireGuardBean || bean is AmneziaWGBean) {
+                    chainWireGuard += proxyEntity.id to ConfigBuildResult.WireGuardInstance(tagOut, entity.id)
+                    if (!forTest) bean.wireGuardProfileDns(proxyEntity.id, tagOut)?.let { chainProfileDns += it }
+                }
 
                 // External proxy need a dokodemo-door inbound to forward the traffic
                 // For external proxy software, their traffic must goes to v2ray-core to use protected fd.
@@ -904,6 +922,8 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             // Reserve only for a chain that built completely; a hop that fails later releases them.
             tailscaleProfiles += chainTailscaleProfiles
             tailscaleEndpoints += chainTailscaleEndpoints
+            chainWireGuard.forEach { (profileId, instance) -> wireguardInstances.getOrPut(profileId) { mutableListOf() } += instance }
+            chainProfileDns.forEach { profileDnsList += selected to it }
             profileList.filter { it.requireBean() is TailscaleBean }.map { it.id }.toSet()
                 .takeIf { it.isNotEmpty() }?.let { profileTailscaleNodes[entity.id] = it }
             return chainTagOut
@@ -911,13 +931,13 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
 
         // A broken chain fails the build when it is the selected profile. As a group member or a
         // rule outbound it is left out with a warning, so the service still starts.
-        fun buildChainOrSkip(chainId: Long, entity: ProxyEntity): String? {
+        fun buildChainOrSkip(chainId: Long, entity: ProxyEntity, selected: Boolean): String? {
             // buildChain appends to these as it goes; a hop that fails halfway must not leave an
             // outbound whose detour points at a tag that is never created, or a global tag for it.
             val appended = listOf(outbounds, endpointList, inbounds, routeRules, externalIndexMap).map { it to it.size }
             val globalBefore = HashMap(globalOutbounds)
             return try {
-                buildChain(chainId, entity)
+                buildChain(chainId, entity, selected)
             } catch (e: IllegalArgumentException) {
                 if (entity.id == proxy.id) throw e
                 for ((list, size) in appended) list.subList(size, list.size).clear()
@@ -932,7 +952,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         if (buildSelector) {
             val list = SagerDatabase.proxyDao.getByGroup(group.id).filter { it.canBuild() }
             list.forEach { member ->
-                buildChainOrSkip(member.id, member)?.let { tagMap[member.id] = it }
+                buildChainOrSkip(member.id, member, true)?.let { tagMap[member.id] = it }
             }
             val memberTags = tagMap.values.toList()
             outbounds.add(
@@ -957,12 +977,38 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 },
             )
         } else {
-            val mainTag = buildChain(0, proxy)
+            val mainTag = buildChain(0, proxy, true)
             tagMap[proxy.id] = mainTag
         }
         // build outbounds from route item
         extraProxies.forEach { (key, p) ->
-            buildChainOrSkip(key, p)?.let { tagMap[key] = it }
+            buildChainOrSkip(key, p, false)?.let { tagMap[key] = it }
+        }
+
+        // Profile DNS for all queries follows the selected profile, which a selector can switch
+        // without a rebuild. Listed domains apply wherever their profile carries traffic: Global
+        // mode ignores the routing rules, so a profile built only for a rule stays out. Ambiguity
+        // fails the build instead of depending on build order.
+        val rulesApply = forTest || !DataStore.globalMode
+        val activeProfileDns = profileDnsList.filter { (selected, _) -> selected || rulesApply }
+        val selectedProfileDns = activeProfileDns.filter { (selected, dns) -> selected && dns.mode == WireGuardDnsMode.ALL }
+            .map { it.second }.distinctBy { it.profileId }
+        if (buildSelector) {
+            selectedProfileDns.firstOrNull()?.let {
+                throw IllegalArgumentException(SagerNet.application.getString(R.string.wireguard_dns_selector, it.name))
+            }
+        }
+        require(selectedProfileDns.size <= 1) {
+            SagerNet.application.getString(R.string.wireguard_dns_chain_conflict, selectedProfileDns[0].name, selectedProfileDns[1].name)
+        }
+        val domainProfileDns = activeProfileDns.map { it.second }.filter { it.mode == WireGuardDnsMode.DOMAINS }.distinctBy { it.profileId }
+        domainProfileDns.forEachIndexed { index, first ->
+            for (second in domainProfileDns.drop(index + 1)) {
+                val shared = first.domains.firstOrNull { a -> second.domains.any { b -> a == b || a.endsWith(".$b") || b.endsWith(".$a") } }
+                require(shared == null) {
+                    SagerNet.application.getString(R.string.wireguard_dns_domain_conflict, first.name, second.name, shared)
+                }
+            }
         }
 
         val mainProxyTag = (if (buildSelector) TAG_PROXY else tagMap[proxy.id]) ?: TAG_PROXY
@@ -1252,13 +1298,18 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         )
         // Typed DNS servers dial directly unless an explicit proxy detour is set.
         if (!forTest) {
+            val profileDns = selectedProfileDns.singleOrNull()
             dnsServers.add(
-                dnsServer(
-                    remoteDns.firstOrNull() ?: throw Exception("No remote DNS, check your settings!"),
-                    "dns-remote",
-                    "dns-direct",
-                    mainProxyTag,
-                ),
+                if (profileDns != null) {
+                    dnsServer(profileDns.server, "dns-remote", "dns-direct", profileDns.tag)
+                } else {
+                    dnsServer(
+                        remoteDns.firstOrNull() ?: throw Exception("No remote DNS, check your settings!"),
+                        "dns-remote",
+                        "dns-direct",
+                        mainProxyTag,
+                    )
+                },
             )
         }
 
@@ -1269,6 +1320,18 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             userDNSRuleList.forEach {
                 if (!it.checkEmpty()) dnsRules.add(it)
             }
+        }
+
+        // Domains listed for a WireGuard profile's DNS, behind the user's own DNS rules.
+        domainProfileDns.forEach { profileDns ->
+            val serverTag = "dns-wg-${profileDns.profileId}"
+            dnsServers.add(dnsServer(profileDns.server, serverTag, "dns-direct", profileDns.tag))
+            dnsRules.add(
+                DNSRule_DefaultOptions().apply {
+                    domain_suffix = profileDns.domains
+                    server = serverTag
+                },
+            )
         }
 
         // MagicDNS is also needed by standalone probes. Keep public-name fallback on
@@ -1430,7 +1493,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             val strategy = when {
                 rule.server == "dns-fake" -> "ipv4_only"
                 rule.server == "dns-direct" || rule.server?.startsWith("dns-sub-") == true -> directStrategy
-                rule.server == "dns-remote" -> remoteStrategy
+                rule.server == "dns-remote" || rule.server?.startsWith("dns-wg-") == true -> remoteStrategy
                 else -> null
             }
             dnsFamilyRules(rule, strategy)
@@ -1452,6 +1515,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             buildSelector && group.autoSelect,
             tailscaleEndpoints,
             profileTailscaleNodes,
+            wireguardInstances,
         )
     }
 }

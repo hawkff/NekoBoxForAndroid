@@ -160,6 +160,35 @@
             app:selectable="false"
             app:summary="@string/protection_notes"
             app:title="@string/protection_notes_title" />
+        <PreferenceCategory app:title="@string/gps_spoofing">
+            <SwitchPreference
+                app:defaultValue="false"
+                app:key="gpsSpoofing"
+                app:summary="@string/gps_spoofing_summary"
+                app:title="@string/gps_spoofing_switch" />
+            <Preference
+                app:icon="@drawable/ic_baseline_info_24"
+                app:key="gpsSpoofingNotice"
+                app:selectable="false"
+                app:summary="@string/gps_spoofing_navigation_notice"
+                app:title="@string/gps_spoofing_navigation_title" />
+            <Preference
+                app:isPreferenceVisible="false"
+                app:key="gpsSpoofingRemove"
+                app:summary="@string/gps_spoofing_remove_summary"
+                app:title="@string/gps_spoofing_remove" />
+            <EditTextPreference
+                app:dialogMessage="@string/gps_spoofing_coordinates_help"
+                app:key="gpsCoordinates"
+                app:title="@string/gps_spoofing_coordinates"
+                app:useSimpleSummaryProvider="true" />
+            <EditTextPreference
+                app:defaultValue="https://ipapi.co/json/"
+                app:dialogMessage="@string/gps_spoofing_lookup_help"
+                app:key="gpsLookupUrl"
+                app:title="@string/gps_spoofing_lookup"
+                app:useSimpleSummaryProvider="true" />
+        </PreferenceCategory>
     </PreferenceScreen>
 
     <PreferenceScreen

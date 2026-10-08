@@ -1,19 +1,26 @@
 package io.nekohasekai.sagernet.fmt.amneziawg
 
+import io.nekohasekai.sagernet.fmt.wireguard.buildPeers
+import io.nekohasekai.sagernet.fmt.wireguard.checkWireGuardLimits
 import io.nekohasekai.sagernet.fmt.wireguard.genReserved
+import io.nekohasekai.sagernet.fmt.wireguard.wireGuardSettings
 import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.utils.listByLineOrComma
 
 fun buildSingBoxOutboundAmneziaWGBean(bean: AmneziaWGBean): SingBoxOptions.Outbound_AmneziaWGOptions = SingBoxOptions.Outbound_AmneziaWGOptions().apply {
+    bean.checkWireGuardLimits()
     type = "amneziawg"
-    server = bean.serverAddress
-    server_port = bean.serverPort
     local_address = bean.localAddress!!.listByLineOrComma()
     private_key = bean.privateKey
-    peer_public_key = bean.peerPublicKey
-    pre_shared_key = bean.peerPreSharedKey
     mtu = bean.mtu
-    if (bean.reserved!!.isNotBlank()) reserved = genReserved(bean.reserved!!)
+    peers = bean.wireGuardSettings()!!.buildPeers()
+    if (peers == null) {
+        server = bean.serverAddress
+        server_port = bean.serverPort
+        peer_public_key = bean.peerPublicKey
+        pre_shared_key = bean.peerPreSharedKey
+        if (bean.reserved!!.isNotBlank()) reserved = genReserved(bean.reserved!!)
+    }
 
     // AmneziaWG obfuscation parameters; zero/blank values are omitted so the
     // tunnel behaves like plain WireGuard when unset.

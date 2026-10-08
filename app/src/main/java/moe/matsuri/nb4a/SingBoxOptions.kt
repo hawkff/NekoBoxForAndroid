@@ -585,6 +585,8 @@ class SingBoxOptions {
 
         @JvmField var allowed_ips: List<String>? = null
 
+        @JvmField var persistent_keepalive_interval: Int? = null
+
         @JvmField var reserved: String? = null
     }
 

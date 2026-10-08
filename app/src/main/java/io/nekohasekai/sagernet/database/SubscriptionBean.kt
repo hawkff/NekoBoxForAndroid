@@ -88,8 +88,42 @@ class SubscriptionBean : Serializable() {
     @JvmField
     var sendDeviceId: Boolean? = null
 
+    // SubscriptionFormat value: which response format to request, or Auto.
+    @JvmField
+    var outputFormat: Int? = null
+
+    // What the last accepted update could not import, empty when it took everything.
+    @JvmField
+    var importWarning: String? = null
+
+    // User-approved URLs tried in order when the main link fails, one per line.
+    @JvmField
+    var backupLinks: String? = null
+
+    // Provider-proposed replacement and backup URLs (new-url / new-domain, fallback-url). Never
+    // fetched until the user approves them; cleared when the next update omits them.
+    @JvmField
+    var offeredLink: String? = null
+
+    @JvmField
+    var offeredBackupLink: String? = null
+
+    // The SubscriptionFormat request the stored profiles came from, set by each accepted update:
+    // 0 for the default request (and before any update), SubscriptionFormat.UNKNOWN for a custom
+    // User-Agent or a file. Auto requests it first; another request needs the user's agreement
+    // before it replaces stored profiles.
+    @JvmField
+    var negotiatedFormat: Int? = null
+
+    // Version 6 fields are written only when one holds a value, so subscriptions that do not use
+    // them keep their version 5 bytes.
+    private fun hasVersion6Fields() = (outputFormat ?: 0) != 0 || !importWarning.isNullOrEmpty() ||
+        !backupLinks.isNullOrEmpty() || !offeredLink.isNullOrEmpty() || !offeredBackupLink.isNullOrEmpty() ||
+        (negotiatedFormat ?: 0) != 0
+
     override fun serializeToBuffer(output: ByteBufferOutput) {
-        output.writeInt(5)
+        val version6 = hasVersion6Fields()
+        output.writeInt(if (version6) 6 else 5)
         output.writeInt(type!!)
         output.writeString(link)
         output.writeBoolean(forceResolve!!)
@@ -109,6 +143,14 @@ class SubscriptionBean : Serializable() {
         output.writeInt(expiryNotifiedAt!!)
         output.writeInt(providerUpdateInterval!!)
         output.writeBoolean(sendDeviceId!!)
+        if (version6) {
+            output.writeInt(outputFormat ?: 0)
+            output.writeString(importWarning)
+            output.writeString(backupLinks)
+            output.writeString(offeredLink)
+            output.writeString(offeredBackupLink)
+            output.writeInt(negotiatedFormat ?: 0)
+        }
     }
 
     fun serializeForShare(output: ByteBufferOutput) {
@@ -150,6 +192,14 @@ class SubscriptionBean : Serializable() {
         if (version >= 5) {
             sendDeviceId = input.readBoolean()
         }
+        if (version >= 6) {
+            outputFormat = input.readInt()
+            importWarning = input.readString()
+            backupLinks = input.readString()
+            offeredLink = input.readString()
+            offeredBackupLink = input.readString()
+            negotiatedFormat = input.readInt()
+        }
     }
 
     fun deserializeFromShare(input: ByteBufferInput) {
@@ -187,6 +237,12 @@ class SubscriptionBean : Serializable() {
         expiryNotifiedAt = expiryNotifiedAt ?: 0
         providerUpdateInterval = providerUpdateInterval ?: 0
         sendDeviceId = sendDeviceId ?: false
+        outputFormat = outputFormat ?: 0
+        importWarning = importWarning ?: ""
+        backupLinks = backupLinks ?: ""
+        offeredLink = offeredLink ?: ""
+        offeredBackupLink = offeredBackupLink ?: ""
+        negotiatedFormat = negotiatedFormat ?: 0
     }
 
     /**
