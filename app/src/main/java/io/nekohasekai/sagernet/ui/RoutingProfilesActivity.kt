@@ -84,8 +84,9 @@ class RoutingProfilesActivity : ThemedActivity() {
         }
     }
 
-    // Accepts export JSON and sn://routing/ links alike. Replacing one of the user's profiles
-    // (and applying it live when that profile is active) needs a confirmation first.
+    // Accepts export JSON, sn://routing/ links and Happ/INCY routing profiles alike. Replacing one
+    // of the user's profiles (and applying it live when that profile is active), or importing a
+    // provider profile with settings it cannot apply, needs a confirmation first.
     private fun importText(text: String) {
         val candidate = RoutingProfiles.parse(text)
         if (candidate == null) {
@@ -93,18 +94,24 @@ class RoutingProfilesActivity : ThemedActivity() {
             return
         }
         val replaced = RoutingProfiles.replacementFor(candidate)
-        if (replaced == null) {
+        if (replaced == null && candidate.notes.isEmpty()) {
             store(candidate)
             return
         }
+        val message = listOfNotNull(
+            replaced?.let {
+                getString(
+                    if (it.id == RoutingProfiles.activeId) R.string.routing_profile_replace_active_message else R.string.routing_profile_replace_message,
+                    it.name,
+                )
+            },
+            candidate.notes.takeIf { it.isNotEmpty() }?.let {
+                getString(R.string.routing_profile_not_applied, candidate.name, it.joinToString(", "))
+            },
+        ).joinToString("\n\n")
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.confirm)
-            .setMessage(
-                getString(
-                    if (replaced.id == RoutingProfiles.activeId) R.string.routing_profile_replace_active_message else R.string.routing_profile_replace_message,
-                    replaced.name,
-                ),
-            )
+            .setMessage(message)
             .setPositiveButton(R.string.yes) { _, _ -> store(candidate) }
             .setNegativeButton(R.string.no, null)
             .show()

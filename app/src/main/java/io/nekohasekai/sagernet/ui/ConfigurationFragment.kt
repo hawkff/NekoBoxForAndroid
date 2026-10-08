@@ -378,7 +378,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                                         .let(cursor::getString)
                                 }
                         val proxies = mutableListOf<AbstractBean>()
-                        var sourceText: String? = null
+                        var preview: ImportPreview? = null
+                        val skippedEntries = mutableListOf<String>()
                         if (fileName != null && fileName.endsWith(".zip")) {
                             // try parse wireguard zip (bounded per-entry + cumulative to stop
                             // a decompression bomb from exhausting memory)
@@ -394,8 +395,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                                     // MAX_IMPORT_BYTES (defeats a many-entry zip bomb).
                                     val bytes = zip.readBytesBounded(remaining)
                                     remaining -= bytes.size
-                                    RawUpdater.parseRaw(bytes.toString(Charsets.UTF_8), entry.name)
-                                        ?.let { pl -> proxies.addAll(pl) }
+                                    try {
+                                        RawUpdater.parseRaw(bytes.toString(Charsets.UTF_8), entry.name)
+                                            ?.let { pl -> proxies.addAll(pl) }
+                                    } catch (e: SubscriptionFoundException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        // One config that cannot be imported does not stop the others; it is named.
+                                        skippedEntries += getString(R.string.import_entry_failed, entry.name, e.readableMessage)
+                                    }
                                     zip.closeEntry()
                                 }
                             }
@@ -404,16 +412,27 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 requireContext().contentResolver.openInputStream(file)!!.use {
                                     it.readTextBounded()
                                 }
-                            RawUpdater.parseRaw(fileText, fileName ?: "")
-                                ?.let { pl -> proxies.addAll(pl) }
-                            sourceText = fileText
+                            RawUpdater.parseImport(fileText, fileName ?: "")?.let { parsed ->
+                                proxies.addAll(parsed.proxies)
+                                preview = ImportPreview.of(parsed)
+                            }
+                        }
+                        if (skippedEntries.isNotEmpty()) {
+                            onMainDispatcher {
+                                if (isAdded) {
+                                    MaterialAlertDialogBuilder(requireContext())
+                                        .setMessage(skippedEntries.joinToString("\n"))
+                                        .setPositiveButton(android.R.string.ok, null)
+                                        .show()
+                                }
+                            }
                         }
                         if (proxies.isEmpty()) {
                             onMainDispatcher {
                                 snackbar(getString(R.string.no_proxies_found_in_file)).show()
                             }
                         } else {
-                            confirmImport(sourceText, proxies)
+                            confirmImport(preview, proxies)
                         }
                     } catch (e: SubscriptionFoundException) {
                         (requireActivity() as MainActivity).importSubscription(e.link.toUri())
@@ -427,11 +446,9 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
         }
 
-    /** Show what the import keeps and drops before creating profiles. Sources without text (zip) import directly. */
-    private suspend fun confirmImport(source: String?, proxies: List<AbstractBean>) {
-        if (source == null) return import(proxies)
-        // Preview the body the parser saw: a base64 envelope would otherwise read as a link list.
-        val preview = ImportPreview.of(RawUpdater.readSubscriptionContent(source).body, proxies)
+    /** Show what the import keeps and drops before creating profiles. Sources without a preview (zip) import directly. */
+    private suspend fun confirmImport(preview: ImportPreview?, proxies: List<AbstractBean>) {
+        if (preview == null) return import(proxies)
         onMainDispatcher {
             if (!isAdded) return@onMainDispatcher
             MaterialAlertDialogBuilder(requireContext())
@@ -461,17 +478,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             )
         }
         if (preview.behaviorDiffers) {
-            val sections = preview.dropped.joinToString(", ") {
-                getString(
-                    when (it) {
-                        ImportPreview.Section.PROXY_GROUPS -> R.string.import_section_proxy_groups
-                        ImportPreview.Section.RULES -> R.string.import_section_rules
-                        ImportPreview.Section.RULE_PROVIDERS -> R.string.import_section_rule_providers
-                        ImportPreview.Section.DNS -> R.string.import_section_dns
-                        ImportPreview.Section.INBOUNDS -> R.string.import_section_inbounds
-                    },
-                )
-            }
+            val sections = preview.dropped.joinToString(", ") { getString(it.title) }
             append("\n\n").append(getString(R.string.import_preview_dropped, sections))
         }
     }
@@ -590,13 +597,13 @@ class ConfigurationFragment @JvmOverloads constructor(
                 } else {
                     runOnDefaultDispatcher {
                         try {
-                            val proxies = RawUpdater.parseRaw(text)
-                            if (proxies.isNullOrEmpty()) {
+                            val parsed = RawUpdater.parseImport(text)
+                            if (parsed == null) {
                                 onMainDispatcher {
                                     snackbar(getString(R.string.no_proxies_found_in_clipboard)).show()
                                 }
                             } else {
-                                confirmImport(text, proxies)
+                                confirmImport(ImportPreview.of(parsed), parsed.proxies)
                             }
                         } catch (e: SubscriptionFoundException) {
                             onMainDispatcher {

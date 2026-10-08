@@ -137,15 +137,15 @@ func (s *TailscaleStream) Close() error {
 }
 
 // Caller holds access until the work is registered, so Close cannot race Add/Wait.
-func (i *BoxInstance) admitTailscaleLocked() (context.Context, func(), error) {
+func (i *BoxInstance) admitCoreWorkLocked() (context.Context, func(), error) {
 	if i.state == 2 || (i.ctx != nil && i.ctx.Err() != nil) {
 		return nil, nil, errors.New("tailscale:closed: instance is closing")
 	}
 	if !i.running || i.ctx == nil || i.Box == nil {
 		return nil, nil, errors.New("tailscale:not-running: instance has not successfully started")
 	}
-	i.tailscaleWork.Add(1)
-	return i.ctx, i.tailscaleWork.Done, nil
+	i.coreWork.Add(1)
+	return i.ctx, i.coreWork.Done, nil
 }
 
 func acquireTailscale(i *BoxInstance, tag string) (*tailscale.Endpoint, context.Context, func(), error) {
@@ -154,7 +154,7 @@ func acquireTailscale(i *BoxInstance, tag string) (*tailscale.Endpoint, context.
 	}
 	i.access.Lock()
 	defer i.access.Unlock()
-	ctx, release, err := i.admitTailscaleLocked()
+	ctx, release, err := i.admitCoreWorkLocked()
 	if err != nil {
 		return nil, nil, nil, err
 	}

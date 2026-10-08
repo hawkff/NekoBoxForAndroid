@@ -55,6 +55,17 @@ class NetworkAutomationActivity : ThemedActivity() {
         }).attachToRecyclerView(binding.recyclerView)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // A refusal or a pause is explained under the rules until automation works again.
+        val status = NetworkAutomation.status()
+        binding.explanation.text = if (status == R.string.network_automation_summary) {
+            getText(R.string.network_automation_explanation)
+        } else {
+            getString(R.string.network_automation_explanation) + "\n\n" + getString(status)
+        }
+    }
+
     override fun snackbarInternal(text: CharSequence): Snackbar = Snackbar.make(binding.coordinator, text, Snackbar.LENGTH_LONG)
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -70,7 +81,7 @@ class NetworkAutomationActivity : ThemedActivity() {
 
     // Rule creation is a chain of small choices: network, optional SSID, action, optional profile.
     private fun askKind() {
-        val kinds = arrayOf(Kind.MOBILE, Kind.WIFI, Kind.SSID)
+        val kinds = arrayOf(Kind.MOBILE, Kind.WIFI, Kind.SSID, Kind.ETHERNET)
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.network_rule_network)
             .setItems(kinds.map { kindLabel(it) }.toTypedArray()) { _, which ->
@@ -140,6 +151,7 @@ class NetworkAutomationActivity : ThemedActivity() {
             Kind.MOBILE -> R.string.network_rule_mobile
             Kind.WIFI -> R.string.network_rule_wifi
             Kind.SSID -> R.string.network_rule_ssid
+            Kind.ETHERNET -> R.string.network_rule_ethernet
         },
     )
 
@@ -148,14 +160,22 @@ class NetworkAutomationActivity : ThemedActivity() {
 
         fun add(rule: Rule) {
             rules += rule
-            NetworkAutomation.saveRules(rules)
+            save()
             notifyItemInserted(rules.size - 1)
         }
 
         fun removeAt(index: Int) {
+            // A second tap on a row that is already going away has no position.
+            if (index !in rules.indices) return
             rules.removeAt(index)
-            NetworkAutomation.saveRules(rules)
+            save()
             notifyItemRemoved(index)
+        }
+
+        // The watcher runs only while a connect rule exists.
+        private fun save() {
+            NetworkAutomation.saveRules(rules)
+            NetworkAutomation.onRulesChanged(applicationContext)
         }
 
         fun ruleAt(index: Int) = rules.getOrNull(index)

@@ -687,4 +687,10 @@
         <item>udp</item>
     </string-array>
 
+    <string-array name="wireguard_dns_modes">
+        <item>@string/wireguard_dns_mode_app</item>
+        <item>@string/wireguard_dns_mode_all</item>
+        <item>@string/wireguard_dns_mode_domains</item>
+    </string-array>
+
 </resources>

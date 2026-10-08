@@ -15,6 +15,7 @@ import com.esotericsoftware.kryo.io.ByteBufferOutput
 import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.Serializable
+import io.nekohasekai.sagernet.fmt.wireguard.WireGuardDnsMode
 
 class AmneziaWGBean : AbstractBean() {
     @JvmField
@@ -83,6 +84,40 @@ class AmneziaWGBean : AbstractBean() {
     @JvmField
     var i5: String? = null
 
+    // Newline-separated prefixes routed to the peer; blank means 0.0.0.0/0 and ::/0.
+    @JvmField
+    var allowedIPs: String? = null
+
+    // Seconds; 0 disables the keepalive.
+    @JvmField
+    var persistentKeepalive: Int? = null
+
+    // Further peers as wg-quick [Peer] sections.
+    @JvmField
+    var extraPeers: String? = null
+
+    // DNS servers and domains from the imported config; subscription updates refresh them.
+    @JvmField
+    var importedDnsServers: String? = null
+
+    @JvmField
+    var importedDnsDomains: String? = null
+
+    // The user's DNS choice and overrides, which subscription updates keep. Blank overrides
+    // follow the imported values.
+    @JvmField
+    var dnsMode: Int? = null
+
+    @JvmField
+    var customDnsServers: String? = null
+
+    @JvmField
+    var customDnsDomains: String? = null
+
+    // How many of the extra peers come before the server peer, so the peers keep their order.
+    @JvmField
+    var serverPeerPosition: Int? = null
+
     override fun initializeDefaultValues() {
         super.initializeDefaultValues()
         localAddress = localAddress ?: ""
@@ -107,10 +142,34 @@ class AmneziaWGBean : AbstractBean() {
         i3 = i3 ?: ""
         i4 = i4 ?: ""
         i5 = i5 ?: ""
+        allowedIPs = allowedIPs ?: ""
+        persistentKeepalive = persistentKeepalive ?: 0
+        extraPeers = extraPeers ?: ""
+        importedDnsServers = importedDnsServers ?: ""
+        importedDnsDomains = importedDnsDomains ?: ""
+        dnsMode = dnsMode ?: WireGuardDnsMode.APP
+        customDnsServers = customDnsServers ?: ""
+        customDnsDomains = customDnsDomains ?: ""
+        serverPeerPosition = serverPeerPosition ?: 0
+    }
+
+    private fun usesVersion1Fields() = !allowedIPs.isNullOrEmpty() || (persistentKeepalive ?: 0) != 0 ||
+        !extraPeers.isNullOrEmpty() || !importedDnsServers.isNullOrEmpty() || !importedDnsDomains.isNullOrEmpty() ||
+        (dnsMode ?: WireGuardDnsMode.APP) != WireGuardDnsMode.APP || !customDnsServers.isNullOrEmpty() ||
+        !customDnsDomains.isNullOrEmpty() || (serverPeerPosition ?: 0) != 0
+
+    override fun keepLocalSettings(from: AbstractBean) {
+        if (from !is AmneziaWGBean) return
+        dnsMode = from.dnsMode ?: WireGuardDnsMode.APP
+        customDnsServers = from.customDnsServers.orEmpty()
+        customDnsDomains = from.customDnsDomains.orEmpty()
     }
 
     override fun serialize(output: ByteBufferOutput) {
-        output.writeInt(0)
+        // Profiles without version 1 fields keep the version 0 bytes: stored blobs stay stable,
+        // and so does the byte-based equality subscription updates compare profiles with.
+        val version1 = usesVersion1Fields()
+        output.writeInt(if (version1) 1 else 0)
         super.serialize(output)
         output.writeString(localAddress)
         output.writeString(privateKey)
@@ -134,6 +193,17 @@ class AmneziaWGBean : AbstractBean() {
         output.writeString(i3)
         output.writeString(i4)
         output.writeString(i5)
+        if (version1) {
+            output.writeString(allowedIPs)
+            output.writeInt(persistentKeepalive ?: 0)
+            output.writeString(extraPeers)
+            output.writeString(importedDnsServers)
+            output.writeString(importedDnsDomains)
+            output.writeInt(dnsMode ?: WireGuardDnsMode.APP)
+            output.writeString(customDnsServers)
+            output.writeString(customDnsDomains)
+            output.writeInt(serverPeerPosition ?: 0)
+        }
     }
 
     override fun deserialize(input: ByteBufferInput) {
@@ -161,6 +231,17 @@ class AmneziaWGBean : AbstractBean() {
         i3 = input.readString()
         i4 = input.readString()
         i5 = input.readString()
+        if (version >= 1) {
+            allowedIPs = input.readString()
+            persistentKeepalive = input.readInt()
+            extraPeers = input.readString()
+            importedDnsServers = input.readString()
+            importedDnsDomains = input.readString()
+            dnsMode = input.readInt()
+            customDnsServers = input.readString()
+            customDnsDomains = input.readString()
+            serverPeerPosition = input.readInt()
+        }
     }
 
     override fun canTCPing(): Boolean = false

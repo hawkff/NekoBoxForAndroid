@@ -51,8 +51,16 @@ object RoutingProfiles {
     /**
      * [source] marks who owns a profile: "" for the user's own, or a subscription tag for profiles
      * delivered through the `routing` subscription key, so a provider only ever refreshes its own.
+     * [notes] lists what an imported provider profile asked for that it does not apply; they are
+     * reported on import and not stored.
      */
-    class Profile(val id: Long, var name: String, var content: JSONObject, val source: String = "") {
+    class Profile(
+        val id: Long,
+        var name: String,
+        var content: JSONObject,
+        val source: String = "",
+        val notes: List<String> = emptyList(),
+    ) {
         val ruleCount: Int get() = content.optJSONArray("rules")?.length() ?: 0
 
         fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("content", content).put("source", source)
@@ -130,10 +138,14 @@ object RoutingProfiles {
         return SETTING_KEYS.map { key -> key to pairs[key]?.let { it.boolean ?: it.float ?: it.long ?: it.string ?: it.stringSet } }
     }
 
-    /** Replace the live rules and profile settings with [content]. Keys absent in it return to defaults. */
-    suspend fun applyLive(content: JSONObject) {
+    /**
+     * Replace the live rules and profile settings with [content]. Keys absent in its settings return
+     * to defaults. Without [includeSettings], or without a settings array, the settings stay as they
+     * are and only the rules change: settings belong to the user, never to a provider.
+     */
+    suspend fun applyLive(content: JSONObject, includeSettings: Boolean = true) {
         val rules = BackupFormatV2.decodeRules(content.optJSONArray("rules") ?: JSONArray())
-        val settings = settingValues(content.optJSONArray("settings") ?: JSONArray())
+        val settings = content.optJSONArray("settings")?.takeIf { includeSettings }?.let(::settingValues).orEmpty()
         val store = DataStore.configurationStore
         for ((key, value) in settings) {
             when (value) {
@@ -169,8 +181,11 @@ object RoutingProfiles {
 
     private suspend fun syncActiveLocked() {
         val id = activeId
-        if (list().none { it.id == id }) return
+        val active = list().firstOrNull { it.id == id } ?: return
         val content = captureLive()
+        // A provider's or rules-only profile never takes the settings along, so switching back to
+        // it later cannot restore DNS or other settings over the user's.
+        if (active.source.isNotEmpty() || !active.content.has("settings")) content.remove("settings")
         mutate { profiles -> profiles.firstOrNull { it.id == id }?.content = content }
     }
 
@@ -185,7 +200,7 @@ object RoutingProfiles {
             val target = list().firstOrNull { it.id == id } ?: return
             if (target.id == activeId) return
             syncActiveLocked()
-            applyLive(target.content)
+            applyLive(target.content, includeSettings = target.source.isEmpty())
             activeId = target.id
         }
     }
@@ -201,26 +216,56 @@ object RoutingProfiles {
 
     fun subscriptionSource(groupId: Long) = "subscription:$groupId"
 
-    /** Reads export JSON or an [LINK_PREFIX] link into an unsaved profile (id 0), or null. */
+    // Routing links: this app's sn://routing/, Happ's and INCY's <scheme>://routing/add|onadd|off,
+    // and INCY's scheme-less ://routing/ header form.
+    private val ROUTING_LINK = Regex("^(?:[A-Za-z][A-Za-z0-9+.-]*)?://routing/")
+    private val PROVIDER_LINK = Regex("^(?:[A-Za-z][A-Za-z0-9+.-]*)?://routing/(add|onadd)/(\\S+)$")
+
+    fun isRoutingLink(text: String) = ROUTING_LINK.containsMatchIn(text.trim())
+
+    /** A provider's request to turn routing off (`routing: off`, `<scheme>://routing/off`), which is not applied. */
+    fun isDisableRequest(text: String) = text.trim().let { it.equals("off", ignoreCase = true) || (isRoutingLink(it) && it.endsWith("://routing/off")) }
+
+    /**
+     * Reads export JSON, an [LINK_PREFIX] link, or a Happ/INCY routing profile (link, base64 or
+     * JSON) into an unsaved profile (id 0), or null.
+     */
     fun parse(text: String, source: String = ""): Profile? {
         val trimmed = text.trim()
-        val jsonText = if (trimmed.startsWith(LINK_PREFIX)) {
-            runCatching { String(Util.b64Decode(trimmed.removePrefix(LINK_PREFIX)), Charsets.UTF_8) }.getOrNull() ?: return null
-        } else {
-            trimmed
+        PROVIDER_LINK.find(trimmed)?.let { match ->
+            val json = decodeJsonObject(match.groupValues[2]) ?: return null
+            return ProviderRouting.translate(json, source, activationRequested = match.groupValues[1] == "onadd")
         }
-        val json = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
+        val json = if (trimmed.startsWith(LINK_PREFIX)) {
+            decodeJsonObject(trimmed.removePrefix(LINK_PREFIX))
+        } else {
+            runCatching { JSONObject(trimmed) }.getOrNull() ?: decodeJsonObject(trimmed)
+        } ?: return null
+        if (!json.has("routingProfile") && ProviderRouting.isProviderProfile(json)) {
+            return ProviderRouting.translate(json, source, activationRequested = false)
+        }
         if (json.optInt("routingProfile", 0) != FORMAT) return null
         val content = json.optJSONObject("content") ?: return null
         // Decode here, typed values included, so malformed content is refused before it can replace a
-        // stored profile or the live rules and settings.
+        // stored profile or the live rules and settings. Settings may be absent (a rules-only profile).
         val decodes = runCatching {
             BackupFormatV2.decodeRules(content.getJSONArray("rules"))
-            settingValues(content.getJSONArray("settings"))
+            if (content.has("settings")) settingValues(content.getJSONArray("settings"))
         }.isSuccess
         if (!decodes) return null
-        return Profile(0L, json.optString("name").ifBlank { "Imported" }, content, source)
+        val name = json.optString("name").ifBlank { "Imported" }
+        // A subscription delivers rules only; DNS, apps and the other settings stay the user's.
+        if (source.isNotEmpty() && content.has("settings")) {
+            val keys = content.optJSONArray("settings")?.let { settings -> (0 until settings.length()).mapNotNull { settings.optJSONObject(it)?.optString("key")?.ifEmpty { null } } }
+            val rules = JSONObject().put("rules", content.getJSONArray("rules"))
+            return Profile(0L, name, rules, source, listOf(keys?.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "settings"))
+        }
+        return Profile(0L, name, content, source)
     }
+
+    private fun decodeJsonObject(base64: String): JSONObject? = runCatching {
+        JSONObject(String(Util.b64Decode(base64), Charsets.UTF_8))
+    }.getOrNull()
 
     /**
      * Store an exported profile or link. A user's import refreshes the user's profile of the same
@@ -257,7 +302,7 @@ object RoutingProfiles {
                 existing to (existing.id == activeId)
             }
         }
-        if (refreshedActive) applyLive(stored.content)
+        if (refreshedActive) applyLive(stored.content, includeSettings = stored.source.isEmpty())
         stored
     }
 
@@ -271,5 +316,72 @@ object RoutingProfiles {
             removed
         }
         if (removed.any { it.id == activeId }) activeId = 0L
+    }
+}
+
+/**
+ * Translates a Happ or INCY routing profile into rules of this app. Only the domain and IP lists
+ * carry over, as block, proxy and direct rules in that order of precedence. DNS servers and hosts,
+ * FakeDNS, the domain strategy, geo file URLs, GlobalProxy=false and an activation request are not
+ * applied: they stay with the user's own settings and are reported as notes, together with list
+ * entries the rules cannot express.
+ */
+internal object ProviderRouting {
+    private class RuleList(val field: String, val ip: Boolean, val outbound: Long)
+
+    private val LISTS = listOf(
+        RuleList("BlockSites", ip = false, outbound = -2L),
+        RuleList("BlockIp", ip = true, outbound = -2L),
+        RuleList("ProxySites", ip = false, outbound = 0L),
+        RuleList("ProxyIp", ip = true, outbound = 0L),
+        RuleList("DirectSites", ip = false, outbound = -1L),
+        RuleList("DirectIp", ip = true, outbound = -1L),
+    )
+
+    /** Fields that describe the profile or the provider's geo file updates. */
+    private val DESCRIPTIVE = setOf("Name", "LastUpdated", "useChunkFiles")
+    private val DOMAIN_PREFIXES = listOf("domain:", "full:", "regexp:", "keyword:")
+    private val IP = Regex("^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$")
+
+    fun isProviderProfile(json: JSONObject) = json.has("GlobalProxy") || LISTS.any { json.has(it.field) }
+
+    /** The rules of [json] as a rules-only profile, or null when none of its entries translate. */
+    fun translate(json: JSONObject, source: String, activationRequested: Boolean): RoutingProfiles.Profile? {
+        val notes = mutableListOf<String>()
+        val rules = JSONArray()
+        for (list in LISTS) {
+            val values = json.optJSONArray(list.field) ?: continue
+            val entries = (0 until values.length()).map { values.optString(it).trim() }.filter { it.isNotEmpty() }
+            val translated = entries.mapNotNull { if (list.ip) ipEntry(it) else domainEntry(it) }
+            if (translated.size < entries.size) notes += "${list.field} (${entries.size - translated.size})"
+            if (translated.isEmpty()) continue
+            val rule = RuleEntity(name = list.field, userOrder = rules.length() + 1L, enabled = true, outbound = list.outbound)
+            if (list.ip) rule.ip = translated.joinToString("\n") else rule.domains = translated.joinToString("\n")
+            rules.put(BackupFormatV2.encodeRule(rule))
+        }
+        for (key in json.keys()) {
+            if (key in DESCRIPTIVE || LISTS.any { it.field == key }) continue
+            // Unmatched traffic goes through the proxy here anyway.
+            if (key == "GlobalProxy" && json.optString(key).equals("true", ignoreCase = true)) continue
+            notes += key
+        }
+        if (activationRequested) notes += "onadd"
+        if (rules.length() == 0) return null
+        val name = json.optString("Name").trim().ifEmpty { "Imported" }
+        return RoutingProfiles.Profile(0L, name, JSONObject().put("rules", rules), source, notes)
+    }
+
+    // Xray matches a bare domain value anywhere in the name; here a bare value is a suffix.
+    private fun domainEntry(value: String): String? = when {
+        value.startsWith("geosite:") -> value.takeUnless { it.contains('@') || it.contains('!') }
+        DOMAIN_PREFIXES.any { value.startsWith(it) } -> value
+        value.contains(':') -> null
+        else -> "keyword:$value"
+    }
+
+    private fun ipEntry(value: String): String? = when {
+        value.startsWith("geoip:") -> value.takeUnless { it.contains('!') }
+        IP.matches(value) -> value
+        else -> null
     }
 }

@@ -37,7 +37,7 @@ class RuntimeSetupTest {
 
         val channels = SagerNet.notification.notificationChannels.associateBy { it.id }
         assertEquals(
-            setOf("service-vpn", "service-proxy", "service-subscription", "connection-test", CORE_NOTIFICATION_CHANNEL),
+            setOf("service-vpn", "service-proxy", "service-subscription", "connection-test", CORE_NOTIFICATION_CHANNEL, AUTOMATION_NOTIFICATION_CHANNEL),
             channels.keys,
         )
         assertEquals(
@@ -48,6 +48,8 @@ class RuntimeSetupTest {
         assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channels.getValue("service-subscription").importance)
         assertEquals(NotificationManager.IMPORTANCE_DEFAULT, channels.getValue("connection-test").importance)
         assertEquals(NotificationManager.IMPORTANCE_HIGH, channels.getValue(CORE_NOTIFICATION_CHANNEL).importance)
+        // The automation watcher is silent but stays visible.
+        assertEquals(NotificationManager.IMPORTANCE_LOW, channels.getValue(AUTOMATION_NOTIFICATION_CHANNEL).importance)
         assertEquals(SagerNet.application.getString(R.string.service_vpn), channels.getValue("service-vpn").name)
     }
 

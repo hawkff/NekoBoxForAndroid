@@ -238,9 +238,9 @@ fun parseHysteria2(url: String): HysteriaBean {
         (link.queryParameter("obfs-max-packet-size") ?: link.queryParameter("maxPacketSize"))?.toIntOrNull()?.also {
             geckoMaxPacketSize = it
         }
-//        link.queryParameter("pinSHA256")?.also {
-//            // TODO your box do not support it
-//        }
+        // A certificate pin has no counterpart here; without it the link would trust any
+        // certificate that insecure=1 lets through, so such a link is refused.
+        require(link.queryParameter("pinSHA256").isNullOrBlank()) { "unsupported certificate pin" }
     }
 }
 
@@ -390,6 +390,7 @@ fun JSONObject.parseHysteria2Json(): HysteriaBean = HysteriaBean().apply {
     }
     // tls block (sni / insecure / Hysteria 2.10 ECH config list).
     optJSONObject("tls")?.also { tls ->
+        require(tls.getStr("pinSHA256") == null) { "unsupported certificate pin" }
         tls.getStr("sni")?.also { sni = it }
         tls.getBool("insecure")?.also { allowInsecure = it }
         tls.getStr("ech")?.also {

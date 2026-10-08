@@ -38,6 +38,9 @@ import androidx.work.Configuration as WorkConfiguration
 // Channel for notifications the core asks the platform to post.
 const val CORE_NOTIFICATION_CHANNEL = "core"
 
+// Channel for the network automation watcher.
+const val AUTOMATION_NOTIFICATION_CHANNEL = "service-automation"
+
 class SagerNet :
     Application(),
     WorkConfiguration.Provider {
@@ -107,10 +110,7 @@ class SagerNet :
             Theme.applyNightTheme()
             AppLocale.apply()
             runOnDefaultDispatcher {
-                DefaultNetworkListener.start(this) {
-                    underlyingNetwork = it
-                    NetworkAutomation.onNetwork(it, DataStore.serviceState.started)
-                }
+                DefaultNetworkListener.start(this) { underlyingNetwork = it }
             }
         }
 
@@ -228,6 +228,11 @@ class SagerNet :
                             application.getText(R.string.core_notifications),
                             NotificationManager.IMPORTANCE_HIGH,
                         ),
+                        NotificationChannel(
+                            AUTOMATION_NOTIFICATION_CHANNEL,
+                            application.getText(R.string.network_automation),
+                            NotificationManager.IMPORTANCE_LOW,
+                        ),
                     ),
                 )
             }
@@ -237,15 +242,17 @@ class SagerNet :
         // last selected, even if the async write-through DB commit hasn't landed yet. Callers with
         // a specific id (e.g. a shortcut switching profile) pass it explicitly. A non-resolving id
         // (incl. 0L "none") is ignored by :bg, which then falls back to its refreshed snapshot/DB.
-        fun startService(profileId: Long = DataStore.selectedProxy) {
-            // Any start lifts the pause a user-requested stop put on network automation.
-            DataStore.automationPaused = false
+        // Starts made by network automation or at boot pass byUser = false: they keep a pause a
+        // manual stop put on network automation.
+        fun startService(profileId: Long = DataStore.selectedProxy, byUser: Boolean = true) {
             ContextCompat.startForegroundService(
                 application,
                 Intent(application, SagerConnection.serviceClass).apply {
                     if (profileId >= 0L) putExtra(Action.EXTRA_PROFILE_ID, profileId)
+                    putExtra(Action.EXTRA_AUTOMATED, !byUser)
                 },
             )
+            if (byUser) NetworkAutomation.onUserStart(application)
         }
 
         fun reloadService(profileId: Long = -1L) = application.sendBroadcast(

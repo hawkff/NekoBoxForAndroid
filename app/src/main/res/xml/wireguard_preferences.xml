@@ -6,6 +6,12 @@
         app:title="@string/profile_name"
         app:useSimpleSummaryProvider="true" />
 
+    <Preference
+        app:icon="@drawable/ic_baseline_info_24"
+        app:key="wireguardStatus"
+        app:summary="@string/wireguard_status_summary"
+        app:title="@string/wireguard_status" />
+
     <PreferenceCategory app:title="@string/proxy_cat">
         <EditTextPreference
             app:icon="@drawable/ic_hardware_router"
@@ -47,6 +53,60 @@
             app:icon="@drawable/ic_baseline_fingerprint_24"
             app:key="reserved"
             app:title="Reserved"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:dialogMessage="@string/wireguard_allowed_ips_hint"
+            app:icon="@drawable/ic_baseline_compare_arrows_24"
+            app:key="allowedIPs"
+            app:title="@string/wireguard_allowed_ips"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:dialogMessage="@string/wireguard_persistent_keepalive_hint"
+            app:icon="@drawable/ic_baseline_timelapse_24"
+            app:key="persistentKeepalive"
+            app:title="@string/wireguard_persistent_keepalive"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:dialogMessage="@string/wireguard_extra_peers_hint"
+            app:icon="@drawable/ic_hardware_router"
+            app:key="extraPeers"
+            app:title="@string/wireguard_extra_peers" />
+        <EditTextPreference
+            app:defaultValue="0"
+            app:dialogMessage="@string/wireguard_server_peer_position_hint"
+            app:key="serverPeerPosition"
+            app:title="@string/wireguard_server_peer_position"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cag_dns">
+        <moe.matsuri.nb4a.ui.SimpleMenuPreference
+            app:defaultValue="0"
+            app:entries="@array/wireguard_dns_modes"
+            app:entryValues="@array/int_array_3"
+            app:icon="@drawable/ic_action_dns"
+            app:key="dnsMode"
+            app:title="@string/wireguard_dns_mode"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:enabled="false"
+            app:key="importedDnsServers"
+            app:title="@string/wireguard_imported_dns_servers"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:enabled="false"
+            app:key="importedDnsDomains"
+            app:title="@string/wireguard_imported_dns_domains"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:dialogMessage="@string/wireguard_custom_dns_servers_hint"
+            app:key="customDnsServers"
+            app:title="@string/wireguard_custom_dns_servers"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:dialogMessage="@string/wireguard_custom_dns_domains_hint"
+            app:key="customDnsDomains"
+            app:title="@string/wireguard_custom_dns_domains"
             app:useSimpleSummaryProvider="true" />
     </PreferenceCategory>
 

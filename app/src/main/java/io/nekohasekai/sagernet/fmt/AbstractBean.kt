@@ -71,6 +71,13 @@ abstract class AbstractBean : Serializable() {
 
     abstract fun clone(): AbstractBean
 
+    /**
+     * Copies the settings the user owns from [from], the stored profile this bean refreshes, so a
+     * subscription update keeps them. Everything else belongs to the provider; by default nothing
+     * is local.
+     */
+    open fun keepLocalSettings(from: AbstractBean) {}
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is AbstractBean || javaClass != other.javaClass) return false
