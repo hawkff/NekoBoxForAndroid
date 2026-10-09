@@ -86,6 +86,7 @@ class SagerNet :
                 join()
             }
             primeError[0]?.let { Logs.w("configurationStore prime failed", it) }
+            if (primeError[0] == null) Telemetry.initialize(isMainProcess)
             Libcore.initCore(
                 process,
                 cacheDir.absolutePath + "/",

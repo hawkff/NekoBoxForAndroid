@@ -23,7 +23,7 @@
 -keep class org.yaml.snakeyaml.** { *; }
 
 -dontobfuscate
--keepattributes SourceFile
+-keepattributes SourceFile,LineNumberTable
 
 -dontwarn java.beans.BeanInfo
 -dontwarn java.beans.FeatureDescriptor

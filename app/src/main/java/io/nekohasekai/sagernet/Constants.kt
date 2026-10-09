@@ -9,6 +9,7 @@ object Key {
 
     const val PERSIST_ACROSS_REBOOT = "isAutoConnect"
 
+    const val HELP_TO_IMPROVE = "helpToImprove"
     const val CLEAR_CACHE = "clearCache"
     const val PROTECTION_ALWAYS_ON = "protectionAlwaysOn"
     const val PROTECTION_LOCKDOWN = "protectionLockdown"
