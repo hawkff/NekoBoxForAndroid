@@ -1,11 +1,12 @@
 package io.nekohasekai.sagernet.utils
 
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.preference.PreferenceManager
 import androidx.preference.SwitchPreference
 import androidx.room.Room
+import com.google.gson.JsonParser
 import com.posthog.PersonProfiles
-import com.posthog.PostHog
 import com.posthog.PostHogEvent
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
@@ -16,11 +17,15 @@ import io.sentry.Hint
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryLevel
+import io.sentry.SentryOptions
+import io.sentry.UncaughtExceptionHandlerIntegration
+import io.sentry.android.core.SentryAndroid
 import io.sentry.protocol.SentryException
 import io.sentry.protocol.SentryStackFrame
 import io.sentry.protocol.SentryStackTrace
 import io.sentry.protocol.User
 import io.sentry.transport.NoOpTransport
+import io.sentry.util.Platform
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
@@ -32,6 +37,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -105,7 +111,7 @@ class TelemetryTest {
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body("{}".toResponseBody()).build()
         }.build()
-        val sdk = PostHog.with(postHogConfig("phc_example", "https://example.com", analyticsCache, client, enabled::get))
+        val sdk = setupPostHog(null, postHogConfig("phc_example", "https://example.com", analyticsCache, client, enabled::get))
         try {
             sdk.capture("app_opened", properties = mapOf("profile" to "private_payload"))
             sdk.flush()
@@ -143,6 +149,19 @@ class TelemetryTest {
         assertEquals(false, options.dataCollection.userInfo)
         assertFalse(options.isEnableAutoSessionTracking)
         assertFalse(options.isSendClientReports)
+        assertFalse(options.isAnrEnabled)
+        assertFalse(options.isEnableNdk)
+        assertFalse(options.isEnableScopeSync)
+        assertFalse(options.isEnableAutoActivityLifecycleTracing)
+        assertFalse(options.isEnableActivityLifecycleBreadcrumbs)
+        assertFalse(options.isEnablePerformanceV2)
+        assertFalse(options.isEnableFramesTracking)
+        assertFalse(options.isAttachScreenshot)
+        assertFalse(options.isAttachViewHierarchy)
+        assertFalse(options.isAttachAnrThreadDump)
+        assertFalse(options.isAttachRawTombstone)
+        assertNull(options.tracesSampleRate)
+        assertTrue(options.integrations.single() is UncaughtExceptionHandlerIntegration)
         assertNull(options.cacheDirPath)
         val event = SentryEvent().apply {
             level = SentryLevel.FATAL
@@ -198,20 +217,33 @@ class TelemetryTest {
     }
 
     @Test
-    fun sentryWrapsAndRestoresTheExistingCrashHandler() {
+    fun sentryInitializesWithTheAndroidGuardAndPreservesTheCrashHandler() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
+        // Robolectric uses desktop java.vendor, so exercise the SDK's real Android-only guard.
+        val androidFlag = Platform::class.java.getDeclaredField("isAndroid").apply { isAccessible = true }
+        val wasAndroid = androidFlag.getBoolean(null)
         var delegated = false
         var report: SentryEvent? = null
         val localHandler = Thread.UncaughtExceptionHandler { _, _ -> delegated = true }
         Thread.setDefaultUncaughtExceptionHandler(localHandler)
         try {
-            val options = sentryOptions("https://public@example.com/1") { true }
-            val filter = requireNotNull(options.beforeSend)
-            options.setBeforeSend { event, hint ->
-                filter.execute(event, hint).also { report = it }
+            androidFlag.setBoolean(null, true)
+            assertTrue(Platform.isAndroid())
+            assertThrows(IllegalArgumentException::class.java) {
+                Sentry.init(SentryOptions().apply { dsn = "https://public@example.com/1" })
             }
-            options.setTransportFactory { _, _ -> NoOpTransport.getInstance() }
-            Sentry.init(options)
+            SentryAndroid.init(RuntimeEnvironment.getApplication()) { options ->
+                sentryOptions("https://public@example.com/1", options) { true }
+                val filter = requireNotNull(options.beforeSend)
+                options.setBeforeSend { event, hint ->
+                    filter.execute(event, hint).also { report = it }
+                }
+                options.setTransportFactory { _, _ -> NoOpTransport.getInstance() }
+            }
+            assertTrue(Sentry.isEnabled())
+            val options = Sentry.getCurrentScopes().options
+            assertNull(options.cacheDirPath)
+            assertTrue(options.integrations.single() is UncaughtExceptionHandlerIntegration)
             requireNotNull(Thread.getDefaultUncaughtExceptionHandler())
                 .uncaughtException(Thread.currentThread(), IllegalStateException("private config"))
             assertTrue(delegated)
@@ -221,8 +253,18 @@ class TelemetryTest {
             assertSame(localHandler, Thread.getDefaultUncaughtExceptionHandler())
         } finally {
             Sentry.close()
+            androidFlag.setBoolean(null, wasAndroid)
             Thread.setDefaultUncaughtExceptionHandler(previous)
         }
+    }
+
+    @Test
+    fun manifestDoesNotStartSentryBeforeConsentLoads() {
+        val context = RuntimeEnvironment.getApplication()
+        val providers = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PROVIDERS)
+            .providers.orEmpty().map { it.name }
+        assertFalse(providers.any { it.startsWith("io.sentry.") })
+        assertFalse(Sentry.isEnabled())
     }
 
     @Test
@@ -230,7 +272,7 @@ class TelemetryTest {
         val failingConsent = { throw IllegalStateException("preference unavailable") }
         val analytics = postHogConfig("phc_example", "https://us.i.posthog.com", analyticsCache, telemetryHttpClient { false }, failingConsent)
         assertNull(analytics.beforeSendList.single().run(PostHogEvent("app_opened", "random-session")))
-        val options = sentryOptions("https://public@example.com/1", failingConsent)
+        val options = sentryOptions("https://public@example.com/1", allowed = failingConsent)
         assertNull(options.beforeSend?.execute(SentryEvent(), Hint()))
     }
 
@@ -249,11 +291,73 @@ class TelemetryTest {
     }
 
     @Test
-    fun analyticsDoesNotReuseOldQueueDirectories() {
-        val client = telemetryHttpClient { true }
-        val first = postHogConfig("phc_example", "https://example.com", analyticsCache, client) { true }
-        val second = postHogConfig("phc_example", "https://example.com", analyticsCache, client) { true }
-        assertNotEquals(first.storagePrefix, second.storagePrefix)
-        assertTrue(requireNotNull(first.storagePrefix).startsWith("${analyticsCache.absolutePath}/"))
+    fun analyticsReusesExecutorsButNotPendingReportsOrIdentity() {
+        val offlineAllowed = AtomicBoolean(true)
+        val attempted = CountDownLatch(1)
+        val offlineClient = telemetryHttpClient(offlineAllowed::get).newBuilder().addInterceptor { chain ->
+            if (chain.request().method == "POST") {
+                attempted.countDown()
+                throw IOException("Offline")
+            }
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK").body("{}".toResponseBody()).build()
+        }.build()
+        val firstConfig = postHogConfig("phc_example", "https://example.com", analyticsCache, offlineClient, offlineAllowed::get)
+        val sdk = setupPostHog(null, firstConfig)
+        try {
+            val identities = mutableSetOf(sdk.distinctId())
+            assertFalse(identities.single().isBlank())
+            sdk.capture("app_opened")
+            sdk.flush()
+            assertTrue(attempted.await(10, TimeUnit.SECONDS))
+            val pending = File(requireNotNull(firstConfig.storagePrefix)).walkTopDown().filter { it.extension == "event" }.toList()
+            assertTrue("An offline report must remain queued", pending.isNotEmpty())
+            offlineAllowed.set(false)
+            sdk.optOut()
+            offlineClient.dispatcher.cancelAll()
+            sdk.close()
+
+            fun sdkThreads() = Thread.getAllStackTraces().keys.filter { it.name.startsWith("PostHog") }.toSet()
+            val initialThreads = sdkThreads()
+            repeat(3) {
+                val allowed = AtomicBoolean(true)
+                val received = CopyOnWriteArrayList<String>()
+                val sent = CountDownLatch(1)
+                val client = telemetryHttpClient(allowed::get).newBuilder().addInterceptor { chain ->
+                    if (chain.request().method == "POST") {
+                        val buffer = Buffer()
+                        chain.request().body?.writeTo(buffer)
+                        val batch = JsonParser.parseString(buffer.readUtf8()).asJsonObject.getAsJsonArray("batch")
+                        batch.forEach { event -> received += event.asJsonObject.get("distinct_id").asString }
+                        sent.countDown()
+                    }
+                    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                        .code(200).message("OK").body("{}".toResponseBody()).build()
+                }.build()
+                try {
+                    val config = postHogConfig("phc_example", "https://example.com", analyticsCache, client, allowed::get).apply { flushAt = 1 }
+                    assertSame(sdk, setupPostHog(sdk, config))
+                    assertFalse(sdk.isOptOut())
+                    val identity = sdk.distinctId()
+                    assertTrue("Every reporting session must have a fresh identity", identities.add(identity))
+                    assertNotEquals(firstConfig.storagePrefix, config.storagePrefix)
+                    sdk.flush()
+                    sdk.capture("app_opened")
+                    assertTrue(sent.await(10, TimeUnit.SECONDS))
+                    assertEquals(listOf(identity), received.toList())
+                    assertTrue("Old queued reports must not be consumed by the new session", pending.all { it.exists() })
+                } finally {
+                    allowed.set(false)
+                    sdk.optOut()
+                    client.dispatcher.cancelAll()
+                    sdk.close()
+                }
+                assertEquals("Repeated opt-in must not accumulate SDK executors", initialThreads, sdkThreads())
+            }
+        } finally {
+            offlineAllowed.set(false)
+            offlineClient.dispatcher.cancelAll()
+            sdk.close()
+        }
     }
 }

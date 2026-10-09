@@ -8,6 +8,7 @@ import com.posthog.PostHog
 import com.posthog.PostHogConfig
 import com.posthog.PostHogEvent
 import com.posthog.PostHogInterface
+import com.posthog.internal.PostHogMemoryPreferences
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
@@ -17,7 +18,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.sentry.Sentry
 import io.sentry.SentryEvent
-import io.sentry.SentryOptions
+import io.sentry.UncaughtExceptionHandlerIntegration
+import io.sentry.android.core.SentryAndroid
+import io.sentry.android.core.SentryAndroidOptions
 import io.sentry.protocol.Mechanism
 import io.sentry.protocol.SentryException
 import io.sentry.protocol.SentryStackFrame
@@ -36,6 +39,8 @@ object Telemetry : OnPreferenceDataStoreChangeListener {
     @Volatile
     private var consent = AtomicBoolean(false)
     private var mainProcess = false
+
+    // close() keeps the SDK executors alive for setup(), so retain and reuse their owner.
     private var analytics: PostHogInterface? = null
     private var analyticsHttp: OkHttpClient? = null
     private val analyticsCache by lazy { File(app.cacheDir, "telemetry-posthog") }
@@ -83,7 +88,7 @@ object Telemetry : OnPreferenceDataStoreChangeListener {
         if (mainProcess && BuildConfig.POSTHOG_PROJECT_TOKEN.isNotBlank()) {
             try {
                 analyticsHttp = telemetryHttpClient(allowed)
-                analytics = PostHog.with(postHogConfig(BuildConfig.POSTHOG_PROJECT_TOKEN, BuildConfig.POSTHOG_HOST, analyticsCache, analyticsHttp!!, allowed))
+                analytics = setupPostHog(analytics, postHogConfig(BuildConfig.POSTHOG_PROJECT_TOKEN, BuildConfig.POSTHOG_HOST, analyticsCache, analyticsHttp!!, allowed))
                 analytics?.capture("app_opened")
             } catch (_: Exception) {
                 Logs.w("PostHog initialization failed")
@@ -91,8 +96,9 @@ object Telemetry : OnPreferenceDataStoreChangeListener {
         }
         if (BuildConfig.SENTRY_DSN.isNotBlank()) {
             try {
-                // The SDK wraps the existing CrashHandler, which still writes the local report.
-                Sentry.init(sentryOptions(BuildConfig.SENTRY_DSN, allowed))
+                // Sentry swallows configuration callback errors, so validate before entering it.
+                require(BuildConfig.SENTRY_DSN.toHttpUrlOrNull()?.isHttps == true)
+                SentryAndroid.init(app) { options -> sentryOptions(BuildConfig.SENTRY_DSN, options, allowed) }
             } catch (_: Exception) {
                 Logs.w("Sentry initialization failed")
             }
@@ -104,7 +110,6 @@ object Telemetry : OnPreferenceDataStoreChangeListener {
         analyticsHttp?.dispatcher?.cancelAll()
         analytics?.optOut()
         analytics?.close()
-        analytics = null
         analyticsHttp?.connectionPool?.evictAll()
         analyticsHttp = null
         if (mainProcess && !analyticsCache.deleteRecursively()) Logs.w("PostHog cache cleanup failed")
@@ -121,6 +126,8 @@ internal fun telemetryHttpClient(allowed: () -> Boolean) = OkHttpClient.Builder(
     .followSslRedirects(false)
     .build()
 
+internal fun setupPostHog(existing: PostHogInterface?, config: PostHogConfig) = existing?.apply { setup(config) } ?: PostHog.with(config)
+
 internal fun postHogConfig(token: String, host: String, cache: File, client: OkHttpClient, allowed: () -> Boolean): PostHogConfig {
     val url = requireNotNull(host.toHttpUrlOrNull()) { "Invalid PostHog host" }
     require(url.isHttps && url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null)
@@ -128,6 +135,8 @@ internal fun postHogConfig(token: String, host: String, cache: File, client: OkH
     return PostHogConfig(token, host).apply {
         // The core SDK requires a file queue; a new directory prevents replaying old sessions.
         storagePrefix = File(cache, UUID.randomUUID().toString()).absolutePath
+        // Reusing the SDK must not reuse its previous identity or stored opt-out value.
+        cachePreferences = PostHogMemoryPreferences()
         // beforeSend does not cover SDK configuration requests.
         httpClient = client
         personProfiles = PersonProfiles.NEVER
@@ -163,9 +172,9 @@ internal fun postHogConfig(token: String, host: String, cache: File, client: OkH
     }
 }
 
-internal fun sentryOptions(dsn: String, allowed: () -> Boolean): SentryOptions {
+internal fun sentryOptions(dsn: String, options: SentryAndroidOptions = SentryAndroidOptions(), allowed: () -> Boolean): SentryAndroidOptions {
     require(dsn.toHttpUrlOrNull()?.isHttps == true) { "Sentry requires an HTTPS DSN" }
-    return SentryOptions().apply {
+    return options.apply {
         this.dsn = dsn
         release = "${BuildConfig.APPLICATION_ID}@${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}"
         environment = BuildConfig.BUILD_TYPE
@@ -175,6 +184,22 @@ internal fun sentryOptions(dsn: String, allowed: () -> Boolean): SentryOptions {
         isEnableAutoSessionTracking = false
         isEnableShutdownHook = false
         isSendClientReports = false
+        // Keep only the crash-handler wrapper; Android's other integrations collect extra data.
+        integrations.removeAll { it !is UncaughtExceptionHandlerIntegration }
+        enableAllAutoBreadcrumbs(false)
+        isAnrEnabled = false
+        isEnableNdk = false
+        isEnableScopeSync = false
+        isEnableAutoActivityLifecycleTracing = false
+        isEnableFramesTracking = false
+        isEnablePerformanceV2 = false
+        isCollectAdditionalContext = false
+        isEnableRootCheck = false
+        isAttachScreenshot = false
+        isAttachViewHierarchy = false
+        isAttachAnrThreadDump = false
+        isAttachRawTombstone = false
+        tracesSampleRate = null
         maxBreadcrumbs = 0
         // No disk queue can survive an opt-out or be uploaded by a later launch.
         cacheDirPath = null

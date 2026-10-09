@@ -97,9 +97,9 @@ dependencies {
     // TextMate exposes JDT nullability annotations in its public signatures.
     compileOnly("org.eclipse.jdt:org.eclipse.jdt.annotation:2.4.100")
 
-    // Core SDKs avoid automatic Android screen, location and UI capture.
+    // Minimal SDK modules; automatic capture is configured explicitly.
     implementation("com.posthog:posthog:6.47.1")
-    implementation("io.sentry:sentry:8.60.0")
+    implementation("io.sentry:sentry-android-core:8.60.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.yaml:snakeyaml:2.7")
     implementation("com.jakewharton:process-phoenix:3.0.0")
