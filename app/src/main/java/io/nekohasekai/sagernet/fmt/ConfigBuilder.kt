@@ -234,8 +234,13 @@ private class BuildLookupCache {
 
 private fun resolveChain(entity: ProxyEntity, lookupCache: BuildLookupCache): MutableList<ProxyEntity> {
     val thisGroup = lookupCache.group(entity.groupId)
-    val frontProxy = thisGroup?.frontProxy?.let(lookupCache::proxy)
-    val landingProxy = thisGroup?.landingProxy?.let(lookupCache::proxy)
+    fun requiredHop(id: Long?) = id?.takeIf { it > 0 }?.let {
+        requireNotNull(lookupCache.proxy(it)) {
+            SagerNet.application.getString(R.string.chain_missing_hop, entity.displayName())
+        }
+    }
+    val frontProxy = requiredHop(thisGroup?.frontProxy)
+    val landingProxy = requiredHop(thisGroup?.landingProxy)
     val list = resolveChainInternal(entity)
     if (frontProxy != null) {
         list.add(frontProxy)
@@ -918,6 +923,23 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 pastEntity = proxyEntity
             }
 
+            // Parse custom JSON before committing the chain, so malformed rule targets can be blocked.
+            chainOutbounds.forEach { outbound ->
+                val json = SingBoxOptions.toJsonTree(outbound)
+                fun stringField(key: String) = json[key]?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                val port = json["server_port"]
+                require(
+                    !stringField("type").isNullOrBlank() &&
+                        stringField("tag") == outbound._hack_config_map["tag"] &&
+                        (!json.has("server") || !stringField("server").isNullOrBlank()) &&
+                        (
+                            port == null || (
+                                port.isJsonPrimitive && port.asJsonPrimitive.isNumber &&
+                                    port.asString.toIntOrNull()?.let { it in 1..65535 } == true
+                                )
+                            ),
+                ) { SagerNet.application.getString(R.string.route_proxy_invalid, entity.displayName()) }
+            }
             trafficMap[chainTagOut] = chainTrafficSet.toList()
             // Reserve only for a chain that built completely; a hop that fails later releases them.
             tailscaleProfiles += chainTailscaleProfiles
@@ -929,21 +951,43 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             return chainTagOut
         }
 
-        // A broken chain fails the build when it is the selected profile. As a group member or a
-        // rule outbound it is left out with a warning, so the service still starts.
+        // A broken selected profile fails the build. Rules targeting skipped profiles become blocks.
         fun buildChainOrSkip(chainId: Long, entity: ProxyEntity, selected: Boolean): String? {
             // buildChain appends to these as it goes; a hop that fails halfway must not leave an
             // outbound whose detour points at a tag that is never created, or a global tag for it.
             val appended = listOf(outbounds, endpointList, inbounds, routeRules, externalIndexMap).map { it to it.size }
             val globalBefore = HashMap(globalOutbounds)
+            val namesBefore = readableNames.toSet()
+            val bypassBefore = bypassDNSBeans.toSet()
+            val forceDnsSize = domainListDNSDirectForce.size
+            val resolverBefore = perGroupResolver.toMap()
+            val groupHostsBefore = perGroupServerHosts.mapValues { it.value.toMutableSet() }
+            val hostResolversBefore = hostResolvers.mapValues { it.value.toMutableSet() }
+            val finalHostsBefore = nonCustomFinalHosts.toSet()
+            val outboundHostsBefore = outboundHosts.keys.toSet()
+            val mappingResolversBefore = mappingResolvers.keys.toSet()
+            val credentialsBefore = localProxyCredentials.keys.toSet()
             return try {
                 buildChain(chainId, entity, selected)
-            } catch (e: IllegalArgumentException) {
-                if (entity.id == proxy.id) throw e
+            } catch (e: Exception) {
+                if (entity.id == proxy.id || e is kotlinx.coroutines.CancellationException) throw e
                 for ((list, size) in appended) list.subList(size, list.size).clear()
                 globalOutbounds.clear()
                 globalOutbounds.putAll(globalBefore)
-                runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
+                readableNames.retainAll(namesBefore)
+                bypassDNSBeans.retainAll(bypassBefore)
+                domainListDNSDirectForce.subList(forceDnsSize, domainListDNSDirectForce.size).clear()
+                perGroupResolver.clear()
+                perGroupResolver.putAll(resolverBefore)
+                perGroupServerHosts.clear()
+                perGroupServerHosts.putAll(groupHostsBefore)
+                hostResolvers.clear()
+                hostResolvers.putAll(hostResolversBefore)
+                nonCustomFinalHosts.retainAll(finalHostsBefore)
+                outboundHosts.keys.retainAll(outboundHostsBefore)
+                mappingResolvers.keys.retainAll(mappingResolversBefore)
+                localProxyCredentials.keys.retainAll(credentialsBefore)
+                if (selected) runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
                 null
             }
         }
@@ -982,7 +1026,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         }
         // build outbounds from route item
         extraProxies.forEach { (key, p) ->
-            buildChainOrSkip(key, p, false)?.let { tagMap[key] = it }
+            if (key !in tagMap) buildChainOrSkip(key, p, false)?.let { tagMap[key] = it }
         }
 
         // Profile DNS for all queries follows the selected profile, which a selector can switch
@@ -1087,6 +1131,29 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     }
                     PackageCache[it]?.takeIf { uid -> uid >= 1000 }
                 }.toHashSet().filterNotNull()
+                // Dropping an unresolved app condition would turn an app rule into a broader rule.
+                if (rule.packages.isNotEmpty() && uidList.isEmpty()) continue
+                val targetTag = when (rule.outbound) {
+                    0L -> mainProxyTag
+                    -1L -> TAG_BYPASS
+                    -2L -> TAG_BLOCK
+                    else -> tagMap[rule.outbound]
+                }
+                var unavailable = targetTag == null
+                val ruleDnsTag = "dns-rule-${rule.id}"
+                if (rule.dnsThroughOutbound && !unavailable) {
+                    try {
+                        rule.validateDnsRouting()
+                        dnsServers += proxyRuleDnsServer(
+                            rule.dnsServer.trim().ifEmpty { remoteDns.firstOrNull().orEmpty() },
+                            ruleDnsTag,
+                            checkNotNull(targetTag),
+                        )
+                        dns.reverse_mapping = true
+                    } catch (_: IllegalArgumentException) {
+                        unavailable = true
+                    }
+                }
                 val ruleSets = mutableListOf<RuleSet>()
 
                 val ruleObj = Rule_DefaultOptions().apply {
@@ -1175,10 +1242,17 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         (rule.packages.isEmpty() || uidList.isNotEmpty())
                     ) {
                         if (uidList.isNotEmpty()) dnsRule.user_id = uidList
-                        when (rule.outbound) {
-                            -1L -> dnsRule.server = "dns-direct"
+                        when {
+                            unavailable -> {
+                                dnsRule.action = "predefined"
+                                dnsRule.rcode = "REFUSED"
+                            }
 
-                            0L -> if (useFakeDns) {
+                            rule.dnsThroughOutbound -> dnsRule.server = ruleDnsTag
+
+                            rule.outbound == -1L -> dnsRule.server = "dns-direct"
+
+                            rule.outbound == 0L -> if (useFakeDns) {
                                 dnsRule.server = "dns-fake"
                                 dnsRule.inbound = listOf("tun-in")
                                 dnsRule.query_type = listOf("A", "AAAA")
@@ -1186,40 +1260,44 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                                 dnsRule.server = "dns-remote"
                             }
 
-                            -2L -> {
+                            rule.outbound == -2L -> {
                                 dnsRule.action = "predefined"
                                 dnsRule.rcode = "NOERROR"
                             }
                         }
-                        if (dnsRule.server != null || dnsRule.action != null) userDNSRuleList += dnsRule
+                        if ((enableDnsRouting || rule.dnsThroughOutbound || unavailable) &&
+                            (dnsRule.server != null || dnsRule.action != null)
+                        ) {
+                            userDNSRuleList += dnsRule
+                        }
                     }
 
-                    outbound = when (val outId = rule.outbound) {
-                        0L -> mainProxyTag
-                        -1L -> TAG_BYPASS
-                        -2L -> TAG_BLOCK
-                        else -> if (outId == proxy.id) mainProxyTag else tagMap[outId] ?: ""
-                    }
+                    outbound = if (unavailable) TAG_BLOCK else targetTag
 
                     _hack_custom_config = rule.config
                 }
 
                 if (!ruleObj.checkEmpty()) {
-                    if (ruleObj.outbound.isNullOrBlank()) {
-                        Toast.makeText(
-                            SagerNet.application,
-                            "Warning: " + rule.displayName() + ": A non-existent outbound was specified.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    } else {
-                        // block now uses the new approach
-                        if (ruleObj.outbound == TAG_BLOCK) {
-                            ruleObj.outbound = null
-                            ruleObj.action = "reject"
+                    if (unavailable) {
+                        runOnMainDispatcher {
+                            Toast.makeText(
+                                SagerNet.application,
+                                SagerNet.application.getString(R.string.route_proxy_unavailable, rule.displayName()),
+                                Toast.LENGTH_LONG,
+                            ).show()
                         }
-                        routeRules.add(ruleObj)
-                        routeRuleSets.addAll(ruleSets)
+                        // Preserve custom match criteria, but never let a custom action undo the guard.
+                        ruleObj._hack_custom_config = SingBoxOptions.toJsonTree(ruleObj).apply {
+                            remove("outbound")
+                            addProperty("action", "reject")
+                        }.toString()
                     }
+                    if (ruleObj.outbound == TAG_BLOCK) {
+                        ruleObj.outbound = null
+                        ruleObj.action = "reject"
+                    }
+                    routeRules.add(ruleObj)
+                    routeRuleSets.addAll(ruleSets)
                 }
             }
             addTailnetRouteRules()
@@ -1316,10 +1394,8 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
         dns.final_ = if (forTest) "dns-direct" else "dns-remote"
 
         // dns object user rules
-        if (enableDnsRouting) {
-            userDNSRuleList.forEach {
-                if (!it.checkEmpty()) dnsRules.add(it)
-            }
+        userDNSRuleList.forEach {
+            if (!it.checkEmpty()) dnsRules.add(it)
         }
 
         // Domains listed for a WireGuard profile's DNS, behind the user's own DNS rules.
@@ -1493,7 +1569,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
             val strategy = when {
                 rule.server == "dns-fake" -> "ipv4_only"
                 rule.server == "dns-direct" || rule.server?.startsWith("dns-sub-") == true -> directStrategy
-                rule.server == "dns-remote" || rule.server?.startsWith("dns-wg-") == true -> remoteStrategy
+                rule.server == "dns-remote" || rule.server?.startsWith("dns-wg-") == true || rule.server?.startsWith("dns-rule-") == true -> remoteStrategy
                 else -> null
             }
             dnsFamilyRules(rule, strategy)
