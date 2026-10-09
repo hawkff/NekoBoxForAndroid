@@ -133,6 +133,69 @@ class ClientTests(unittest.TestCase):
                     patch.object(api, "call", return_value={"package": args.package}) as invoke, patch.object(api.time, "sleep"):
                 yield args, rows, calls, invoke
 
+    @contextlib.contextmanager
+    def missing_device_config(self, still_exists=False):
+        shell = api.adb_shell
+
+        def read(*arguments, **kwargs):
+            if arguments[-2:] == ("cat", "no_backup/local-api.json"):
+                return SimpleNamespace(returncode=1, stdout=b"")
+            if arguments[-1] == "test ! -e no_backup/local-api.json":
+                return SimpleNamespace(returncode=int(still_exists), stdout=b"")
+            return shell(*arguments, **kwargs)
+
+        with patch.object(api, "adb_shell", side_effect=read):
+            yield
+
+    def test_disable_cleans_owned_host_state_when_device_config_is_missing(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        owned = ("emulator-5554", "tcp:42000", "tcp:9091")
+        foreign = ("another-device", "tcp:43000", "tcp:9091")
+        with self.enrollment(previous, [owned, foreign]) as (args, rows, _, invoke), self.missing_device_config():
+            self.assertEqual({"enabled": False}, api.configure(args, False))
+            self.assertEqual({foreign}, rows)
+            self.assertFalse(args.state.exists())
+            invoke.assert_not_called()
+
+    def test_missing_device_config_does_not_authorize_foreign_host_cleanup(self):
+        foreign = ("emulator-5554", "tcp:42000", "tcp:9999")
+        for other_owner in (True, False):
+            previous = {"serial": "another-device" if other_owner else "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+            with self.subTest(other_owner=other_owner), self.enrollment(previous, [foreign]) as (args, rows, calls, _), self.missing_device_config():
+                api.configure(args, False)
+                self.assertEqual({foreign}, rows)
+                self.assertEqual(other_owner, args.state.exists())
+                self.assertFalse(any("--remove" in call for call in calls))
+
+    def test_missing_config_with_legacy_state_keeps_unverifiable_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "token": TOKEN}
+        forwarding = ("emulator-5554", "tcp:42000", "tcp:9091")
+        warning = io.StringIO()
+        with self.enrollment(previous, [forwarding]) as (args, rows, _, _), self.missing_device_config(), contextlib.redirect_stderr(warning):
+            api.configure(args, False)
+            self.assertEqual({forwarding}, rows)
+            self.assertFalse(args.state.exists())
+        self.assertIn("unverified forward", warning.getvalue())
+        self.assertNotIn(TOKEN, warning.getvalue())
+
+    def test_missing_config_rejects_a_null_saved_destination(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": None, "token": TOKEN}
+        forwarding = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [forwarding]) as (args, rows, _, _), self.missing_device_config():
+            with self.assertRaisesRegex(ValueError, "Invalid saved forward"):
+                api.configure(args, False)
+            self.assertEqual({forwarding}, rows)
+            self.assertTrue(args.state.exists())
+
+    def test_unreadable_existing_device_config_keeps_saved_access(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        forwarding = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [forwarding]) as (args, rows, _, _), self.missing_device_config(still_exists=True):
+            with self.assertRaisesRegex(RuntimeError, "saved access was preserved"):
+                api.configure(args, False)
+            self.assertEqual({forwarding}, rows)
+            self.assertEqual(previous, json.loads(args.state.read_text()))
+
     def test_forward_listing_ignores_blank_and_malformed_rows(self):
         output = b"\nemulator-5554 tcp:42000 tcp:9091\n\npartial row\n"
         with patch.object(api, "adb", return_value=SimpleNamespace(stdout=output)):

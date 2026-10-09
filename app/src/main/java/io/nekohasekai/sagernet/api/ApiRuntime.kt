@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.api
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.preference.PreferenceDataStore
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.aidl.ISagerNetService
@@ -18,6 +19,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
+private const val TAILSCALE_RESULT_TIMEOUT_MS = 60_000L
+
 internal class ApiRuntime(private val context: Context) :
     SagerConnection.Callback,
     OnPreferenceDataStoreChangeListener {
@@ -34,7 +37,8 @@ internal class ApiRuntime(private val context: Context) :
     private val sequence = AtomicLong()
     private val sessions = ConcurrentHashMap<Long, JSONObject>()
     private val results = ConcurrentHashMap<Long, JSONObject>()
-    private val requests = ConcurrentHashMap<Long, Long>()
+    private data class TailscaleRequest(val sessionId: Long, val deadline: Long)
+    private val requests = ConcurrentHashMap<Long, TailscaleRequest>()
     private val jobs = LinkedHashMap<String, JSONObject>()
 
     @Volatile var busy = false
@@ -121,13 +125,41 @@ internal class ApiRuntime(private val context: Context) :
     }
 
     override fun cbTailscaleStatus(sessionId: Long, sequence: Long, json: String) {
-        if (sessions.containsKey(sessionId)) {
-            sessions[sessionId] = JSONObject().put("sessionId", sessionId).put("sequence", sequence).put("status", JSONObject(json))
+        val status = sessions.computeIfPresent(sessionId) { _, previous ->
+            if (closedTailscaleSession(previous) || previous.optLong("sequence", -1) >= sequence) {
+                previous
+            } else {
+                JSONObject().put("sessionId", sessionId).put("sequence", sequence).put("status", JSONObject(json))
+            }
+        } ?: return
+        if (closedTailscaleSession(status)) {
+            requests.filterValues { it.sessionId == sessionId }.keys.forEach {
+                unavailableTailscaleResult(it, "tailscale:session-closed")
+            }
         }
     }
 
     override fun cbTailscaleResult(sessionId: Long, requestId: Long, json: String) {
-        if (requests[requestId] == sessionId) results[requestId] = JSONObject(json)
+        if (requests[requestId]?.sessionId != sessionId) return
+        val incoming = JSONObject(json)
+        results.computeIfPresent(requestId) { _, previous ->
+            if (terminalTailscaleResult(previous) && !terminalTailscaleResult(incoming)) previous else incoming
+        }
+    }
+
+    private fun closedTailscaleSession(session: JSONObject) = session.optJSONObject("status")?.optString("stage") in setOf("closed", "error")
+
+    private fun terminalTailscaleResult(result: JSONObject?) = result?.optBoolean("done") == true || result?.optString("kind") == "exit"
+
+    private fun unavailableTailscaleResult(id: Long, code: String) {
+        results.computeIfPresent(id) { _, previous ->
+            if (terminalTailscaleResult(previous)) {
+                previous
+            } else {
+                JSONObject().put("state", "unavailable").put("done", true).put("errorCode", code)
+                    .put("message", "The outcome is unknown; refresh Tailscale status before retrying")
+            }
+        }
     }
 
     @Synchronized
@@ -177,7 +209,7 @@ internal class ApiRuntime(private val context: Context) :
         tailscaleStatus(id)
         connection.closeTailscaleSession(id)
         sessions.remove(id)
-        requests.entries.filter { it.value == id }.forEach { (requestId, _) ->
+        requests.entries.filter { it.value.sessionId == id }.forEach { (requestId, _) ->
             requests.remove(requestId)
             results.remove(requestId)
         }
@@ -189,15 +221,16 @@ internal class ApiRuntime(private val context: Context) :
         requireApi(timeout != null || (savedExit != null && savedExit.length <= TailscaleSessionController.MAX_EXIT_SELECTION_LENGTH), "Invalid exit selection")
         return withContext(Dispatchers.Main) {
             binder()
-            tailscaleStatus(sessionId)
+            if (closedTailscaleSession(tailscaleStatus(sessionId))) reject("session_closed", "Open a new Tailscale session")
             if (requests.size >= 64) reject("busy", "Close the session to discard completed requests")
-            val active = requests.count { (id, owner) ->
-                val result = results[id]
-                owner == sessionId && result?.optBoolean("done") != true && result?.optString("kind") != "exit"
+            val active = requests.count { (id, request) ->
+                request.sessionId == sessionId && !terminalTailscaleResult(tailscaleResult(id))
             }
             if (active >= TailscaleSessionController.MAX_SESSION_REQUESTS) reject("busy", "Wait for a Tailscale request to finish")
             val id = sequence.incrementAndGet()
-            requests[id] = sessionId
+            // One-way Binder admission can drop a request without a callback.
+            requests[id] = TailscaleRequest(sessionId, SystemClock.elapsedRealtime() + TAILSCALE_RESULT_TIMEOUT_MS)
+            results[id] = JSONObject().put("state", "pending")
             if (timeout != null) {
                 connection.pingTailscalePeer(sessionId, id, peer, timeout)
             } else {
@@ -208,13 +241,17 @@ internal class ApiRuntime(private val context: Context) :
     }
 
     fun tailscaleResult(id: Long): JSONObject {
-        if (!requests.containsKey(id)) reject("not_found", "Tailscale request is unknown")
-        return results[id] ?: JSONObject().put("state", "pending")
+        val request = requests[id] ?: reject("not_found", "Tailscale request is unknown")
+        if (!terminalTailscaleResult(results[id]) && SystemClock.elapsedRealtime() >= request.deadline) {
+            unavailableTailscaleResult(id, "tailscale:result-timeout")
+            runCatching { connection.cancelTailscaleRequest(request.sessionId, id) }
+        }
+        return results[id] ?: reject("not_found", "Tailscale request is unknown")
     }
 
     suspend fun cancelTailscale(id: Long) = withContext(Dispatchers.Main) {
-        val session = requests[id] ?: reject("not_found", "Tailscale request is unknown")
-        connection.cancelTailscaleRequest(session, id)
+        val request = requests[id] ?: reject("not_found", "Tailscale request is unknown")
+        connection.cancelTailscaleRequest(request.sessionId, id)
         JSONObject().put("accepted", true)
     }
 }

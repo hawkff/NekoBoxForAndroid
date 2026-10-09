@@ -26,6 +26,8 @@ python3 scripts/app-api.py --serial DEVICE_SERIAL enable --rotate
 python3 scripts/app-api.py --serial DEVICE_SERIAL disable
 ```
 
+Disabling also removes matching saved host credentials and an owned ADB forward when the device configuration is missing. If an existing configuration cannot be read, the client preserves saved access and reports an error. Legacy state without a recorded forward destination leaves that unverified listener in place with a warning.
+
 Release builds do not permit `run-as`. After enabling the API in the app, use an explicit forward such as `adb -s DEVICE_SERIAL forward tcp:19091 tcp:9091`, then connect to `http://127.0.0.1:19091` with the copied token. A client state file can contain `{"port":19091,"token":"YOUR_TOKEN"}` for HTTP-only use. Keep that file private.
 
 ## Requests and results
@@ -116,6 +118,8 @@ Profile and group deletion requires `confirm: true` and a stopped service. The A
 Use `service.test` for the running configuration, and `profiles.test` for a saved profile through the app's existing isolated probe implementation. Both return jobs. `service.traffic` reports the latest traffic sample; it remains empty before the first sample or when traffic sampling is disabled.
 
 For Tailscale, open a session with `tailscale.open` and poll `tailscale.status`. `check: true` permits a managed check of a stopped profile. Peer probes and exit-node changes return request IDs for `tailscale.result`. Exit changes require the exact `expectedSavedSelection` and `confirm: true`. Close sessions when finished. The API permits two sessions, admits at most four in-flight requests per session, and retains up to 64 requests. Peer IDs are limited to 256 UTF-16 code units and exit-selection baselines to 4096. Closing a session discards its requests. Login URLs remain data. The API does not open them.
+
+Requests for a `closed` or `error` session fail with `session_closed`. If the session closes or a result does not arrive within 60 seconds, `tailscale.result` returns `done: true`, `state: "unavailable"` and an `errorCode`. On timeout the API also requests cancellation. An unavailable result does not prove that an exit-node change was rolled back; refresh the node status before retrying. A late authoritative result can replace the unavailable reply, but late progress cannot return it to pending.
 
 ### Settings, routing and screens
 

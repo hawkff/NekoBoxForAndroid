@@ -86,6 +86,14 @@ def configure(args, enabled):
         config = validate_config(json.loads(existing.stdout))
     else:
         if not enabled:
+            absent = adb_shell(args.serial, "run-as", args.package, "sh", "-c", "test ! -e no_backup/local-api.json", check=False)
+            if absent.returncode:
+                raise RuntimeError("API configuration could not be read; saved access was preserved")
+            if matching:
+                forward = saved_forward(args, previous)
+                if forward is not None:
+                    remove_forward(forward)
+                args.state.unlink()
             return {"enabled": False}
         config = {"enabled": True, "port": 9091, "token": secrets.token_hex(32)}
     previous_config = config.copy() if existing.returncode == 0 else config | {"enabled": False}
@@ -93,15 +101,7 @@ def configure(args, enabled):
     if args.rotate:
         config["token"] = secrets.token_hex(32)
     validate_config(config)
-    old_forward = None
-    if matching:
-        port = previous.get("port")
-        device_port = previous.get("devicePort", config["port"])
-        if type(port) is not int or not 1 <= port <= 65535 or type(device_port) is not int or not 1024 <= device_port <= 65535:
-            raise ValueError("Invalid saved forward")
-        candidate = (args.serial, f"tcp:{port}", f"tcp:{device_port}")
-        if candidate in forward_list(args.serial):
-            old_forward = candidate
+    old_forward = saved_forward(args, previous, config["port"]) if matching else None
     if not enabled:
         apply_device_config(args, config)
         if matching:
@@ -150,6 +150,21 @@ def configure(args, enabled):
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             print(f"Warning: new connection saved; could not retire previous forward {old_forward[1]}", file=sys.stderr)
     return {"enabled": True, "port": port, "stateFile": str(args.state), "app": result}
+
+
+def saved_forward(args, previous, default_device_port=None):
+    port = previous.get("port")
+    device_port = previous.get("devicePort", default_device_port)
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Invalid saved forward")
+    # Without a recorded destination, an old forward cannot be proved to belong to this client.
+    if device_port is None and "devicePort" not in previous:
+        print(f"Warning: destination unknown; unverified forward tcp:{port} was preserved", file=sys.stderr)
+        return None
+    if type(device_port) is not int or not 1024 <= device_port <= 65535:
+        raise ValueError("Invalid saved forward")
+    candidate = (args.serial, f"tcp:{port}", f"tcp:{device_port}")
+    return candidate if candidate in forward_list(args.serial) else None
 
 
 def forward_list(serial):

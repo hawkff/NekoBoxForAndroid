@@ -20,6 +20,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowSystemClock
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
@@ -163,6 +165,81 @@ class ApiRuntimeTest {
             assertEquals(session + 1, accepted)
             runtime.tailscaleRequest(session, "p".repeat(256), null, "e".repeat(4096))
             assertEquals(1, fixture.calls.count { it.first == "setTailscaleExitNode" })
+        } finally {
+            runtime.close()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun closedSessionsFinishPendingRequestsAndCannotReopenFromLateStatus() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            for (stage in listOf("closed", "error")) {
+                val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication())
+                val runtime = ApiRuntime(fixture.context)
+                try {
+                    runtime.connect()
+                    val profile = ProxyEntity(id = 42, uuid = "fixture").putBean(TailscaleBean().apply { initializeDefaultValues() })
+                    val session = runtime.openTailscale(profile, false).getLong("sessionId")
+                    val ping = runtime.tailscaleRequest(session, "peer", 1000, null).getLong("requestId")
+                    val exit = runtime.tailscaleRequest(session, "peer", null, "").getLong("requestId")
+                    fixture.callback.cbTailscaleStatus(session, 1, """{"stage":"$stage"}""")
+                    runCurrent()
+                    for (id in listOf(ping, exit)) {
+                        val result = runtime.tailscaleResult(id)
+                        assertTrue(result.getBoolean("done"))
+                        assertEquals("unavailable", result.getString("state"))
+                        assertFalse(result.has("outcome"))
+                    }
+                    assertEquals("session_closed", (runCatching { runtime.tailscaleRequest(session, "peer", 1000, null) }.exceptionOrNull() as ApiFailure).code)
+                    fixture.callback.cbTailscaleStatus(session, 2, """{"stage":"observing"}""")
+                    fixture.callback.cbTailscaleResult(session, ping, """{"kind":"ping","done":false}""")
+                    fixture.callback.cbTailscaleResult(session, exit, """{"kind":"exit","outcome":"saved-for-next-start"}""")
+                    runCurrent()
+                    assertEquals(stage, runtime.tailscaleStatus(session).getJSONObject("status").getString("stage"))
+                    assertTrue(runtime.tailscaleResult(ping).getBoolean("done"))
+                    assertEquals("saved-for-next-start", runtime.tailscaleResult(exit).getString("outcome"))
+                    runtime.closeTailscale(session)
+                    assertEquals("not_found", (runCatching { runtime.tailscaleResult(ping) }.exceptionOrNull() as ApiFailure).code)
+                    assertEquals(exit + 1, runtime.openTailscale(profile, false).getLong("sessionId"))
+                } finally {
+                    runtime.close()
+                }
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun missingCallbacksExpireWithoutClaimingAnExitWasRolledBack() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication())
+        val runtime = ApiRuntime(fixture.context)
+        try {
+            runtime.connect()
+            val profile = ProxyEntity(id = 42, uuid = "fixture").putBean(TailscaleBean().apply { initializeDefaultValues() })
+            val session = runtime.openTailscale(profile, false).getLong("sessionId")
+            val exit = runtime.tailscaleRequest(session, "peer", null, "").getLong("requestId")
+            val pings = List(3) { runtime.tailscaleRequest(session, "peer", 1000, null).getLong("requestId") }
+            assertEquals("pending", runtime.tailscaleResult(exit).getString("state"))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(61))
+            runtime.tailscaleRequest(session, "peer", 1000, null)
+            for (id in pings + exit) {
+                val result = runtime.tailscaleResult(id)
+                assertTrue(result.getBoolean("done"))
+                assertEquals("tailscale:result-timeout", result.getString("errorCode"))
+                assertFalse(result.has("outcome"))
+            }
+            assertEquals(4, fixture.calls.count { it.first == "cancelTailscaleRequest" })
+            fixture.callback.cbTailscaleResult(session, pings.first(), """{"kind":"ping","done":false}""")
+            fixture.callback.cbTailscaleResult(session, exit, """{"kind":"exit","outcome":"applied-and-saved"}""")
+            runCurrent()
+            assertTrue(runtime.tailscaleResult(pings.first()).getBoolean("done"))
+            assertEquals("applied-and-saved", runtime.tailscaleResult(exit).getString("outcome"))
         } finally {
             runtime.close()
             Dispatchers.resetMain()
