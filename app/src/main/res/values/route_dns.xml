@@ -9,6 +9,7 @@
     <string name="route_dns_match_error">Use an app or domain rule without IP addresses, ports, network, protocol, source, custom JSON or IP rule sets. DNS requests do not carry those connection details.</string>
     <string name="route_dns_proxy_error">Choose Proxy or Select Profile as the outbound to use DNS through a proxy.</string>
     <string name="route_dns_server_error">Enter one supported remote DNS address or URL. Local DNS cannot go through a proxy.</string>
+    <string name="route_apps_unavailable">Rule %1$s is inactive: none of its applications are installed or accessible. Check its application selection.</string>
     <string name="route_proxy_invalid">Profile %1$s contains invalid outbound settings.</string>
     <string name="route_proxy_unavailable">Rule %1$s: the proxy or DNS settings are unavailable or invalid. Matching traffic is blocked. Repair the profile or edit the rule.</string>
 </resources>

@@ -1,6 +1,8 @@
 package io.nekohasekai.sagernet.fmt
 
+import android.os.Looper
 import io.nekohasekai.sagernet.Key
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -8,11 +10,14 @@ import io.nekohasekai.sagernet.database.RuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
+import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.applyDefaultValues
 import io.nekohasekai.sagernet.utils.PackageCache
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -21,7 +26,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
@@ -29,9 +37,13 @@ class ProxyRuleSafetyTest {
     private lateinit var main: ProxyEntity
     private lateinit var extra: ProxyEntity
     private val apps = setOf("test.bank")
+    private val originalLogSink = Logs.sink
+    private val diagnostics = mutableListOf<String>()
 
     @Before
     fun setUp() {
+        Logs.sink = { diagnostics += it }
+        ShadowToast.reset()
         ConfigBuilderTestEnv.reset()
         DataStore.serviceMode = Key.MODE_VPN
         PackageCache.packageMap = mapOf("test.bank" to 10001, "test.browser" to 10002)
@@ -49,6 +61,11 @@ class ProxyRuleSafetyTest {
             main = profile("main")
             extra = profile("residential")
         }
+    }
+
+    @After
+    fun tearDown() {
+        Logs.sink = originalLogSink
     }
 
     @Test
@@ -95,6 +112,9 @@ class ProxyRuleSafetyTest {
         for (json in listOf(
             """{"server":[]}""",
             """{"type":true}""",
+            """{"type":"not-a-proxy"}""",
+            """{"type":"dns"}""",
+            """{"type":"tailscale"}""",
             """{"tag":{}}""",
             """{"server_port":"443"}""",
             """{"server_port":443.5}""",
@@ -114,6 +134,71 @@ class ProxyRuleSafetyTest {
             )
             main.requireBean().customOutboundJson = ""
         }
+    }
+
+    @Test
+    fun customOutboundTypes_followTheBundledRegistry() {
+        val registry = File("../libcore/box_include.go").readText()
+            .substringAfter("func nekoboxAndroidOutboundRegistry()")
+            .substringBefore("func nekoboxAndroidEndpointRegistry()")
+        val types = Regex("(\\w+)\\.RegisterOutbound\\(registry\\)").findAll(registry)
+            .map { it.groupValues[1] }.filterNot { it == "protocolDns" }
+            .map { if (it == "snellprotocol") "snell" else it }.toSet() + setOf("selector", "urltest")
+        assertTrue(types.containsAll(listOf("socks", "shadowsocksr", "juicity", "amneziawg")))
+        for (type in types) {
+            ConfigBuilderTestEnv.io {
+                SagerDatabase.proxyDao.updateProxy(
+                    extra.putBean(
+                        ConfigBean().applyDefaultValues().apply {
+                            this.type = 1
+                            name = "custom-outbound"
+                            config = JSONObject().put("type", type).toString()
+                        },
+                    ),
+                )
+            }
+            rules(RuleEntity(packages = apps, outbound = extra.id))
+            assertEquals(type, "custom-outbound", appRoutes(build()).single().getString("outbound"))
+        }
+    }
+
+    @Test
+    fun failedTargetLogsCauseAndLocation_withoutConfigurationDetails() {
+        ConfigBuilderTestEnv.io {
+            SagerDatabase.proxyDao.updateProxy(
+                extra.putBean(
+                    ConfigBean().applyDefaultValues().apply {
+                        type = 1
+                        name = "private-profile-name"
+                        config = """{"server":"private-proxy.example","password":"secret-fixture-value","type": """
+                    },
+                ),
+            )
+        }
+        rules(RuleEntity(packages = apps, outbound = extra.id))
+        assertEquals("reject", appRoutes(build()).single().getString("action"))
+        val diagnostic = diagnostics.single()
+        assertTrue(diagnostic.contains("Proxy ${extra.id}"))
+        assertTrue(diagnostic.contains("JsonSyntaxException"))
+        assertTrue(diagnostic.contains(" at "))
+        assertFalse(diagnostic.contains("private-profile-name"))
+        assertFalse(diagnostic.contains("private-proxy.example"))
+        assertFalse(diagnostic.contains("secret-fixture-value"))
+    }
+
+    @Test
+    fun delimiterOnlyRulesets_areRejectedAndBlockAppDns() {
+        for (value in listOf(",", " , , ", ",\n,\n")) {
+            val rule = RuleEntity(packages = apps, outbound = extra.id, dnsThroughOutbound = true, ruleset = value)
+            assertThrows(IllegalArgumentException::class.java) { rule.validateDnsRouting() }
+            assertThrows(IllegalArgumentException::class.java) { rule.copy(packages = emptySet()).validateDnsRouting() }
+            rules(rule)
+            val config = build()
+            assertEquals("reject", appRoutes(config).single().getString("action"))
+            assertEquals("REFUSED", appDns(config).single().getString("rcode"))
+        }
+        RuleEntity(packages = apps, outbound = extra.id, dnsThroughOutbound = true).validateDnsRouting()
+        RuleEntity(outbound = extra.id, dnsThroughOutbound = true, ruleset = "rssite:https://rules.example/domains.srs").validateDnsRouting()
     }
 
     @Test
@@ -155,11 +240,13 @@ class ProxyRuleSafetyTest {
 
     @Test
     fun unresolvedApps_neverBroadenARouteOrDnsRule() {
-        rules(RuleEntity(packages = setOf("missing.app"), domains = "bank.example", outbound = Long.MAX_VALUE))
+        rules(RuleEntity(name = "Missing app", packages = setOf("missing.app"), domains = "bank.example", outbound = Long.MAX_VALUE))
         val config = build()
         assertTrue(appRoutes(config).isEmpty())
         assertFalse(config.getJSONObject("route").getJSONArray("rules").toString().contains("bank.example"))
         assertFalse(config.getJSONObject("dns").getJSONArray("rules").toString().contains("bank.example"))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(app.getString(R.string.route_apps_unavailable, "Missing app"), ShadowToast.getTextOfLatestToast())
     }
 
     @Test

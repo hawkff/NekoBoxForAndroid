@@ -74,12 +74,14 @@ internal fun RuleEntity.validateDnsRouting() {
     if (!dnsThroughOutbound) return
     require(outbound >= 0) { app.getString(R.string.route_dns_proxy_error) }
     val domainRule = DNSRule_DefaultOptions().apply { makeSingBoxRule(domains.listByLineOrComma()) }
+    val ruleSets = ruleset.listByLineOrComma()
     require(
         ip.isBlank() && port.isBlank() && sourcePort.isBlank() && network.isBlank() &&
             source.isBlank() && protocol.isBlank() && config.isBlank() &&
-            ruleset.listByLineOrComma().all { it.startsWith("rssite:") } &&
+            (ruleset.isBlank() || ruleSets.isNotEmpty()) &&
+            ruleSets.all { it.startsWith("rssite:") } &&
             (domains.isBlank() || !domainRule.checkEmpty()) &&
-            (packages.isNotEmpty() || !domainRule.checkEmpty() || ruleset.isNotBlank()),
+            (packages.isNotEmpty() || !domainRule.checkEmpty() || ruleSets.isNotEmpty()),
     ) { app.getString(R.string.route_dns_match_error) }
     if (dnsServer.isNotBlank()) proxyRuleDnsServer(dnsServer.trim(), "dns-check", "proxy")
 }

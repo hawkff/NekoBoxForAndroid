@@ -40,6 +40,7 @@ import io.nekohasekai.sagernet.fmt.wireguard.WireGuardDnsMode
 import io.nekohasekai.sagernet.fmt.wireguard.WireGuardProfileDns
 import io.nekohasekai.sagernet.fmt.wireguard.buildSingBoxOutboundWireguardBean
 import io.nekohasekai.sagernet.fmt.wireguard.wireGuardProfileDns
+import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.ktx.readableMessage
@@ -170,6 +171,13 @@ const val TAG_FRAGMENT = "fragment"
 const val TAG_DNS_HOSTS = "dns-hosts"
 
 const val LOCALHOST = "127.0.0.1"
+
+// Mirrors libcore/box_include.go, except the legacy DNS type rejected by the core decoder.
+private val coreOutboundTypes = setOf(
+    "direct", "block", "selector", "urltest", "socks", "http", "shadowsocks", "shadowsocksr",
+    "vmess", "trojan", "tor", "ssh", "shadowtls", "vless", "anytls", "snell",
+    "hysteria", "tuic", "hysteria2", "juicity", "wireguard", "amneziawg",
+)
 
 // IANA STUN/TURN ports (plain and TLS) plus Google's 19302-19309 STUN/TURN range. Only
 // the fallback for what the STUN sniffer cannot see: TURN over TCP or TLS.
@@ -928,8 +936,9 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 val json = SingBoxOptions.toJsonTree(outbound)
                 fun stringField(key: String) = json[key]?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
                 val port = json["server_port"]
+                val types = if (outbound is Endpoint) setOf("wireguard", "tailscale") else coreOutboundTypes
                 require(
-                    !stringField("type").isNullOrBlank() &&
+                    stringField("type") in types &&
                         stringField("tag") == outbound._hack_config_map["tag"] &&
                         (!json.has("server") || !stringField("server").isNullOrBlank()) &&
                         (
@@ -987,7 +996,12 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                 outboundHosts.keys.retainAll(outboundHostsBefore)
                 mappingResolvers.keys.retainAll(mappingResolversBefore)
                 localProxyCredentials.keys.retainAll(credentialsBefore)
-                if (selected) runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
+                if (selected) {
+                    runOnMainDispatcher { Toast.makeText(SagerNet.application, e.readableMessage, Toast.LENGTH_LONG).show() }
+                } else {
+                    // Exception messages can contain credentials; the class and source location do not.
+                    Logs.w("Proxy ${entity.id} could not be built: ${e.javaClass.name} at ${e.stackTrace.firstOrNull()}")
+                }
                 null
             }
         }
@@ -1132,7 +1146,16 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                     PackageCache[it]?.takeIf { uid -> uid >= 1000 }
                 }.toHashSet().filterNotNull()
                 // Dropping an unresolved app condition would turn an app rule into a broader rule.
-                if (rule.packages.isNotEmpty() && uidList.isEmpty()) continue
+                if (rule.packages.isNotEmpty() && uidList.isEmpty()) {
+                    runOnMainDispatcher {
+                        Toast.makeText(
+                            SagerNet.application,
+                            SagerNet.application.getString(R.string.route_apps_unavailable, rule.displayName()),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    continue
+                }
                 val targetTag = when (rule.outbound) {
                     0L -> mainProxyTag
                     -1L -> TAG_BYPASS
@@ -1233,7 +1256,7 @@ fun buildConfig(proxy: ProxyEntity, forTest: Boolean = false, forExport: Boolean
                         rule.network.isNotBlank() || rule.source.isNotBlank() ||
                         rule.protocol.isNotBlank() || rule.config.isNotBlank()
                     val isAppOnlyDns = uidList.isNotEmpty() &&
-                        rule.domains.isBlank() && rule.ip.isBlank() && rule.ruleset.isBlank()
+                        rule.domains.isBlank() && rule.ip.isBlank() && rule.ruleset.listByLineOrComma().isEmpty()
 
                     // DNS cannot infer the later connection's ports, network or protocol.
                     // Custom JSON may invert or replace criteria. Skip these projections rather
