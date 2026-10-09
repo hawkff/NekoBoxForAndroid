@@ -13,6 +13,9 @@ __MACOSX/
 AGENTS.md
 /info_for_agents/
 
+# Python tooling
+__pycache__/
+
 # Gradle / Kotlin build state
 .gradle/
 .kotlin/

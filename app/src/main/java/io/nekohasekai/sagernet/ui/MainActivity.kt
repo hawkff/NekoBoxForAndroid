@@ -2,8 +2,6 @@ package io.nekohasekai.sagernet.ui
 
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.annotation.SuppressLint
-import android.app.ActivityManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -28,6 +26,8 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficData
+import io.nekohasekai.sagernet.api.ApiUi
+import io.nekohasekai.sagernet.api.LocalApiAccess
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.NetworkAutomationService
 import io.nekohasekai.sagernet.bg.SagerConnection
@@ -151,23 +151,10 @@ class MainActivity :
     override fun onResume() {
         super.onResume()
         MessageStore.setCurrentActivity(this)
+        ApiUi.attach(this)
+        LocalApiAccess.sync(this)
 
-        if (DataStore.hideFromRecentApps) {
-            applyHideFromRecentApps(DataStore.hideFromRecentApps)
-        }
-    }
-
-    fun applyHideFromRecentApps(hide: Boolean) {
-        try {
-            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val tasks = activityManager.appTasks
-            if (tasks.isNotEmpty()) {
-                val task = tasks[0]
-                task.setExcludeFromRecents(hide)
-            }
-        } catch (e: Exception) {
-            Logs.w("Failed to set excludeFromRecents: ${e.message}")
-        }
+        applyHideFromRecentApps(DataStore.hideFromRecentApps)
     }
 
     fun refreshNavMenu(clashApi: Boolean) {
@@ -178,6 +165,7 @@ class MainActivity :
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        LocalApiAccess.sync(this)
 
         val uri = intent.data ?: return
 

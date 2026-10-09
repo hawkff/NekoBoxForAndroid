@@ -249,6 +249,10 @@ The app reads these keys from response headers or from `#key: value` lines at th
 
 <br>
 
+## Local control API
+
+An optional token-authenticated loopback API controls profiles, subscriptions, routing, settings and service operations. See [API.md](API.md) for enrollment, command discovery and the Python client. It is off by default and keeps Android permission checks.
+
 ## Usage and crash reporting
 
 Settings > Advanced > **Help to improve** controls PostHog and Sentry together. The switch defaults to on. A build without account settings sends nothing. Turning it off stops reporting in both the UI and VPN processes without restarting the VPN. A request already in flight may still reach the provider.

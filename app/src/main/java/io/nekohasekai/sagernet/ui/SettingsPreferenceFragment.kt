@@ -21,6 +21,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.api.LocalApiAccess
 import io.nekohasekai.sagernet.bg.LocationSpoofing
 import io.nekohasekai.sagernet.bg.LocationTurnOffReceiver
 import io.nekohasekai.sagernet.bg.NetworkAutomation
@@ -484,6 +485,10 @@ class SettingsPreferenceFragment : PreferenceFragmentCompat() {
     }
 
     private fun setupAdvanced() {
+        findPreference<Preference>("localControlApi")?.setOnPreferenceClickListener {
+            LocalApiAccess.showSettings(requireActivity())
+            true
+        }
         findPreference<LongClickListPreference>(Key.LOG_LEVEL)?.apply {
             dialogLayoutResource = R.layout.layout_loglevel_help
             setOnPreferenceChangeListener { _, _ ->

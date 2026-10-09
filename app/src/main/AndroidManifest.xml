@@ -359,6 +359,15 @@
         </service>
 
         <service
+            android:name="io.nekohasekai.sagernet.api.LocalApiService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Provides the authenticated loopback app-control API while explicitly enabled" />
+        </service>
+
+        <service
             android:name="io.nekohasekai.sagernet.bg.NetworkAutomationService"
             android:exported="false"
             android:foregroundServiceType="specialUse"

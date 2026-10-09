@@ -11,6 +11,8 @@ import io.nekohasekai.sagernet.fmt.Serializable
 import io.nekohasekai.sagernet.ktx.app
 import moe.matsuri.nb4a.proxy.config.ConfigBean
 
+internal fun ProxyEntity.isUsableChainHop() = canBuild() && requireBean().let { it !is ConfigBean || it.type != 0 }
+
 /**
  * Hops of [entity] in dial order: the first hop is dialed directly, the last hop reaches the
  * destination. Nested chains are inlined in their own order. A chain without hops, a hop whose
@@ -22,7 +24,7 @@ fun chainHops(entity: ProxyEntity, visiting: MutableSet<Long> = linkedSetOf()): 
     if (bean !is ChainBean) {
         // A full custom config replaces the generated config as a whole; inlined as one outbound
         // the core rejects it.
-        require(entity.canBuild() && (bean !is ConfigBean || bean.type != 0)) {
+        require(entity.isUsableChainHop()) {
             app.getString(R.string.chain_hop_unsupported, entity.displayName())
         }
         return listOf(entity)

@@ -22,12 +22,13 @@ class SagerConnection(
     IBinder.DeathRecipient {
 
     companion object {
-        val serviceClass
-            get() = when (DataStore.serviceMode) {
-                Key.MODE_PROXY -> ProxyService::class
-                Key.MODE_VPN -> VpnService::class
-                else -> throw UnknownError()
-            }.java
+        val serviceClass get() = serviceClassForMode(DataStore.serviceMode)
+
+        private fun serviceClassForMode(mode: String) = when (mode) {
+            Key.MODE_PROXY -> ProxyService::class
+            Key.MODE_VPN -> VpnService::class
+            else -> throw UnknownError()
+        }.java
 
         const val CONNECTION_ID_SHORTCUT = 0
         const val CONNECTION_ID_TILE = 1
@@ -38,6 +39,7 @@ class SagerConnection(
         const val CONNECTION_ID_TAILSCALE_SETTINGS = 6
         const val CONNECTION_ID_TAILSCALE_STATUS = 7
         const val CONNECTION_ID_WIREGUARD_STATUS = 8
+        const val CONNECTION_ID_LOCAL_API = 9
 
         var restartingApp = false
     }
@@ -66,6 +68,9 @@ class SagerConnection(
         fun onServiceDisconnected() {}
         fun onBinderDied() {}
     }
+
+    @Volatile var boundMode: String? = null
+        private set
 
     private var connectionActive = false
     private var callbackRegistered = false
@@ -162,6 +167,8 @@ class SagerConnection(
     }
 
     override fun onServiceConnected(name: ComponentName?, binder: IBinder) {
+        val mode = boundMode ?: return
+        if (name != null && name.className != serviceClassForMode(mode).name) return
         epoch++
         serviceCallback = newServiceCallback(epoch)
         this.binder = binder
@@ -221,7 +228,9 @@ class SagerConnection(
         connectionActive = true
         check(this.callback == null)
         this.callback = callback
-        val intent = Intent(context, serviceClass).setAction(Action.SERVICE)
+        val mode = DataStore.serviceMode
+        val intent = Intent(context, serviceClassForMode(mode)).setAction(Action.SERVICE)
+        boundMode = mode
         context.bindService(intent, this, Context.BIND_AUTO_CREATE)
     }
 
@@ -236,6 +245,7 @@ class SagerConnection(
             } // ignore
         }
         connectionActive = false
+        boundMode = null
         if (listenForDeath || connectionId == CONNECTION_ID_TAILSCALE_STATUS) {
             try {
                 deathRecipient?.let { binder?.unlinkToDeath(it, 0) }

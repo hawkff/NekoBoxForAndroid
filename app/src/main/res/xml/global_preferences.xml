@@ -451,6 +451,11 @@
             app:title="@string/connection_test_url"
             app:useSimpleSummaryProvider="true" />
         <Preference
+            app:icon="@drawable/ic_device_developer_mode"
+            app:key="localControlApi"
+            app:summary="@string/local_api_summary"
+            app:title="@string/local_api_title" />
+        <Preference
             app:icon="@drawable/baseline_undo_24"
             app:key="resetSettings"
             app:title="@string/reset_settings" />
