@@ -107,6 +107,7 @@ class ClientTests(unittest.TestCase):
             rows = set(forwards)
             calls = []
             config = {"enabled": True, "port": device_port, "token": TOKEN}
+            args.device_config = config
 
             def adb(serial, *arguments, **_):
                 calls.append((serial, *arguments))
@@ -122,7 +123,10 @@ class ClientTests(unittest.TestCase):
                     self.fail(f"Unexpected adb operation: {arguments}")
                 return SimpleNamespace(returncode=0, stdout=data)
 
-            def shell(*_, **__):
+            def shell(*_, data=None, **__):
+                if data is not None:
+                    config.clear()
+                    config.update(json.loads(data))
                 return SimpleNamespace(returncode=0, stdout=json.dumps(config).encode())
 
             with patch.object(api, "adb", side_effect=adb), patch.object(api, "adb_shell", side_effect=shell), \
@@ -179,11 +183,52 @@ class ClientTests(unittest.TestCase):
         previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
         old = ("emulator-5554", "tcp:42000", "tcp:9091")
         with self.enrollment(previous, [old], device_port=9191) as (args, rows, _, _):
-            with patch.object(api, "remove_forward", side_effect=RuntimeError("cleanup failed")), self.assertRaisesRegex(RuntimeError, "New connection saved"):
-                api.configure(args, True)
+            warning = io.StringIO()
+            with patch.object(api, "remove_forward", side_effect=RuntimeError("cleanup failed")), contextlib.redirect_stderr(warning):
+                result = api.configure(args, True)
+            self.assertTrue(result["enabled"])
+            self.assertIn("Warning:", warning.getvalue())
+            self.assertIn("tcp:42000", warning.getvalue())
             self.assertEqual(42001, json.loads(args.state.read_text())["port"])
             self.assertIn((args.serial, "tcp:42001", "tcp:9191"), rows)
             self.assertIn(old, rows)
+
+    def test_failed_rotation_restores_device_credentials_on_a_reused_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        old = ("emulator-5554", "tcp:42000", "tcp:9091")
+        for failure in ("readiness", "save"):
+            with self.subTest(failure=failure), self.enrollment(previous, [old]) as (args, rows, _, invoke):
+                original = args.device_config.copy()
+                args.rotate = True
+                if failure == "readiness":
+                    invoke.side_effect = RuntimeError("not ready")
+                    with self.assertRaises(RuntimeError):
+                        api.configure(args, True)
+                else:
+                    with patch.object(api, "save_private", side_effect=OSError("disk full")), self.assertRaises(OSError):
+                        api.configure(args, True)
+                self.assertEqual(original, args.device_config)
+                self.assertEqual(previous, json.loads(args.state.read_text()))
+                self.assertEqual({old}, rows)
+
+    def test_failed_rotation_restores_config_if_forward_allocation_fails(self):
+        with self.enrollment() as (args, rows, _, _):
+            original = args.device_config.copy()
+            args.rotate = True
+            with patch.object(api, "adb", side_effect=RuntimeError("forward failed")), self.assertRaisesRegex(RuntimeError, "forward failed"):
+                api.configure(args, True)
+            self.assertEqual(original, args.device_config)
+            self.assertFalse(args.state.exists())
+            self.assertFalse(rows)
+
+    def test_failed_rotation_reports_unrecoverable_device_config_without_secrets(self):
+        with self.enrollment() as (args, rows, _, invoke):
+            args.rotate = True
+            invoke.side_effect = RuntimeError("not ready")
+            with patch.object(api, "apply_device_config", side_effect=[None, RuntimeError("restore failed")]), self.assertRaisesRegex(RuntimeError, "could not be restored") as failure:
+                api.configure(args, True)
+            self.assertNotIn(TOKEN, str(failure.exception))
+            self.assertFalse(rows)
 
     def test_stale_state_does_not_delete_a_foreign_forward(self):
         previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}

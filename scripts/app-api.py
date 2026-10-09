@@ -58,6 +58,17 @@ def adb_shell(serial, *arguments, data=None, check=True):
     return adb(serial, "shell", shlex.join(arguments), data=data, check=check)
 
 
+def apply_device_config(args, config):
+    # The token goes through stdin, never through command arguments or terminal output.
+    adb_shell(
+        args.serial, "run-as", args.package, "sh", "-c",
+        "umask 077; mkdir -p no_backup && cat > no_backup/local-api.json.tmp "
+        "&& mv no_backup/local-api.json.tmp no_backup/local-api.json",
+        data=json.dumps(config).encode(),
+    )
+    adb_shell(args.serial, "am", "start", "-n", f"{args.package}/io.nekohasekai.sagernet.ui.MainActivity")
+
+
 def configure(args, enabled):
     if not args.serial or not re.fullmatch(r"[A-Za-z0-9_.:-]+", args.serial):
         raise ValueError("An explicit --serial is required")
@@ -77,6 +88,7 @@ def configure(args, enabled):
         if not enabled:
             return {"enabled": False}
         config = {"enabled": True, "port": 9091, "token": secrets.token_hex(32)}
+    previous_config = config.copy() if existing.returncode == 0 else config | {"enabled": False}
     config["enabled"] = enabled
     if args.rotate:
         config["token"] = secrets.token_hex(32)
@@ -90,28 +102,24 @@ def configure(args, enabled):
         candidate = (args.serial, f"tcp:{port}", f"tcp:{device_port}")
         if candidate in forward_list(args.serial):
             old_forward = candidate
-    # The token goes through stdin, never through command arguments or terminal output.
-    adb_shell(
-        args.serial, "run-as", args.package, "sh", "-c",
-        "umask 077; mkdir -p no_backup && cat > no_backup/local-api.json.tmp "
-        "&& mv no_backup/local-api.json.tmp no_backup/local-api.json",
-        data=json.dumps(config).encode(),
-    )
-    adb_shell(args.serial, "am", "start", "-n", f"{args.package}/io.nekohasekai.sagernet.ui.MainActivity")
     if not enabled:
+        apply_device_config(args, config)
         if matching:
             if old_forward is not None:
                 remove_forward(old_forward)
             args.state.unlink()
         return {"enabled": False}
     reused = old_forward is not None and old_forward[2] == f"tcp:{config['port']}"
-    if reused:
-        port = previous["port"]
-    else:
-        forwarded = adb(args.serial, "forward", "--no-rebind", "tcp:0", f"tcp:{config['port']}")
-        port = int(forwarded.stdout.strip())
-    state = {"serial": args.serial, "package": args.package, "port": port, "devicePort": config["port"], "token": config["token"]}
+    new_forward = None
     try:
+        apply_device_config(args, config)
+        if reused:
+            port = previous["port"]
+        else:
+            forwarded = adb(args.serial, "forward", "--no-rebind", "tcp:0", f"tcp:{config['port']}")
+            port = int(forwarded.stdout.strip())
+            new_forward = (args.serial, f"tcp:{port}", f"tcp:{config['port']}")
+        state = {"serial": args.serial, "package": args.package, "port": port, "devicePort": config["port"], "token": config["token"]}
         for _ in range(40):
             try:
                 result = call(state, "app.status", {})
@@ -122,14 +130,25 @@ def configure(args, enabled):
             raise RuntimeError("API did not become ready; inspect the API notification and app logs")
         save_private(args.state, state)
     except BaseException:
-        if not reused:
-            remove_forward((args.serial, f"tcp:{port}", f"tcp:{config['port']}"))
+        restored = False
+        try:
+            apply_device_config(args, previous_config)
+            restored = True
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            pass
+        if new_forward is not None:
+            try:
+                remove_forward(new_forward)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                print(f"Warning: could not remove temporary forward {new_forward[1]}", file=sys.stderr)
+        if not restored:
+            raise RuntimeError("Enrollment failed and the previous device configuration could not be restored; repeat enable to recover") from None
         raise
     if old_forward is not None and not reused:
         try:
             remove_forward(old_forward)
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
-            raise RuntimeError(f"New connection saved; could not retire previous forward {old_forward[1]}") from None
+            print(f"Warning: new connection saved; could not retire previous forward {old_forward[1]}", file=sys.stderr)
     return {"enabled": True, "port": port, "stateFile": str(args.state), "app": result}
 
 
