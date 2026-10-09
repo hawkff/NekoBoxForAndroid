@@ -120,13 +120,16 @@ def configure(args, enabled):
                 time.sleep(0.25)
         else:
             raise RuntimeError("API did not become ready; inspect the API notification and app logs")
-        if old_forward is not None and not reused:
-            remove_forward(old_forward)
         save_private(args.state, state)
     except BaseException:
         if not reused:
             remove_forward((args.serial, f"tcp:{port}", f"tcp:{config['port']}"))
         raise
+    if old_forward is not None and not reused:
+        try:
+            remove_forward(old_forward)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            raise RuntimeError(f"New connection saved; could not retire previous forward {old_forward[1]}") from None
     return {"enabled": True, "port": port, "stateFile": str(args.state), "app": result}
 
 
@@ -175,11 +178,14 @@ def call(state, operation, parameters):
     if not isinstance(payload, dict) or ("result" in payload) == ("error" in payload):
         raise RuntimeError("API returned a malformed response envelope")
     if "error" in payload:
-        error = payload["error"]
-        if not isinstance(error, dict) or not isinstance(error.get("code", "error"), str) or not isinstance(error.get("message", ""), str):
-            raise RuntimeError("API returned a malformed error")
-        raise RuntimeError(f"API {error.get('code', 'error')}: {error.get('message', '')}")
+        raise RuntimeError(f"API {error_text(payload['error'])}")
     return payload["result"]
+
+
+def error_text(error):
+    if not isinstance(error, dict) or not isinstance(error.get("code", "error"), str) or not isinstance(error.get("message", ""), str):
+        raise RuntimeError("API returned a malformed error")
+    return f"{error.get('code', 'error')}: {error.get('message', '')}"
 
 
 def smoke(state, mutate=False):
@@ -189,7 +195,7 @@ def smoke(state, mutate=False):
         call(state, operation, {})
     if not mutate:
         return {"commands": len(catalog["commands"]), "readOnly": True}
-    if status["serviceState"] not in ("Idle", "Stopped"):
+    if status["serviceState"] != "Stopped":
         raise RuntimeError("Mutation smoke requires a stopped VPN; the client will not stop it")
     group_id = rule_id = None
     try:
@@ -246,9 +252,12 @@ def main():
                 deadline = time.monotonic() + args.timeout
                 while True:
                     result = call(state, "jobs.get", {"id": args.job_id})
+                    if not isinstance(result, dict) or result.get("state") not in ("running", "succeeded", "failed", "cancelled"):
+                        raise RuntimeError("API returned a malformed job status")
                     if result["state"] != "running":
                         if result["state"] != "succeeded":
-                            raise RuntimeError(f"Background operation {result['state']}")
+                            details = f": {error_text(result['error'])}" if "error" in result else ""
+                            raise RuntimeError(f"Background operation {result['state']}{details}")
                         break
                     if time.monotonic() >= deadline:
                         raise RuntimeError("Job is still running; its operation was not cancelled or retried")

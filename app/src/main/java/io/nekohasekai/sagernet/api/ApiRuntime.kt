@@ -1,6 +1,8 @@
 package io.nekohasekai.sagernet.api
 
 import android.content.Context
+import androidx.preference.PreferenceDataStore
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.bg.BaseService
@@ -8,6 +10,7 @@ import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.bg.TailscaleSessionController
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import kotlinx.coroutines.*
 import moe.matsuri.nb4a.utils.JavaUtil
 import org.json.JSONObject
@@ -15,7 +18,9 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-internal class ApiRuntime(private val context: Context) : SagerConnection.Callback {
+internal class ApiRuntime(private val context: Context) :
+    SagerConnection.Callback,
+    OnPreferenceDataStoreChangeListener {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connection = SagerConnection(SagerConnection.CONNECTION_ID_LOCAL_API, true)
 
@@ -35,9 +40,14 @@ internal class ApiRuntime(private val context: Context) : SagerConnection.Callba
     @Volatile var busy = false
         private set
 
-    fun connect() = connection.connect(context, this)
+    fun connect() {
+        if (!scope.isActive) return
+        DataStore.configurationStore.registerChangeListener(this)
+        connection.connect(context, this)
+    }
 
     fun close() {
+        DataStore.configurationStore.unregisterChangeListener(this)
         scope.cancel()
         connection.disconnect(context)
         connected = null
@@ -52,9 +62,31 @@ internal class ApiRuntime(private val context: Context) : SagerConnection.Callba
         connect()
     }
 
-    fun binder() = connected ?: reject("service_unavailable", "The service connection is not ready")
+    override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
+        if (key == Key.SERVICE_MODE) refreshServiceMode()
+    }
 
-    fun serviceState() = connected?.let { service ->
+    private fun refreshServiceMode() {
+        if (!scope.isActive || connection.boundMode == DataStore.serviceMode) return
+        scope.launch(Dispatchers.Main.immediate) {
+            if (connection.boundMode != DataStore.serviceMode) rebind()
+        }
+    }
+
+    private fun currentService() = when {
+        !scope.isActive -> null
+
+        connection.boundMode != DataStore.serviceMode -> {
+            refreshServiceMode()
+            null
+        }
+
+        else -> connected
+    }
+
+    fun binder() = currentService() ?: reject("service_unavailable", "The service connection is not ready")
+
+    fun serviceState() = currentService()?.let { service ->
         runCatching { BaseService.State.entries.getOrNull(service.state) }.getOrNull()
     } ?: BaseService.State.Idle
 

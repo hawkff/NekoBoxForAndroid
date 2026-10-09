@@ -1,10 +1,14 @@
 package io.nekohasekai.sagernet.api
 
 import android.app.Application
+import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.ProxyService
 import io.nekohasekai.sagernet.bg.TailscaleSessionController
+import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.preference.KeyValuePair
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
 import io.nekohasekai.sagernet.fmt.tailscale.TailscaleBean
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +42,100 @@ class ApiRuntimeTest {
             assertEquals(BaseService.State.Idle, runtime.serviceState())
         } finally {
             runtime.close()
+        }
+    }
+
+    @Test
+    fun uiModeChangeInvalidatesTheOldBinderUntilTheReplacementConnects() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var state = BaseService.State.Stopped
+        val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication()) { state }
+        val runtime = ApiRuntime(fixture.context)
+        try {
+            runtime.connect()
+            assertEquals(ProxyService::class.java.name, fixture.bindings.last().className)
+            assertEquals(BaseService.State.Stopped, runtime.serviceState())
+            fixture.bindImmediately = false
+            DataStore.serviceMode = Key.MODE_VPN
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+            assertEquals("service_unavailable", (runCatching { runtime.binder() }.exceptionOrNull() as ApiFailure).code)
+            runCurrent()
+            assertEquals(VpnService::class.java.name, fixture.bindings.last().className)
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+            state = BaseService.State.Connected
+            fixture.completeBinding()
+            assertEquals(BaseService.State.Connected, runtime.serviceState())
+            runtime.close()
+            val bindings = fixture.bindings.size
+            DataStore.serviceMode = Key.MODE_PROXY
+            runCurrent()
+            assertEquals(bindings, fixture.bindings.size)
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+        } finally {
+            runtime.close()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun aReversedModeChangeKeepsTheMatchingLiveBinding() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication()) { BaseService.State.Stopped }
+        val runtime = ApiRuntime(fixture.context)
+        try {
+            runtime.connect()
+            DataStore.serviceMode = Key.MODE_VPN
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+            DataStore.serviceMode = Key.MODE_PROXY
+            assertEquals(BaseService.State.Stopped, runtime.serviceState())
+            runCurrent()
+            assertEquals(1, fixture.bindings.size)
+            assertEquals(BaseService.State.Stopped, runtime.serviceState())
+        } finally {
+            runtime.close()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun lateBindingFromTheOldModeCannotMakeTheReplacementLookStopped() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication()) { BaseService.State.Stopped }
+        fixture.bindImmediately = false
+        val runtime = ApiRuntime(fixture.context)
+        try {
+            runtime.connect()
+            DataStore.serviceMode = Key.MODE_VPN
+            runCurrent()
+            fixture.completeBinding()
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+            fixture.completeBinding()
+            assertEquals(BaseService.State.Stopped, runtime.serviceState())
+        } finally {
+            runtime.close()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun bulkPreferenceReplacementAlsoInvalidatesAMismatchedBinding() = runTest {
+        ConfigBuilderTestEnv.reset()
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val fixture = ApiServiceFixture(RuntimeEnvironment.getApplication()) { BaseService.State.Stopped }
+        val runtime = ApiRuntime(fixture.context)
+        try {
+            runtime.connect()
+            DataStore.configurationStore.replaceAllDurable(listOf(KeyValuePair(Key.SERVICE_MODE).put(Key.MODE_VPN)))
+            assertEquals(BaseService.State.Idle, runtime.serviceState())
+            runCurrent()
+            assertEquals(VpnService::class.java.name, fixture.bindings.last().className)
+            assertEquals(BaseService.State.Stopped, runtime.serviceState())
+        } finally {
+            runtime.close()
+            Dispatchers.resetMain()
         }
     }
 

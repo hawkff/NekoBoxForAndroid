@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.database.preference.PublicDatabase
 import io.nekohasekai.sagernet.fmt.AbstractBean
 import io.nekohasekai.sagernet.fmt.KryoConverters
 import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.internal.isUsableChainHop
 import io.nekohasekai.sagernet.fmt.tailscale.profilesForBackup
 import io.nekohasekai.sagernet.group.GroupUpdater
 import io.nekohasekai.sagernet.ktx.parseProxies
@@ -156,7 +157,6 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
         command("settings.set", "Validate and save a settings patch; reload or restart is explicit", "values", "confirm") {
             val changes = it.objectValue("values")
             settings.patch(changes, it.flag("confirm"))
-            if (changes.has(Key.SERVICE_MODE)) runtime.rebind()
             JSONObject().put("changed", JSONArray(changes.keysSet().toList())).put("reloadRequired", true)
                 .put("restartRequired", changes.keysSet().any { key -> key in setOf(Key.APP_THEME, Key.NIGHT_THEME, Key.APP_LANGUAGE, Key.LOG_LEVEL, Key.LOG_BUF_SIZE) })
         }
@@ -828,8 +828,10 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
                 if (id in completed) return
                 requireApi(id != editingId && visiting.add(id), "Proxy chain contains a cycle")
                 val member = lookup(id)
-                requireApi(member.canBuild(), "A chain member is archived")
-                member.chainBean?.proxies?.forEach(::check)
+                requireApi(member.isUsableChainHop(), "A chain member cannot be used as a hop")
+                val nested = member.requireBean() as? ChainBean
+                if (nested != null) requireApi(!nested.proxies.isNullOrEmpty(), "A nested chain has no hops")
+                nested?.proxies?.forEach(::check)
                 visiting.remove(id)
                 completed.add(id)
             }

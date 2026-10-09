@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import json
+import io
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -165,6 +166,25 @@ class ClientTests(unittest.TestCase):
             self.assertEqual({old}, rows)
             self.assertEqual(previous, json.loads(args.state.read_text()))
 
+    def test_state_save_failure_preserves_old_forward_and_discards_new_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        old = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [old], device_port=9191) as (args, rows, _, _):
+            with patch.object(api, "save_private", side_effect=OSError("disk full")), self.assertRaises(OSError):
+                api.configure(args, True)
+            self.assertEqual({old}, rows)
+            self.assertEqual(previous, json.loads(args.state.read_text()))
+
+    def test_old_forward_cleanup_failure_keeps_the_saved_new_connection(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        old = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [old], device_port=9191) as (args, rows, _, _):
+            with patch.object(api, "remove_forward", side_effect=RuntimeError("cleanup failed")), self.assertRaisesRegex(RuntimeError, "New connection saved"):
+                api.configure(args, True)
+            self.assertEqual(42001, json.loads(args.state.read_text())["port"])
+            self.assertIn((args.serial, "tcp:42001", "tcp:9191"), rows)
+            self.assertIn(old, rows)
+
     def test_stale_state_does_not_delete_a_foreign_forward(self):
         previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
         foreign = ("emulator-5554", "tcp:42000", "tcp:9999")
@@ -189,21 +209,45 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             api.call(state, "profiles.list", {"text": "x" * (2 * 1024 * 1024)})
 
-    def test_smoke_does_not_mutate_or_stop_a_running_vpn(self):
+    def test_wait_reports_the_job_error_code_and_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            api.save_private(path, {"port": 9091, "token": TOKEN})
+            response = {"state": "failed", "error": {"code": "confirmation_required", "message": "Approval is required"}}
+            output = io.StringIO()
+            with patch.object(api.sys, "argv", ["app-api.py", "--state", str(path), "wait", "fixture"]), patch.object(api, "call", return_value=response), contextlib.redirect_stderr(output):
+                self.assertEqual(1, api.main())
+            self.assertIn("confirmation_required", output.getvalue())
+            self.assertIn("Approval is required", output.getvalue())
+
+    def test_wait_rejects_malformed_job_status_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            api.save_private(path, {"port": 9091, "token": TOKEN})
+            for response in (None, [], {}, {"state": "unknown"}, {"state": "failed", "error": []}):
+                output = io.StringIO()
+                with self.subTest(response=response), patch.object(api.sys, "argv", ["app-api.py", "--state", str(path), "wait", "fixture"]), patch.object(api, "call", return_value=response), contextlib.redirect_stderr(output):
+                    self.assertEqual(1, api.main())
+                self.assertIn("malformed", output.getvalue())
+                self.assertNotIn("Traceback", output.getvalue())
+
+    def test_smoke_does_not_mutate_or_stop_a_running_or_unknown_vpn(self):
         invoked = []
+        service_state = "Connected"
 
         def call(_, operation, __):
             invoked.append(operation)
             if operation == "api.describe":
                 return {"commands": {"app.status": {}}}
             if operation == "app.status":
-                return {"serviceState": "Connected"}
+                return {"serviceState": service_state}
             return {}
 
         with patch.object(api, "call", side_effect=call):
             self.assertTrue(api.smoke({}, mutate=False)["readOnly"])
-            with self.assertRaisesRegex(RuntimeError, "stopped VPN"):
-                api.smoke({}, mutate=True)
+            for service_state in ("Connected", "Idle", "Connecting", "Stopping"):
+                with self.subTest(state=service_state), self.assertRaisesRegex(RuntimeError, "stopped VPN"):
+                    api.smoke({}, mutate=True)
         self.assertNotIn("groups.create", invoked)
         self.assertNotIn("service.stop", invoked)
 

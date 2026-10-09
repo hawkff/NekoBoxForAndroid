@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.api
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -15,6 +16,9 @@ internal class ApiServiceFixture(base: Context, state: () -> BaseService.State =
     private val binder = Binder()
     lateinit var callback: ISagerNetServiceCallback
     val calls = mutableListOf<Pair<String, List<Any?>>>()
+    val bindings = mutableListOf<ComponentName>()
+    var bindImmediately = true
+    private val pending = mutableListOf<Pair<ComponentName, ServiceConnection>>()
     val api = Proxy.newProxyInstance(ISagerNetService::class.java.classLoader, arrayOf(ISagerNetService::class.java)) { _, method, args ->
         when (method.name) {
             "asBinder" -> binder
@@ -39,9 +43,16 @@ internal class ApiServiceFixture(base: Context, state: () -> BaseService.State =
     }
     val context = object : ContextWrapper(base) {
         override fun bindService(intent: Intent, connection: ServiceConnection, flags: Int): Boolean {
-            connection.onServiceConnected(checkNotNull(intent.component), binder)
+            val component = checkNotNull(intent.component)
+            bindings += component
+            if (bindImmediately) connection.onServiceConnected(component, binder) else pending += component to connection
             return true
         }
         override fun unbindService(connection: ServiceConnection) = Unit
+    }
+
+    fun completeBinding() {
+        val (component, connection) = pending.removeAt(0)
+        connection.onServiceConnected(component, binder)
     }
 }

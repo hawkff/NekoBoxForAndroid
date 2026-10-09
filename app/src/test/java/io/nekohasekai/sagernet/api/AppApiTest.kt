@@ -366,6 +366,29 @@ class AppApiTest {
     }
 
     @Test
+    fun chainMutationsRejectFullConfigsButAllowCustomOutbounds() {
+        val group = group()
+        val hop = profile(group).getLong("id")
+        val full = objectResult("profiles.create", params("groupId" to group, "type" to ProxyEntity.TYPE_CONFIG, "configuration" to params("type" to 0, "config" to "{}"))).getLong("id")
+        error("invalid_parameters", "profiles.create", params("groupId" to group, "type" to ProxyEntity.TYPE_CHAIN, "configuration" to params("proxies" to JSONArray(listOf(full)))))
+        val chain = objectResult("profiles.create", params("groupId" to group, "type" to ProxyEntity.TYPE_CHAIN, "configuration" to params("proxies" to JSONArray(listOf(hop))))).getLong("id")
+        error("invalid_parameters", "profiles.update", params("id" to chain, "configuration" to params("proxies" to JSONArray(listOf(full)))))
+        assertEquals(listOf(hop), ConfigBuilderTestEnv.io { ProfileManager.getProfile(chain)!!.chainBean!!.proxies })
+        val outbound = objectResult("profiles.create", params("groupId" to group, "type" to ProxyEntity.TYPE_CONFIG, "configuration" to params("type" to 1, "config" to """{"type":"direct"}"""))).getLong("id")
+        objectResult("profiles.update", params("id" to chain, "configuration" to params("proxies" to JSONArray(listOf(outbound)))))
+    }
+
+    @Test
+    fun chainValidationRejectsEmptyNestedChains() {
+        val empty = ProxyEntity(id = 1L).putBean(ChainBean().apply { initializeDefaultValues() })
+        val root = ChainBean().apply {
+            proxies = listOf(1L)
+            initializeDefaultValues()
+        }
+        assertEquals("invalid_parameters", (runCatching { api.validateBean(root, lookup = { empty }) }.exceptionOrNull() as ApiFailure).code)
+    }
+
+    @Test
     fun replacementHandlerCannotOverlapAnAcceptedMutation() = runTest {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
