@@ -38,6 +38,7 @@ class SagerConnection(
         const val CONNECTION_ID_TAILSCALE_SETTINGS = 6
         const val CONNECTION_ID_TAILSCALE_STATUS = 7
         const val CONNECTION_ID_WIREGUARD_STATUS = 8
+        const val CONNECTION_ID_LOCAL_API = 9
 
         var restartingApp = false
     }

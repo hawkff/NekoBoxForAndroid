@@ -28,6 +28,8 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficData
+import io.nekohasekai.sagernet.api.ApiUi
+import io.nekohasekai.sagernet.api.LocalApiAccess
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.NetworkAutomationService
 import io.nekohasekai.sagernet.bg.SagerConnection
@@ -151,6 +153,8 @@ class MainActivity :
     override fun onResume() {
         super.onResume()
         MessageStore.setCurrentActivity(this)
+        ApiUi.attach(this)
+        LocalApiAccess.sync(this)
 
         if (DataStore.hideFromRecentApps) {
             applyHideFromRecentApps(DataStore.hideFromRecentApps)
@@ -178,6 +182,7 @@ class MainActivity :
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        LocalApiAccess.sync(this)
 
         val uri = intent.data ?: return
 

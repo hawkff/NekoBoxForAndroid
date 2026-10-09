@@ -132,7 +132,11 @@ abstract class GroupUpdater {
             }
         }
 
-        suspend fun executeUpdate(proxyGroup: ProxyGroup, byUser: Boolean): Boolean {
+        suspend fun executeUpdate(
+            proxyGroup: ProxyGroup,
+            byUser: Boolean,
+            userInterface: GroupManager.Interface? = GroupManager.userInterface,
+        ): Boolean {
             return coroutineScope {
                 if (!updating.add(proxyGroup.id)) {
                     // already updating this group in another run; skip quietly
@@ -142,7 +146,6 @@ abstract class GroupUpdater {
 
                 val subscription = proxyGroup.subscription!!
                 val connected = DataStore.serviceState.connected
-                val userInterface = GroupManager.userInterface
 
                 if (byUser && (
                         subscription.link?.startsWith(
