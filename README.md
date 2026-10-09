@@ -253,6 +253,28 @@ The app reads these keys from response headers or from `#key: value` lines at th
 
 An optional token-authenticated loopback API controls profiles, subscriptions, routing, settings and service operations. See [API.md](API.md) for enrollment, command discovery and the Python client. It is off by default and keeps Android permission checks.
 
+## Usage and crash reporting
+
+Settings > Advanced > **Help to improve** controls PostHog and Sentry together. The switch defaults to on. A build without account settings sends nothing. Turning it off stops reporting in both the UI and VPN processes without restarting the VPN. A request already in flight may still reach the provider.
+
+PostHog receives an `app_opened` event when the UI process starts or reporting is re-enabled, with the app version, build type and Android API level. Its random identifier lasts only for that reporting session. Sentry receives Java/Kotlin crash exception types and stack frames from both processes. Reports omit exception messages, profiles, credentials, traffic, logs and account or hardware identifiers. Session replay, screen capture, performance tracing and native crash capture are not enabled. Both services can see the connection's source IP address. PostHog's event payload disables GeoIP enrichment and person profiles.
+
+PostHog uses a bounded queue in app cache. The app clears it before starting reporting and on opt-out, and creates a new directory for each reporting session so old reports cannot be replayed. Sentry uses a memory-only queue. Offline reports may be lost. The existing local crash report remains available. Reporting failures do not prevent a VPN connection.
+
+### Account setup
+
+Create a PostHog project and a Sentry project, then put their public ingestion settings in the build environment or the ignored `local.properties` file:
+
+```properties
+POSTHOG_PROJECT_TOKEN=phc_example_project_token
+POSTHOG_HOST=https://us.i.posthog.com
+SENTRY_DSN=https://examplePublicKey@o0.ingest.us.sentry.io/0
+```
+
+Replace the example token and DSN with the values from the project dashboards. For an EU PostHog project, use `https://eu.i.posthog.com`. Environment variables override `local.properties`. Rebuild the app after changing these values. Each integration works independently; leaving its token or DSN empty disables it.
+
+The token and DSN are public ingestion credentials embedded in the APK. Do not put PostHog personal API keys or Sentry auth tokens here. No symbol-upload credentials or build-time upload plugin are required. Release builds retain Java/Kotlin class names and source line numbers; native Go/NDK crashes remain in local Android logs.
+
 ## Credits
 
 Core:

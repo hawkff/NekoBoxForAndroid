@@ -232,6 +232,22 @@ class AppApiTest {
     }
 
     @Test
+    fun reportingOptOutRemainsTypedAndPersistsAcrossApiHandlers() {
+        val setting = objectResult("settings.describe").getJSONObject(Key.HELP_TO_IMPROVE)
+        assertEquals("boolean", setting.getString("type"))
+        assertTrue(setting.getBoolean("default"))
+        assertTrue(objectResult("settings.get").getBoolean(Key.HELP_TO_IMPROVE))
+
+        DataStore.serviceState = BaseService.State.Connected
+        objectResult("settings.set", params("values" to params(Key.HELP_TO_IMPROVE to false)))
+        assertFalse(DataStore.helpToImprove)
+        error("invalid_parameters", "settings.set", params("values" to params(Key.HELP_TO_IMPROVE to "true")))
+        api = AppApi(RuntimeEnvironment.getApplication(), runtime)
+        assertFalse(objectResult("settings.get").getBoolean(Key.HELP_TO_IMPROVE))
+        assertEquals(BaseService.State.Connected, DataStore.serviceState)
+    }
+
+    @Test
     fun routingProfilesCanBeSavedExportedImportedAndDeleted() {
         objectResult("rules.create", params("values" to params("name" to "rule", "domains" to "full:example.invalid")))
         val first = objectResult("routing.save", params("name" to "first")).getLong("id")

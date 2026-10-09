@@ -420,6 +420,12 @@
         app:key="screen_advanced"
         app:summary="@string/settings_advanced_summary"
         app:title="@string/settings_advanced">
+        <SwitchPreference
+            app:defaultValue="true"
+            app:icon="@drawable/ic_baseline_bug_report_24"
+            app:key="helpToImprove"
+            app:summary="@string/help_to_improve_summary"
+            app:title="@string/help_to_improve" />
         <moe.matsuri.nb4a.ui.LongClickListPreference
             app:defaultValue="0"
             app:entries="@array/log_level"

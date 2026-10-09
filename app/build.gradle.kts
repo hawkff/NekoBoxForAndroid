@@ -23,6 +23,21 @@ android {
         aidl = true
     }
     namespace = "io.nekohasekai.sagernet"
+    defaultConfig {
+        for ((name, fallback) in mapOf(
+            "POSTHOG_PROJECT_TOKEN" to "",
+            "POSTHOG_HOST" to "https://us.i.posthog.com",
+            "SENTRY_DSN" to "",
+        )) {
+            val value = (
+                providers.environmentVariable(name).orNull
+                    ?: requireLocalProperties().getProperty(name, fallback)
+                ).trim()
+            require(value.none { it.isISOControl() }) { "$name contains control characters" }
+            val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+            buildConfigField("String", name, "\"$escaped\"")
+        }
+    }
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -82,6 +97,9 @@ dependencies {
     // TextMate exposes JDT nullability annotations in its public signatures.
     compileOnly("org.eclipse.jdt:org.eclipse.jdt.annotation:2.4.100")
 
+    // Minimal SDK modules; automatic capture is configured explicitly.
+    implementation("com.posthog:posthog:6.47.1")
+    implementation("io.sentry:sentry-android-core:8.60.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.yaml:snakeyaml:2.7")
     implementation("com.jakewharton:process-phoenix:3.0.0")
