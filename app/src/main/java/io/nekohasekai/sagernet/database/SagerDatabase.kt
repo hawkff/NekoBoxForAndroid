@@ -15,7 +15,7 @@ import io.nekohasekai.sagernet.fmt.KryoConverters
 
 @Database(
     entities = [ProxyGroup::class, ProxyEntity::class, RuleEntity::class],
-    version = 15,
+    version = 16,
     autoMigrations = [
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
@@ -32,6 +32,7 @@ import io.nekohasekai.sagernet.fmt.KryoConverters
         AutoMigration(from = 13, to = 14),
         // v15: additive proxy_entities.tailscaleBean column (nullable BLOB).
         AutoMigration(from = 14, to = 15),
+        AutoMigration(from = 15, to = 16),
     ],
 )
 @TypeConverters(KryoConverters::class)

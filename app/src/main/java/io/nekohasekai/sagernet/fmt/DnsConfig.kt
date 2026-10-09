@@ -1,9 +1,15 @@
 package io.nekohasekai.sagernet.fmt
 
+import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.RuleEntity
+import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.unwrapIPV6Host
 import moe.matsuri.nb4a.SingBoxOptions
 import moe.matsuri.nb4a.SingBoxOptions.*
+import moe.matsuri.nb4a.checkEmpty
+import moe.matsuri.nb4a.makeSingBoxRule
+import moe.matsuri.nb4a.utils.listByLineOrComma
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal fun dnsResolver(tag: String, strategy: String?) = DomainResolveOptions().apply {
@@ -52,6 +58,32 @@ internal fun dnsServer(address: String, tag: String, resolver: String, detour: S
         if (!url.host.isIpAddress()) domain_resolver = dnsResolver(resolver, null)
         this.detour = detour
     }
+}
+
+internal fun proxyRuleDnsServer(address: String, tag: String, outbound: String): DNSServerOptions {
+    val error = app.getString(R.string.route_dns_server_error)
+    require(address.isNotBlank() && address.none { it.isWhitespace() || it.isISOControl() }) { error }
+    return try {
+        dnsServer(address, tag, "dns-direct", outbound).also { require(it.type != "local") { error } }
+    } catch (_: IllegalArgumentException) {
+        throw IllegalArgumentException(error)
+    }
+}
+
+internal fun RuleEntity.validateDnsRouting() {
+    if (!dnsThroughOutbound) return
+    require(outbound >= 0) { app.getString(R.string.route_dns_proxy_error) }
+    val domainRule = DNSRule_DefaultOptions().apply { makeSingBoxRule(domains.listByLineOrComma()) }
+    val ruleSets = ruleset.listByLineOrComma()
+    require(
+        ip.isBlank() && port.isBlank() && sourcePort.isBlank() && network.isBlank() &&
+            source.isBlank() && protocol.isBlank() && config.isBlank() &&
+            (ruleset.isBlank() || ruleSets.isNotEmpty()) &&
+            ruleSets.all { it.startsWith("rssite:") } &&
+            (domains.isBlank() || !domainRule.checkEmpty()) &&
+            (packages.isNotEmpty() || !domainRule.checkEmpty() || ruleSets.isNotEmpty()),
+    ) { app.getString(R.string.route_dns_match_error) }
+    if (dnsServer.isNotBlank()) proxyRuleDnsServer(dnsServer.trim(), "dns-check", "proxy")
 }
 
 // Rule strategy cannot coexist with query_type in 1.14. Return an empty answer

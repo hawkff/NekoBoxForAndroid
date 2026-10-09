@@ -27,6 +27,8 @@ data class RuleEntity(
     var ruleset: String = "",
     var outbound: Long = 0,
     var packages: Set<String> = emptySet(),
+    @ColumnInfo(defaultValue = "0") var dnsThroughOutbound: Boolean = false,
+    @ColumnInfo(defaultValue = "") var dnsServer: String = "",
 ) : Parcelable {
 
     fun displayName(): String = name.takeIf { it.isNotBlank() } ?: "Rule $id"
