@@ -1,16 +1,19 @@
 package io.nekohasekai.sagernet.api
 
+import android.app.ActivityManager
 import android.app.Application
+import android.content.Context
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.*
 import io.nekohasekai.sagernet.fmt.ConfigBuilderTestEnv
+import io.nekohasekai.sagernet.fmt.internal.ChainBean
+import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.ktx.Logs
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.test.*
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -20,11 +23,15 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAppTask
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class AppApiTest {
+    private lateinit var service: ApiServiceFixture
     private lateinit var runtime: ApiRuntime
     private lateinit var api: AppApi
     private val logSink = Logs.sink
@@ -39,7 +46,9 @@ class AppApiTest {
             WorkManager.initialize(context, Configuration.Builder().setDefaultProcessName(context.packageName).build())
             WorkManager.getInstance(context)
         }
-        runtime = ApiRuntime(context)
+        service = ApiServiceFixture(context)
+        runtime = ApiRuntime(service.context)
+        runtime.connect()
         api = AppApi(context, runtime)
     }
 
@@ -252,12 +261,14 @@ class AppApiTest {
     fun serviceAndTailscaleRequestsRejectUnavailableStateWithoutSideEffects() {
         val id = profile(group()).getLong("id")
         error("service_stopped", "service.reload", JSONObject())
+        runtime.onServiceDisconnected()
         error("service_unavailable", "service.connections", JSONObject())
         error("not_found", "tailscale.status", params("sessionId" to 1))
         error("not_found", "tailscale.result", params("requestId" to 1))
         error("invalid_parameters", "tailscale.ping", params("sessionId" to 1, "peerId" to "peer", "timeoutMs" to 0))
         error("confirmation_required", "tailscale.exit", params("sessionId" to 1, "peerId" to "peer", "expectedSavedSelection" to "", "confirm" to false))
         error("not_found", "jobs.get", params("id" to "missing"))
+        runtime.onServiceConnected(service.api)
         DataStore.serviceState = BaseService.State.Connected
         error("service_running", "profiles.delete", params("id" to id, "confirm" to true))
         error("service_running", "service.start", params("id" to id))
@@ -325,6 +336,87 @@ class AppApiTest {
         assertEquals(1, (result("backup.recoveries") as JSONArray).length())
         error("secrets_required", "backup.recovery", params("id" to recoveryId, "includeSecrets" to false))
         error("invalid_parameters", "backup.recovery", params("id" to "../configuration.db", "includeSecrets" to true))
+    }
+
+    @Test
+    fun chainValidationLoadsSharedDescendantsOnceAndStillRejectsCycles() {
+        val graph = mutableMapOf<Long, ProxyEntity>()
+        graph[1L] = ProxyEntity(id = 1).putBean(SOCKSBean().apply { initializeDefaultValues() })
+        for (id in 2L..32L) {
+            graph[id] = ProxyEntity(id = id).putBean(
+                ChainBean().apply {
+                    proxies = if (id == 2L) mutableListOf(1L) else mutableListOf(id - 1, id - 2)
+                    initializeDefaultValues()
+                },
+            )
+        }
+        val root = ChainBean().apply {
+            proxies = mutableListOf(32L)
+            initializeDefaultValues()
+        }
+        val visits = mutableMapOf<Long, Int>()
+        api.validateBean(root, lookup = { id ->
+            visits[id] = visits.getOrDefault(id, 0) + 1
+            graph.getValue(id)
+        })
+        assertEquals(graph.keys, visits.keys)
+        assertTrue(visits.values.all { it == 1 })
+        graph.getValue(2L).chainBean!!.proxies = mutableListOf(32L)
+        assertEquals("invalid_parameters", (runCatching { api.validateBean(root, lookup = graph::getValue) }.exceptionOrNull() as ApiFailure).code)
+    }
+
+    @Test
+    fun replacementHandlerCannotOverlapAnAcceptedMutation() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val listener = object : GroupManager.Listener {
+            override suspend fun groupAdd(group: ProxyGroup) {
+                if (group.name == "paused") {
+                    entered.complete(Unit)
+                    release.await()
+                }
+            }
+            override suspend fun groupUpdated(group: ProxyGroup) = Unit
+            override suspend fun groupRemoved(groupId: Long) = Unit
+            override suspend fun groupUpdated(groupId: Long) = Unit
+        }
+        GroupManager.addListener(listener)
+        try {
+            val accepted = async(Dispatchers.IO) { api.response("groups.create", params("name" to "paused").toString()) }
+            withContext(Dispatchers.IO) { withTimeout(5000) { entered.await() } }
+            val replacement = AppApi(RuntimeEnvironment.getApplication(), runtime)
+            val rejected = withContext(Dispatchers.IO) { replacement.response("groups.create", params("name" to "overlap").toString()) }
+            assertEquals("busy", rejected.getJSONObject("error").getString("code"))
+            assertEquals(1, ConfigBuilderTestEnv.io { SagerDatabase.groupDao.allGroups().size })
+            release.complete(Unit)
+            assertTrue(accepted.await().has("result"))
+            val next = withContext(Dispatchers.IO) { replacement.response("groups.create", params("name" to "after").toString()) }
+            assertTrue(next.has("result"))
+        } finally {
+            release.complete(Unit)
+            GroupManager.removeListener(listener)
+        }
+    }
+
+    @Test
+    fun recentAppsSettingAppliesBothValuesWithoutAnActivityResume() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val context = RuntimeEnvironment.getApplication()
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = listOf(ShadowAppTask.newInstance(), ShadowAppTask.newInstance())
+            shadowOf(manager).setAppTasks(tasks)
+            for (hide in listOf(true, false)) {
+                val response = withContext(Dispatchers.IO) {
+                    api.response("settings.set", params("values" to params(Key.HIDE_FROM_RECENT_APPS to hide)).toString())
+                }
+                assertTrue(response.toString(), response.has("result"))
+                assertEquals(hide, DataStore.hideFromRecentApps)
+                tasks.forEach { assertEquals(hide, shadowOf(it).isExcludedFromRecents) }
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 
     @Test

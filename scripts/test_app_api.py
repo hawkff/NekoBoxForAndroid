@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import threading
 import unittest
@@ -12,6 +13,7 @@ spec = importlib.util.spec_from_file_location("app_api", Path(__file__).with_nam
 api = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(api)
 TOKEN = "0123456789abcdef" * 4
+DEFAULT_RESPONSE = object()
 
 
 class ClientTests(unittest.TestCase):
@@ -32,7 +34,7 @@ class ClientTests(unittest.TestCase):
             self.assertEqual([path], list(Path(directory).iterdir()))
 
     @contextlib.contextmanager
-    def server(self, code=200, payload=None, redirect=False):
+    def server(self, code=200, payload=DEFAULT_RESPONSE, redirect=False, raw=None):
         received = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -42,7 +44,8 @@ class ClientTests(unittest.TestCase):
                 if redirect:
                     self.send_header("Location", "https://example.invalid/collect")
                 self.end_headers()
-                self.wfile.write(json.dumps(payload or {"result": {"ok": True}}).encode())
+                body = {"result": {"ok": True}} if payload is DEFAULT_RESPONSE else payload
+                self.wfile.write(json.dumps(body).encode() if raw is None else raw)
 
             def log_message(self, *_):
                 pass
@@ -78,6 +81,105 @@ class ClientTests(unittest.TestCase):
         with self.server(payload={"error": {"code": "confirmation_required"}}) as (state, _):
             with self.assertRaisesRegex(RuntimeError, "confirmation_required"):
                 api.call(state, "profiles.delete", {})
+
+    def test_malformed_response_shapes_raise_defined_errors_without_echoing_content(self):
+        for payload in (None, [], "private-response", {}, {"error": None}, {"error": []},
+                        {"error": {"code": 3}}, {"error": {"message": []}},
+                        {"result": {}, "error": {"code": "invalid"}}):
+            with self.subTest(payload=payload), self.server(payload=payload) as (state, received):
+                with self.assertRaisesRegex(RuntimeError, "malformed") as raised:
+                    api.call(state, "app.status", {})
+                self.assertNotIn("private-response", str(raised.exception))
+                self.assertEqual(1, len(received))
+        for raw in (b"{private-response", b"\xff"):
+            with self.server(raw=raw) as (state, _), self.assertRaisesRegex(RuntimeError, "malformed JSON"):
+                api.call(state, "app.status", {})
+        with self.server(payload={"result": None}) as (state, _):
+            self.assertIsNone(api.call(state, "app.status", {}))
+
+    @contextlib.contextmanager
+    def enrollment(self, saved=None, forwards=(), device_port=9091):
+        with tempfile.TemporaryDirectory() as directory:
+            args = SimpleNamespace(serial="emulator-5554", package="com.example.debug", state=Path(directory) / "state.json", rotate=False)
+            if saved is not None:
+                api.save_private(args.state, saved)
+            rows = set(forwards)
+            calls = []
+            config = {"enabled": True, "port": device_port, "token": TOKEN}
+
+            def adb(serial, *arguments, **_):
+                calls.append((serial, *arguments))
+                if arguments == ("forward", "--list"):
+                    data = "\n".join(" ".join(row) for row in sorted(rows)).encode()
+                elif arguments[:3] == ("forward", "--no-rebind", "tcp:0"):
+                    rows.add((serial, "tcp:42001", arguments[3]))
+                    data = b"42001\n"
+                elif arguments[:2] == ("forward", "--remove"):
+                    rows.difference_update({row for row in rows if row[0] == serial and row[1] == arguments[2]})
+                    data = b""
+                else:
+                    self.fail(f"Unexpected adb operation: {arguments}")
+                return SimpleNamespace(returncode=0, stdout=data)
+
+            def shell(*_, **__):
+                return SimpleNamespace(returncode=0, stdout=json.dumps(config).encode())
+
+            with patch.object(api, "adb", side_effect=adb), patch.object(api, "adb_shell", side_effect=shell), \
+                    patch.object(api, "call", return_value={"package": args.package}) as invoke, patch.object(api.time, "sleep"):
+                yield args, rows, calls, invoke
+
+    def test_forward_listing_ignores_blank_and_malformed_rows(self):
+        output = b"\nemulator-5554 tcp:42000 tcp:9091\n\npartial row\n"
+        with patch.object(api, "adb", return_value=SimpleNamespace(stdout=output)):
+            self.assertEqual({("emulator-5554", "tcp:42000", "tcp:9091")}, api.forward_list("emulator-5554"))
+
+    def test_enrollment_reuses_its_forward_across_rotation_and_disable(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "token": TOKEN}
+        forwarding = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [forwarding]) as (args, rows, calls, _):
+            args.rotate = True
+            self.assertEqual(42000, api.configure(args, True)["port"])
+            current = json.loads(args.state.read_text())
+            self.assertNotEqual(TOKEN, current["token"])
+            self.assertEqual(9091, current["devicePort"])
+            self.assertFalse(any("--no-rebind" in command for command in calls))
+            api.configure(args, False)
+            self.assertFalse(rows)
+            self.assertFalse(args.state.exists())
+
+    def test_replacement_removes_only_the_old_owned_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        old = ("emulator-5554", "tcp:42000", "tcp:9091")
+        foreign = ("another-device", "tcp:43000", "tcp:9091")
+        with self.enrollment(previous, [old, foreign], device_port=9191) as (args, rows, _, _):
+            self.assertEqual(42001, api.configure(args, True)["port"])
+            self.assertEqual({foreign, (args.serial, "tcp:42001", "tcp:9191")}, rows)
+
+    def test_failed_replacement_keeps_previous_state_and_cleans_new_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        old = ("emulator-5554", "tcp:42000", "tcp:9091")
+        with self.enrollment(previous, [old], device_port=9191) as (args, rows, _, invoke):
+            invoke.side_effect = RuntimeError("not ready")
+            with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                api.configure(args, True)
+            self.assertEqual({old}, rows)
+            self.assertEqual(previous, json.loads(args.state.read_text()))
+
+    def test_stale_state_does_not_delete_a_foreign_forward(self):
+        previous = {"serial": "emulator-5554", "package": "com.example.debug", "port": 42000, "devicePort": 9091, "token": TOKEN}
+        foreign = ("emulator-5554", "tcp:42000", "tcp:9999")
+        with self.enrollment(previous, [foreign]) as (args, rows, calls, _):
+            api.configure(args, True)
+            self.assertIn(foreign, rows)
+            self.assertNotIn((args.serial, "forward", "--remove", "tcp:42000"), calls)
+
+    def test_enrollment_cannot_overwrite_another_device_state(self):
+        previous = {"serial": "another-device", "package": "com.example.debug", "port": 42000, "token": TOKEN}
+        with self.enrollment(previous) as (args, _, calls, _):
+            with self.assertRaisesRegex(ValueError, "another device"):
+                api.configure(args, True)
+            self.assertFalse(calls)
+            self.assertEqual(previous, json.loads(args.state.read_text()))
 
     def test_invalid_calls_fail_before_network_io(self):
         state = {"port": 9091, "token": TOKEN}

@@ -1,7 +1,15 @@
 package io.nekohasekai.sagernet.api
 
+import android.app.Activity
 import android.app.Application
+import android.content.ComponentName
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
 import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -14,6 +22,7 @@ import java.util.Base64
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [23, 35], application = Application::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class ApiAccessTest {
     private val token = "0123456789abcdef".repeat(4)
     private fun config() = JSONObject().put("enabled", true).put("port", 9091).put("token", token)
@@ -42,6 +51,42 @@ class ApiAccessTest {
         assertTrue(base.renameTo(File(context.noBackupFilesDir, "local-api.json.bak")))
         assertEquals(fresh, LocalApiAccess.read(context))
         assertTrue(base.exists())
+    }
+
+    @Test
+    fun successfulAccessChangesApplyAfterTheActivityFinishes() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val changes = mutableListOf<String>()
+        val app = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
+            override fun getApplicationContext(): Context = this
+            override fun startService(intent: Intent): ComponentName? {
+                changes += "start"
+                return intent.component
+            }
+            override fun startForegroundService(intent: Intent): ComponentName? {
+                changes += "start"
+                return intent.component
+            }
+            override fun stopService(intent: Intent): Boolean {
+                changes += "stop"
+                return true
+            }
+        }
+        val activity = object : Activity() {
+            override fun getApplicationContext(): Context = app
+            override fun isFinishing() = true
+        }
+        try {
+            val config = LocalApiAccess.fresh()
+            LocalApiAccess.saveFromUi(activity, config.copy(enabled = false)).join()
+            assertEquals(listOf("stop"), changes)
+            assertEquals(false, LocalApiAccess.read(app)?.enabled)
+            LocalApiAccess.saveFromUi(activity, config).join()
+            assertEquals(listOf("stop", "start"), changes)
+            assertEquals(config, LocalApiAccess.read(app))
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 
     @Test

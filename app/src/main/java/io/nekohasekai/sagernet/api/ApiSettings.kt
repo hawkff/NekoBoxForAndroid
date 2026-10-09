@@ -12,12 +12,15 @@ import io.nekohasekai.sagernet.bg.NetworkAutomation
 import io.nekohasekai.sagernet.bg.parseMockCoordinates
 import io.nekohasekai.sagernet.database.DEFAULT_HTTP_PROXY_BYPASS
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.ui.applyHideFromRecentApps
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 
-internal class ApiSettings(private val context: Context) {
+internal class ApiSettings(private val context: Context, private val serviceState: () -> BaseService.State) {
     private data class Setting(val type: String, val default: Any, val values: List<String> = emptyList())
 
     private val settings by lazy {
@@ -94,8 +97,10 @@ internal class ApiSettings(private val context: Context) {
     suspend fun patch(changes: JSONObject, confirm: Boolean) {
         requireApi(changes.length() > 0, "values must not be empty")
         changes.keysSet().forEach { key -> validate(key, changes.get(key), confirm) }
-        if (changes.has(Key.SERVICE_MODE) && DataStore.serviceState != BaseService.State.Stopped) {
-            reject("service_running", "Stop the service before changing serviceMode")
+        if (changes.has(Key.SERVICE_MODE)) {
+            val state = serviceState()
+            if (state == BaseService.State.Idle) reject("service_unavailable", "The service connection is not ready")
+            if (state != BaseService.State.Stopped) reject("service_running", "Stop the service before changing serviceMode")
         }
         val store = DataStore.configurationStore
         changes.keysSet().forEach { key ->
@@ -106,6 +111,9 @@ internal class ApiSettings(private val context: Context) {
             }
         }
         store.awaitWrites()
+        if (changes.has(Key.HIDE_FROM_RECENT_APPS)) {
+            withContext(Dispatchers.Main) { context.applyHideFromRecentApps(changes.getBoolean(Key.HIDE_FROM_RECENT_APPS)) }
+        }
         if (changes.has(Key.NETWORK_AUTOMATION)) NetworkAutomation.onSwitched(context, changes.getBoolean(Key.NETWORK_AUTOMATION))
         if (changes.has(Key.PERSIST_ACROSS_REBOOT)) BootReceiver.enabled = BootReceiver.wanted
         if (changes.has(Key.GPS_SPOOFING) && !changes.getBoolean(Key.GPS_SPOOFING)) {

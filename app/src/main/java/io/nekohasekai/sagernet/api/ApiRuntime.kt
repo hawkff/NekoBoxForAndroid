@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.bg.TailscaleSessionController
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import kotlinx.coroutines.*
@@ -53,13 +54,16 @@ internal class ApiRuntime(private val context: Context) : SagerConnection.Callba
 
     fun binder() = connected ?: reject("service_unavailable", "The service connection is not ready")
 
+    fun serviceState() = connected?.let { service ->
+        runCatching { BaseService.State.entries.getOrNull(service.state) }.getOrNull()
+    } ?: BaseService.State.Idle
+
     override fun onServiceConnected(service: ISagerNetService) {
         connected = service
     }
 
     override fun onServiceDisconnected() {
         connected = null
-        DataStore.serviceState = BaseService.State.Idle
         sessions.clear()
         results.clear()
         requests.clear()
@@ -128,7 +132,7 @@ internal class ApiRuntime(private val context: Context) : SagerConnection.Callba
     suspend fun openTailscale(profile: ProxyEntity, check: Boolean): JSONObject = withContext(Dispatchers.Main) {
         binder()
         requireApi(profile.type == ProxyEntity.TYPE_TAILSCALE, "A Tailscale profile is required")
-        if (sessions.size >= 4) reject("busy", "Close a Tailscale session before opening another")
+        if (sessions.size >= TailscaleSessionController.MAX_OWNER_SESSIONS) reject("busy", "Close a Tailscale session before opening another")
         val id = sequence.incrementAndGet()
         sessions[id] = JSONObject().put("sessionId", id).put("state", "pending")
         if (check) connection.startTailscaleCheck(id, profile.id, profile.uuid) else connection.observeTailscale(id, profile.id, profile.uuid)
@@ -148,18 +152,27 @@ internal class ApiRuntime(private val context: Context) : SagerConnection.Callba
         JSONObject().put("closed", true)
     }
 
-    suspend fun tailscaleRequest(sessionId: Long, peer: String, timeout: Int?, savedExit: String?) = withContext(Dispatchers.Main) {
-        binder()
-        tailscaleStatus(sessionId)
-        if (requests.size >= 64) reject("busy", "Close the session to discard completed requests")
-        val id = sequence.incrementAndGet()
-        requests[id] = sessionId
-        if (timeout != null) {
-            connection.pingTailscalePeer(sessionId, id, peer, timeout)
-        } else {
-            connection.setTailscaleExitNode(sessionId, id, peer, savedExit!!)
+    suspend fun tailscaleRequest(sessionId: Long, peer: String, timeout: Int?, savedExit: String?): JSONObject {
+        requireApi(peer.length <= TailscaleSessionController.MAX_PEER_ID_LENGTH, "Peer ID is too long")
+        requireApi(timeout != null || (savedExit != null && savedExit.length <= TailscaleSessionController.MAX_EXIT_SELECTION_LENGTH), "Invalid exit selection")
+        return withContext(Dispatchers.Main) {
+            binder()
+            tailscaleStatus(sessionId)
+            if (requests.size >= 64) reject("busy", "Close the session to discard completed requests")
+            val active = requests.count { (id, owner) ->
+                val result = results[id]
+                owner == sessionId && result?.optBoolean("done") != true && result?.optString("kind") != "exit"
+            }
+            if (active >= TailscaleSessionController.MAX_SESSION_REQUESTS) reject("busy", "Wait for a Tailscale request to finish")
+            val id = sequence.incrementAndGet()
+            requests[id] = sessionId
+            if (timeout != null) {
+                connection.pingTailscalePeer(sessionId, id, peer, timeout)
+            } else {
+                connection.setTailscaleExitNode(sessionId, id, peer, savedExit!!)
+            }
+            JSONObject().put("requestId", id)
         }
-        JSONObject().put("requestId", id)
     }
 
     fun tailscaleResult(id: Long): JSONObject {

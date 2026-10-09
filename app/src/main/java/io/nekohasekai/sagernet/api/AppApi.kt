@@ -26,6 +26,7 @@ import io.nekohasekai.sagernet.ui.BackupRestoreOperations
 import io.nekohasekai.sagernet.ui.DatabaseBackupRestoreOperations
 import io.nekohasekai.sagernet.ui.restoreBackup
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
 import libcore.Libcore
 import libcore.LocalAPIHandler
 import org.json.JSONArray
@@ -34,6 +35,11 @@ import java.io.File
 import java.util.UUID
 
 internal class AppApi(private val context: Context, private val runtime: ApiRuntime) : LocalAPIHandler {
+    private companion object {
+        // Listener replacement must not let a new token overlap an accepted command.
+        val commandGate = Mutex()
+    }
+
     private class Command(
         val required: Set<String>,
         val optional: Set<String>,
@@ -41,7 +47,7 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
         val run: suspend (JSONObject) -> Any,
     )
     private val commands = linkedMapOf<String, Command>()
-    private val settings = ApiSettings(context)
+    private val settings = ApiSettings(context, runtime::serviceState)
 
     private fun command(name: String, description: String, required: String = "", optional: String = "", run: suspend (JSONObject) -> Any) {
         fun keys(value: String) = value.split(' ').filter { it.isNotEmpty() }.toSet()
@@ -52,40 +58,45 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
         response(operation, parameters).toString()
     }
 
-    suspend fun response(operation: String, parameters: String): JSONObject = try {
-        val command = commands[operation] ?: reject("unknown_operation", "Unknown operation")
-        val params = try {
-            JSONObject(parameters)
-        } catch (_: Exception) {
-            reject("invalid_parameters", "A JSON object is required")
-        }
-        requireApi(params.keysSet().containsAll(command.required), "Missing required parameters")
-        requireApi(params.keysSet().all { it in command.required || it in command.optional }, "Unknown parameters")
-        val properties = parameterSchema(operation, command).getJSONObject("properties")
-        params.keysSet().forEach { name ->
-            val value = params.get(name)
-            val type = properties.getJSONObject(name).getString("type")
-            val valid = when (type) {
-                "integer" -> value is Int || value is Long
-                "boolean" -> value is Boolean
-                "string" -> value is String
-                "object" -> value is JSONObject
-                "array" -> value is JSONArray
-                else -> false
+    suspend fun response(operation: String, parameters: String): JSONObject {
+        if (!commandGate.tryLock()) return JSONObject().put("error", JSONObject().put("code", "busy").put("message", "Another command is executing"))
+        return try {
+            val command = commands[operation] ?: reject("unknown_operation", "Unknown operation")
+            val params = try {
+                JSONObject(parameters)
+            } catch (_: Exception) {
+                reject("invalid_parameters", "A JSON object is required")
             }
-            requireApi(valid, "$name must be $type")
+            requireApi(params.keysSet().containsAll(command.required), "Missing required parameters")
+            requireApi(params.keysSet().all { it in command.required || it in command.optional }, "Unknown parameters")
+            val properties = parameterSchema(operation, command).getJSONObject("properties")
+            params.keysSet().forEach { name ->
+                val value = params.get(name)
+                val type = properties.getJSONObject(name).getString("type")
+                val valid = when (type) {
+                    "integer" -> value is Int || value is Long
+                    "boolean" -> value is Boolean
+                    "string" -> value is String
+                    "object" -> value is JSONObject
+                    "array" -> value is JSONArray
+                    else -> false
+                }
+                requireApi(valid, "$name must be $type")
+            }
+            if (runtime.busy && operation !in setOf("api.describe", "api.openapi", "app.status", "permissions.get", "jobs.get", "service.stop", "tailscale.cancel", "tailscale.close", "ui.status")) {
+                reject("busy", "Wait for the background operation to finish")
+            }
+            JSONObject().put("result", withTimeout(90_000) { command.run(params) })
+        } catch (e: ApiFailure) {
+            JSONObject().put("error", JSONObject().put("code", e.code).put("message", e.message))
+        } catch (_: CancellationException) {
+            JSONObject().put("error", JSONObject().put("code", "cancelled"))
+        } catch (_: Exception) {
+            // Parser and native errors may contain credentials from the supplied configuration.
+            JSONObject().put("error", JSONObject().put("code", "operation_failed"))
+        } finally {
+            commandGate.unlock()
         }
-        if (runtime.busy && operation !in setOf("api.describe", "api.openapi", "app.status", "permissions.get", "jobs.get", "service.stop", "tailscale.cancel", "tailscale.close", "ui.status")) {
-            reject("busy", "Wait for the background operation to finish")
-        }
-        JSONObject().put("result", withTimeout(90_000) { command.run(params) })
-    } catch (e: ApiFailure) {
-        JSONObject().put("error", JSONObject().put("code", e.code).put("message", e.message))
-    } catch (_: CancellationException) {
-        JSONObject().put("error", JSONObject().put("code", "cancelled"))
-    } catch (_: Exception) {
-        // Parser and native errors may contain credentials from the supplied configuration.
-        JSONObject().put("error", JSONObject().put("code", "operation_failed"))
     }
 
     init {
@@ -107,7 +118,7 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
         command("api.openapi", "Read the OpenAPI 3.1 description generated from the command registry") { openApi() }
         command("app.status", "Read application and VPN state without changing it") {
             JSONObject().put("package", context.packageName).put("version", BuildConfig.VERSION_NAME)
-                .put("apiVersion", 1).put("debug", BuildConfig.DEBUG).put("serviceState", DataStore.serviceState.name)
+                .put("apiVersion", 1).put("debug", BuildConfig.DEBUG).put("serviceState", runtime.serviceState().name)
                 .put("selectedProfileId", DataStore.selectedProxy).put("currentProfileId", DataStore.currentProfile)
                 .put("serviceMode", DataStore.serviceMode).put("busy", runtime.busy)
                 .put("lastError", runtime.lastError ?: JSONObject.NULL)
@@ -433,7 +444,7 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
             DataStore.configurationStore.awaitWrites()
             ProfileManager.postUpdate(old, true)
             ProfileManager.postUpdate(profile.id, true)
-            if (it.flag("apply") && DataStore.serviceState.started) SagerNet.reloadService(profile.id)
+            if (it.flag("apply") && runtime.serviceState().started) SagerNet.reloadService(profile.id)
             JSONObject().put("selectedProfileId", profile.id)
         }
         command("profiles.delete", "Delete one unreferenced profile while the service is stopped", "id confirm") {
@@ -624,7 +635,9 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
             JSONObject().put("accepted", true)
         }
         command("service.reload", "Apply saved configuration or switch a running profile", optional = "id") {
-            if (!DataStore.serviceState.canStop) reject("service_stopped", "Start the service before reloading it")
+            val state = runtime.serviceState()
+            if (state == BaseService.State.Idle) reject("service_unavailable", "The service connection is not ready")
+            if (!state.canStop) reject("service_stopped", "Start the service before reloading it")
             val id = if (it.has("id")) profile(it.positiveId()).id else -1L
             DataStore.configurationStore.awaitWrites()
             withContext(Dispatchers.Main) { SagerNet.reloadService(id) }
@@ -770,8 +783,9 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
     private fun profile(id: Long) = ProfileManager.getProfile(id) ?: reject("not_found", "Profile does not exist")
     private fun group(id: Long) = SagerDatabase.groupDao.getById(id) ?: reject("not_found", "Group does not exist")
     private fun requireStopped() {
-        if (DataStore.serviceState == BaseService.State.Idle) reject("service_unavailable", "Wait for the service connection before changing its state")
-        if (DataStore.serviceState != BaseService.State.Stopped) reject("service_running", "Stop the service and close active checks first")
+        val state = runtime.serviceState()
+        if (state == BaseService.State.Idle) reject("service_unavailable", "Wait for the service connection before changing its state")
+        if (state != BaseService.State.Stopped) reject("service_running", "Stop the service and close active checks first")
     }
     private fun profileJson(profile: ProxyEntity, secrets: Boolean) = JSONObject().apply {
         put("id", profile.id)
@@ -802,19 +816,22 @@ internal class AppApi(private val context: Context, private val runtime: ApiRunt
         put("landingProxy", group.landingProxy)
         if (secrets) group.subscription?.let { put("subscription", ApiBean.encode(it)) }
     }
-    private fun validateBean(bean: AbstractBean, editingId: Long = 0L) {
+    internal fun validateBean(bean: AbstractBean, editingId: Long = 0L, lookup: (Long) -> ProxyEntity = ::profile) {
         requireApi(bean.serverPort in 1..65535, "serverPort must be 1..65535")
         requireApi(!bean.serverAddress.isNullOrBlank(), "serverAddress is required")
         if (bean is ChainBean) {
             val ids = bean.proxies.orEmpty()
             requireApi(ids.isNotEmpty() && ids.size <= 100 && ids.distinct().size == ids.size && editingId !in ids, "Invalid proxy chain")
             val visiting = mutableSetOf<Long>()
+            val completed = mutableSetOf<Long>()
             fun check(id: Long) {
+                if (id in completed) return
                 requireApi(id != editingId && visiting.add(id), "Proxy chain contains a cycle")
-                val member = profile(id)
+                val member = lookup(id)
                 requireApi(member.canBuild(), "A chain member is archived")
                 member.chainBean?.proxies?.forEach(::check)
                 visiting.remove(id)
+                completed.add(id)
             }
             ids.forEach(::check)
         }

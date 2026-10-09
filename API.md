@@ -17,7 +17,7 @@ python3 scripts/app-api.py call api.describe
 python3 scripts/app-api.py call api.openapi > openapi.json
 ```
 
-The client requires Python 3.9 or later and `adb`. `--package` defaults to `com.nb4a.debug`. It writes only the app's private `no_backup/local-api.json`, launches `MainActivity`, and creates an ADB port forward on a free host port. It does not install, uninstall, clear data, stop the VPN or grant Android permissions.
+The client requires Python 3.9 or later and `adb`. `--package` defaults to `com.nb4a.debug`. It writes only the app's private `no_backup/local-api.json`, launches `MainActivity`, and creates an ADB port forward on a free host port. Repeated enrollment reuses a matching forward, including during token rotation. It does not install, uninstall, clear data, stop the VPN or grant Android permissions.
 
 The client saves the forwarded port and token in `~/.config/nekobox/api.json` with mode `0600`. Use a different `--state` path for each device. The app keeps its API credentials outside Android backups and its own exported backups.
 
@@ -46,7 +46,7 @@ Successful command responses contain `result`. Application failures contain `err
 
 Requests are limited to 2 MiB, 64 nesting levels and 100,000 JSON tokens. Responses are limited to 16 MiB. Browser requests and non-loopback Host headers are refused. The API does not support CORS, cookies, redirects or tokens in URLs. Use the literal address `127.0.0.1`.
 
-Commands execute one at a time. HTTP 503 with `error.code: busy` and `Retry-After: 1` means the request was not dispatched because another command was executing. You can retry after that delay. An HTTP 200 `busy` error means a background job is still running; poll that job first.
+Commands execute one at a time. HTTP 503 with `error.code: busy` and `Retry-After: 1` means the request was not dispatched because another command was executing. You can retry after that delay. An HTTP 200 `busy` error means another command or background job is still running, including a command accepted before token rotation. Wait before retrying, or poll the job when one exists.
 
 Long operations return a `jobId`; poll `jobs.get`, or use:
 
@@ -115,7 +115,7 @@ Profile and group deletion requires `confirm: true` and a stopped service. The A
 
 Use `service.test` for the running configuration, and `profiles.test` for a saved profile through the app's existing isolated probe implementation. Both return jobs. `service.traffic` reports the latest traffic sample; it remains empty before the first sample or when traffic sampling is disabled.
 
-For Tailscale, open a session with `tailscale.open` and poll `tailscale.status`. `check: true` permits a managed check of a stopped profile. Peer probes and exit-node changes return request IDs for `tailscale.result`. Exit changes require the exact `expectedSavedSelection` and `confirm: true`. Close sessions when finished. The service permits four sessions and retains up to 64 requests; closing a session discards its requests. Login URLs remain data. The API does not open them.
+For Tailscale, open a session with `tailscale.open` and poll `tailscale.status`. `check: true` permits a managed check of a stopped profile. Peer probes and exit-node changes return request IDs for `tailscale.result`. Exit changes require the exact `expectedSavedSelection` and `confirm: true`. Close sessions when finished. The API permits two sessions, admits at most four in-flight requests per session, and retains up to 64 requests. Peer IDs are limited to 256 UTF-16 code units and exit-selection baselines to 4096. Closing a session discards its requests. Login URLs remain data. The API does not open them.
 
 ### Settings, routing and screens
 
@@ -123,7 +123,7 @@ For Tailscale, open a session with `tailscale.open` and poll `tailscale.status`.
 
 The API requires confirmation before enabling LAN sharing, insecure TLS options, unauthenticated system HTTP proxying or mock location. Android permissions remain necessary. `sharing.get` reveals the shared proxy credential only with `includeSecrets: true`; `sharing.rotate` changes that credential and requires a subsequent reload.
 
-Settings and routing changes report whether a reload or restart is needed. Use `service.reload` to apply core configuration, `ui.recreate` for appearance, or `app.restart` for process-level settings such as logging. Restart requires `confirm: true` and a stopped service.
+Settings and routing changes report whether a reload or restart is needed. Use `service.reload` to apply core configuration, `ui.recreate` for appearance, or `app.restart` for process-level settings such as logging. Restart requires `confirm: true` and a stopped service. Changes to `hideFromRecentApps` take effect at once for both true and false.
 
 Use `automation.set` to replace the network-rule list. Each rule has `kind`, `action`, and optional `ssid` and `profileId`. Kinds are `MOBILE`, `WIFI`, `SSID` and `ETHERNET`; actions are `CONNECT` and `DISCONNECT`. Enable or disable automation through `settings.set`.
 

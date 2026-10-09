@@ -65,20 +65,18 @@ internal object LocalApiAccess {
         }
     }
 
-    fun sync(context: Context) {
+    fun sync(context: Context) = runOnDefaultDispatcher {
         val app = context.applicationContext
-        runOnDefaultDispatcher {
-            val enabled = runCatching { read(app)?.enabled == true }.getOrDefault(false)
-            onMainDispatcher {
-                if (enabled) {
-                    try {
-                        ContextCompat.startForegroundService(app, Intent(app, LocalApiService::class.java))
-                    } catch (_: IllegalStateException) {
-                        Toast.makeText(app, R.string.local_api_start_failed, Toast.LENGTH_LONG).show()
-                    }
-                } else {
-                    app.stopService(Intent(app, LocalApiService::class.java))
+        val enabled = runCatching { read(app)?.enabled == true }.getOrDefault(false)
+        onMainDispatcher {
+            if (enabled) {
+                try {
+                    ContextCompat.startForegroundService(app, Intent(app, LocalApiService::class.java))
+                } catch (_: IllegalStateException) {
+                    Toast.makeText(app, R.string.local_api_start_failed, Toast.LENGTH_LONG).show()
                 }
+            } else {
+                app.stopService(Intent(app, LocalApiService::class.java))
             }
         }
     }
@@ -116,14 +114,13 @@ internal object LocalApiAccess {
         }
     }
 
-    private fun saveFromUi(activity: Activity, config: Config) {
-        runOnDefaultDispatcher {
-            val saved = runCatching { write(activity, config) }.isSuccess
-            onMainDispatcher {
-                if (activity.isFinishing || activity.isDestroyed) return@onMainDispatcher
-                if (saved) sync(activity)
-                Toast.makeText(activity, if (saved) R.string.local_api_saved else R.string.local_api_start_failed, Toast.LENGTH_SHORT).show()
-            }
+    internal fun saveFromUi(activity: Activity, config: Config) = runOnDefaultDispatcher {
+        val app = activity.applicationContext
+        val saved = runCatching { write(app, config) }.isSuccess
+        if (saved) sync(app).join()
+        onMainDispatcher {
+            if (activity.isFinishing || activity.isDestroyed) return@onMainDispatcher
+            Toast.makeText(activity, if (saved) R.string.local_api_saved else R.string.local_api_start_failed, Toast.LENGTH_SHORT).show()
         }
     }
 }

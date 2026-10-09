@@ -63,6 +63,12 @@ def configure(args, enabled):
         raise ValueError("An explicit --serial is required")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", args.package):
         raise ValueError("Invalid package name")
+    previous = json.loads(args.state.read_text()) if args.state.exists() else None
+    if previous is not None and not isinstance(previous, dict):
+        raise ValueError("Invalid client state")
+    matching = previous is not None and previous.get("serial") == args.serial and previous.get("package") == args.package
+    if enabled and previous is not None and not matching:
+        raise ValueError("The saved connection belongs to another device or package; choose another --state path")
     adb_shell(args.serial, "run-as", args.package, "id")
     existing = adb_shell(args.serial, "run-as", args.package, "cat", "no_backup/local-api.json", check=False)
     if existing.returncode == 0:
@@ -75,6 +81,15 @@ def configure(args, enabled):
     if args.rotate:
         config["token"] = secrets.token_hex(32)
     validate_config(config)
+    old_forward = None
+    if matching:
+        port = previous.get("port")
+        device_port = previous.get("devicePort", config["port"])
+        if type(port) is not int or not 1 <= port <= 65535 or type(device_port) is not int or not 1024 <= device_port <= 65535:
+            raise ValueError("Invalid saved forward")
+        candidate = (args.serial, f"tcp:{port}", f"tcp:{device_port}")
+        if candidate in forward_list(args.serial):
+            old_forward = candidate
     # The token goes through stdin, never through command arguments or terminal output.
     adb_shell(
         args.serial, "run-as", args.package, "sh", "-c",
@@ -84,23 +99,45 @@ def configure(args, enabled):
     )
     adb_shell(args.serial, "am", "start", "-n", f"{args.package}/io.nekohasekai.sagernet.ui.MainActivity")
     if not enabled:
-        if args.state.exists():
-            state = json.loads(args.state.read_text())
-            if state.get("serial") == args.serial and state.get("package") == args.package:
-                adb(args.serial, "forward", "--remove", f"tcp:{state['port']}", check=False)
-                args.state.unlink()
+        if matching:
+            if old_forward is not None:
+                remove_forward(old_forward)
+            args.state.unlink()
         return {"enabled": False}
-    forwarded = adb(args.serial, "forward", "--no-rebind", "tcp:0", f"tcp:{config['port']}")
-    port = int(forwarded.stdout.strip())
-    state = {"serial": args.serial, "package": args.package, "port": port, "token": config["token"]}
-    save_private(args.state, state)
-    for _ in range(40):
-        try:
-            result = call(state, "app.status", {})
-            return {"enabled": True, "port": port, "stateFile": str(args.state), "app": result}
-        except (OSError, RuntimeError):
-            time.sleep(0.25)
-    raise RuntimeError("API did not become ready; inspect the API notification and app logs")
+    reused = old_forward is not None and old_forward[2] == f"tcp:{config['port']}"
+    if reused:
+        port = previous["port"]
+    else:
+        forwarded = adb(args.serial, "forward", "--no-rebind", "tcp:0", f"tcp:{config['port']}")
+        port = int(forwarded.stdout.strip())
+    state = {"serial": args.serial, "package": args.package, "port": port, "devicePort": config["port"], "token": config["token"]}
+    try:
+        for _ in range(40):
+            try:
+                result = call(state, "app.status", {})
+                break
+            except (OSError, RuntimeError):
+                time.sleep(0.25)
+        else:
+            raise RuntimeError("API did not become ready; inspect the API notification and app logs")
+        if old_forward is not None and not reused:
+            remove_forward(old_forward)
+        save_private(args.state, state)
+    except BaseException:
+        if not reused:
+            remove_forward((args.serial, f"tcp:{port}", f"tcp:{config['port']}"))
+        raise
+    return {"enabled": True, "port": port, "stateFile": str(args.state), "app": result}
+
+
+def forward_list(serial):
+    rows = (tuple(line.split()) for line in adb(serial, "forward", "--list").stdout.decode().splitlines())
+    return {row for row in rows if len(row) == 3}
+
+
+def remove_forward(forward):
+    if forward in forward_list(forward[0]):
+        adb(forward[0], "forward", "--remove", forward[1])
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -131,9 +168,16 @@ def call(state, operation, parameters):
         raise RuntimeError(f"API HTTP error {error.code}; the command was not retried") from None
     if len(data) > MAX_RESPONSE:
         raise RuntimeError("API response exceeds the size limit")
-    payload = json.loads(data)
+    try:
+        payload = json.loads(data)
+    except ValueError:
+        raise RuntimeError("API returned malformed JSON") from None
+    if not isinstance(payload, dict) or ("result" in payload) == ("error" in payload):
+        raise RuntimeError("API returned a malformed response envelope")
     if "error" in payload:
         error = payload["error"]
+        if not isinstance(error, dict) or not isinstance(error.get("code", "error"), str) or not isinstance(error.get("message", ""), str):
+            raise RuntimeError("API returned a malformed error")
         raise RuntimeError(f"API {error.get('code', 'error')}: {error.get('message', '')}")
     return payload["result"]
 
