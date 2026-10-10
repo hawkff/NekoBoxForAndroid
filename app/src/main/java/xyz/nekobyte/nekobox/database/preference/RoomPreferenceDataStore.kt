@@ -16,9 +16,8 @@ import java.util.concurrent.atomic.AtomicReference
  * androidx [PreferenceDataStore] backed by a Room `KeyValuePair.Dao`.
  *
  * Two modes:
- *  - **uncached** (default, e.g. `profileCacheStore` over the in-memory `TempDatabase`): every
- *    getter is a synchronous SELECT and every setter a synchronous write, as before. Behaviour
- *    unchanged.
+ *  - **uncached** (default, e.g. `profileCacheStore` over [InMemoryKeyValuePairDao]): every
+ *    getter reads the DAO and every setter writes it synchronously.
  *  - **cached** (`configurationStore` over the disk `PublicDatabase`): reads serve from an
  *    immutable in-memory snapshot (no SQLite on any thread after priming); writes update the
  *    snapshot synchronously and persist to the DB off-main on [PrefSnapshotExecutor]; a

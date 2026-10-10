@@ -7,10 +7,10 @@ import xyz.nekobyte.nekobox.CONNECTION_TEST_URL
 import xyz.nekobyte.nekobox.GroupType
 import xyz.nekobyte.nekobox.IPv6Mode
 import xyz.nekobyte.nekobox.Key
-import xyz.nekobyte.nekobox.TempDatabase
 import xyz.nekobyte.nekobox.TunImplementation
 import xyz.nekobyte.nekobox.bg.BaseService
 import xyz.nekobyte.nekobox.bg.VpnService
+import xyz.nekobyte.nekobox.database.preference.InMemoryKeyValuePairDao
 import xyz.nekobyte.nekobox.database.preference.OnPreferenceDataStoreChangeListener
 import xyz.nekobyte.nekobox.database.preference.PublicDatabase
 import xyz.nekobyte.nekobox.database.preference.RoomPreferenceDataStore
@@ -51,7 +51,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
         cached = true,
         database = PublicDatabase.database,
     )
-    val profileCacheStore = RoomPreferenceDataStore(TempDatabase.profileCacheDao)
+    val profileCacheStore = RoomPreferenceDataStore(InMemoryKeyValuePairDao())
 
     // last used, but may not be running
     var currentProfile by configurationStore.long(Key.PROFILE_CURRENT)
