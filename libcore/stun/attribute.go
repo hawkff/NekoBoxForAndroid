@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//      http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -56,15 +56,15 @@ func newChangeReqAttribute(changeIP bool, changePort bool) *attribute {
 	return newAttribute(attributeChangeRequest, value)
 }
 
-//      0                   1                   2                   3
-//      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-//     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//     |x x x x x x x x|    Family     |         X-Port                |
-//     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//     |                X-Address (Variable)
-//     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// xorAddr decodes an XOR-MAPPED-ADDRESS attribute (RFC 5389, Figure 6):
 //
-//             Figure 6: Format of XOR-MAPPED-ADDRESS Attribute
+//	 0                   1                   2                   3
+//	 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|x x x x x x x x|    Family     |         X-Port                |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|                X-Address (Variable)
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 func (v *attribute) xorAddr(transID []byte) *Host {
 	xorIP := make([]byte, 16)
 	for i := 0; i < len(v.value)-4; i++ {
@@ -80,17 +80,17 @@ func (v *attribute) xorAddr(transID []byte) *Host {
 	return &Host{family, net.IP(xorIP).String(), port ^ x}
 }
 
-//       0                   1                   2                   3
-//       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//      |0 0 0 0 0 0 0 0|    Family     |           Port                |
-//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//      |                                                               |
-//      |                 Address (32 bits or 128 bits)                 |
-//      |                                                               |
-//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// rawAddr decodes a MAPPED-ADDRESS attribute (RFC 5389, Figure 5):
 //
-//               Figure 5: Format of MAPPED-ADDRESS Attribute
+//	 0                   1                   2                   3
+//	 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|0 0 0 0 0 0 0 0|    Family     |           Port                |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	|                                                               |
+//	|                 Address (32 bits or 128 bits)                 |
+//	|                                                               |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 func (v *attribute) rawAddr() *Host {
 	host := new(Host)
 	host.family = uint16(v.value[1])

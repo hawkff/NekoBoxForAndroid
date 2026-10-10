@@ -11,11 +11,9 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/common/dialer"
 	M "github.com/sagernet/sing/common/metadata"
 )
@@ -67,9 +65,6 @@ func TestTailscaleManagementEndToEnd(t *testing.T) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal("cannot read private harness config")
-	}
-	if err := neko_log.SetupLog(1<<20, filepath.Join(t.TempDir(), "neko.log")); err != nil {
-		t.Fatal("cannot initialize test logging")
 	}
 	var instance *BoxInstance
 	t.Cleanup(func() {

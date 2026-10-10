@@ -5,16 +5,16 @@ go 1.27.1
 require (
 	github.com/dyhkwong/sing-juicity v0.0.3
 	github.com/gofrs/uuid/v5 v5.5.1
-	github.com/matsuridayo/libneko v1.0.0 // replaced
 	github.com/miekg/dns v1.1.72
 	github.com/oschwald/maxminddb-golang v1.13.1
+	github.com/sagernet/gomobile v0.1.13
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
 	github.com/sagernet/sing v0.9.6-0.20260922013354-87c33f17688f
 	github.com/sagernet/sing-box v1.0.0 // replaced
 	github.com/sagernet/sing-tun v0.9.6-0.20260924001923-ddaa4ca25e3b
 	github.com/sagernet/tailscale v1.102.1-sing-box-1.14-mod.5
 	github.com/ulikunitz/xz v0.5.17
-	golang.org/x/mobile v0.0.0-20260908204917-8b95e45f8d3e
+	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
 	golang.org/x/sys v0.48.0
 )
@@ -86,7 +86,6 @@ require (
 	github.com/sagernet/cors v1.2.1 // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
 	github.com/sagernet/gliderssh v0.3.4-0.20260531100337-2194faca5648 // indirect
-	github.com/sagernet/gomobile v0.1.13 // indirect
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
 	github.com/sagernet/nftables v0.3.0-mod.4 // indirect
@@ -116,8 +115,8 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
@@ -133,8 +132,6 @@ require (
 	gvisor.dev/gvisor v0.0.0-20250606233247-e3c4c4cad86f // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
-
-replace github.com/matsuridayo/libneko => ../../libneko
 
 replace github.com/sagernet/sing-box => ../../sing-box
 

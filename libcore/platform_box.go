@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/matsuridayo/libneko/neko_log"
 	"github.com/sagernet/sing-box/adapter"
 	sblog "github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -260,5 +259,5 @@ func (w *boxPlatformLogWriterWrapper) WriteMessage(level uint8, message string) 
 	if !strings.HasSuffix(message, "\n") {
 		message += "\n"
 	}
-	neko_log.LogWriter.Write([]byte(message))
+	nekoLogWriter{}.Write([]byte(message))
 }

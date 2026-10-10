@@ -11,9 +11,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 
-	"github.com/matsuridayo/libneko/protect_server"
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/boxapi"
@@ -32,7 +31,9 @@ func init() {
 	dialer.DoNotSelectInterface.Store(true)
 }
 
-var mainInstance *BoxInstance
+// mainInstance is the core the service runs; SetAsMain, Close and UrlTest touch it from
+// different JVM threads.
+var mainInstance atomic.Pointer[BoxInstance]
 
 func VersionBox() string {
 	version := []string{
@@ -176,8 +177,7 @@ func (b *BoxInstance) Close() (err error) {
 	b.coreWork.Wait()
 
 	// clear main instance
-	if mainInstance == b {
-		mainInstance = nil
+	if mainInstance.CompareAndSwap(b, nil) {
 		goServeProtect(false)
 	}
 
@@ -206,7 +206,7 @@ func (b *BoxInstance) Wake() {
 }
 
 func (b *BoxInstance) SetAsMain() {
-	mainInstance = b
+	mainInstance.Store(b)
 	goServeProtect(true)
 }
 
@@ -253,26 +253,24 @@ func (b *BoxInstance) SelectedOutbound() string {
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer deferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
+	if i == nil {
+		i = mainInstance.Load()
+	}
+	if i == nil {
+		// no core: test the direct route
+		return urlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout)
+	}
 	var connectionTracker adapter.ConnectionTracker
-	// test i
-	if i != nil {
-		if i.v2api != nil {
-			connectionTracker = i.v2api.StatsService()
-		}
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	if i.v2api != nil {
+		connectionTracker = i.v2api.StatsService()
 	}
-	// test direct
-	if mainInstance == nil {
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
-	}
-	// test mainInstance
-	if mainInstance.v2api != nil {
-		connectionTracker = mainInstance.v2api.StatsService()
-	}
-	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	return urlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout)
 }
 
-var protectCloser io.Closer
+var (
+	protectAccess sync.Mutex
+	protectCloser io.Closer
+)
 
 // ServeProtect keeps socket protection available to the UI process while the kill switch holds
 // the tun with no core running; SetAsMain replaces the server once a core starts again.
@@ -281,12 +279,14 @@ func ServeProtect(start bool) {
 }
 
 func goServeProtect(start bool) {
+	protectAccess.Lock()
+	defer protectAccess.Unlock()
 	if protectCloser != nil {
 		protectCloser.Close()
 		protectCloser = nil
 	}
 	if start {
-		protectCloser = protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
+		protectCloser = serveProtect("protect_path", func(fd int) {
 			intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
 	}
