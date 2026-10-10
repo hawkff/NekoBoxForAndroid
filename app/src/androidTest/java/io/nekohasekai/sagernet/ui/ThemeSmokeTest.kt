@@ -55,6 +55,8 @@ class ThemeSmokeTest {
             R.layout.layout_backup,
             R.layout.layout_import,
             R.layout.item_keyboard_key,
+            R.layout.layout_profile,
+            R.layout.layout_route_item,
         )
         for (id in allThemes) {
             for (dialog in booleanArrayOf(false, true)) {
