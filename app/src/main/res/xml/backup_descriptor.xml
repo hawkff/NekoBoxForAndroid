@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content xmlns:tools="http://schemas.android.com/tools"
                      tools:ignore="FullBackupContent">
-    <exclude domain="database" path="sager_net.db"/>
+    <exclude domain="database" path="profiles.db"/>
     <!-- No device storage yet in Android 6.0 -->
-    <exclude domain="database" path="configuration.db"/>
-    <exclude domain="device_database" path="configuration.db"/>
+    <exclude domain="database" path="settings.db"/>
+    <exclude domain="device_database" path="settings.db"/>
 </full-backup-content>
