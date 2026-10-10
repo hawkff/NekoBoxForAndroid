@@ -278,7 +278,6 @@ class RouteFragment :
             val profileType = binding.profileType
             val routeOutbound = binding.routeOutbound
             val editButton = binding.edit
-            val shareLayout = binding.share
             val enableSwitch = binding.enable
 
             fun bind(ruleEntity: RuleEntity) {

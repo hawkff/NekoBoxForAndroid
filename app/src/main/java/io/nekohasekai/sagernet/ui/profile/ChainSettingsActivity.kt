@@ -33,7 +33,6 @@ import io.nekohasekai.sagernet.fmt.socks.SOCKSBean
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.ProfileSelectActivity
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
-import moe.matsuri.nb4a.Protocols.getProtocolColor
 
 // An earlier TCP-only proxy can carry encapsulated UDP, so only the exit's capability is
 // definitive here. Other hints leave the requirements between hops conditional.
@@ -300,7 +299,6 @@ class ChainSettingsActivity : ProfileSettingsActivity<ChainBean>(R.layout.layout
         fun bind(proxyEntity: ProxyEntity) {
             profileName.text = proxyEntity.displayName()
             profileType.text = proxyEntity.displayType()
-            profileType.setTextColor(getProtocolColor(proxyEntity.type))
 
             val rx = proxyEntity.rx
             val tx = proxyEntity.tx

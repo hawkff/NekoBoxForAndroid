@@ -243,8 +243,8 @@ class AboutFragment : ToolbarFragment(R.layout.layout_about) {
 
     private data class AboutItem(
         @DrawableRes val icon: Int = 0,
-        val text: CharSequence,
-        val subText: CharSequence? = null,
+        val text: String,
+        val subText: String? = null,
         val onClick: (() -> Unit)? = null,
     )
 

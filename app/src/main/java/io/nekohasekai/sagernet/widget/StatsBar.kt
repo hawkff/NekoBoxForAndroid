@@ -168,9 +168,6 @@ class StatsBar @JvmOverloads constructor(
 
     @SuppressLint("SetTextI18n")
     fun updateSpeed(txRate: Long, rxRate: Long) {
-        val speedColor = context.getColorAttr(R.attr.speedTextColor)
-        txText.setTextColor(speedColor)
-        rxText.setTextColor(speedColor)
         txText.text = "▲  ${
             context.getString(
                 R.string.speed,

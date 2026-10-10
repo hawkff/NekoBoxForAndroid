@@ -70,28 +70,6 @@
     </issue>
 
     <issue
-        id="DiffUtilEquals"
-        message="Suspicious equality check: `equals()` is not implemented in CharSequence"
-        errorLine1="                        oldItem.text == newItem.text &amp;&amp;"
-        errorLine2="                                     ~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt"
-            line="262"
-            column="38"/>
-    </issue>
-
-    <issue
-        id="DiffUtilEquals"
-        message="Suspicious equality check: `equals()` is not implemented in CharSequence"
-        errorLine1="                        oldItem.subText == newItem.subText"
-        errorLine2="                                        ~~">
-        <location
-            file="src/main/java/io/nekohasekai/sagernet/ui/AboutFragment.kt"
-            line="263"
-            column="41"/>
-    </issue>
-
-    <issue
         id="Deprecated"
         message="autoRevokePermissions has no effect; this flag was only used in preview versions of Android 11"
         errorLine1="        android:autoRevokePermissions=&quot;allowed&quot;"
@@ -463,17 +441,6 @@
             file="src/main/java/moe/matsuri/nb4a/ui/ThemePickerPreference.kt"
             line="61"
             column="13"/>
-    </issue>
-
-    <issue
-        id="LabelFor"
-        message="Missing accessibility label: provide either a view with an `android:labelFor` that references this view or provide an `android:hint`"
-        errorLine1="                        &lt;EditText"
-        errorLine2="                         ~~~~~~~~">
-        <location
-            file="src/main/res/layout/layout_stun.xml"
-            line="66"
-            column="26"/>
     </issue>
 
 </issues>
