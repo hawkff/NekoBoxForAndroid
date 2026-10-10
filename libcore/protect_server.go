@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"syscall"
+	"time"
 )
 
 // serveProtect listens on the unix socket at path. Each client connection carries one socket
@@ -27,6 +28,8 @@ func serveProtect(path string, protect func(fd int)) io.Closer {
 			}
 			go func() {
 				defer conn.Close()
+				// A client that connects and never sends must not pin this goroutine.
+				conn.SetDeadline(time.Now().Add(5 * time.Second))
 				fd, err := receiveFd(conn)
 				if err != nil {
 					log.Println("protect server:", err)
@@ -60,6 +63,9 @@ func receiveFd(conn *net.UnixConn) (int, error) {
 		return 0, err
 	}
 	if len(fds) != 1 {
+		for _, fd := range fds {
+			syscall.Close(fd)
+		}
 		return 0, fmt.Errorf("protect: %d fds", len(fds))
 	}
 	return fds[0], nil

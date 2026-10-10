@@ -11,7 +11,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/certificate"
@@ -31,9 +30,13 @@ func init() {
 	dialer.DoNotSelectInterface.Store(true)
 }
 
-// mainInstance is the core the service runs; SetAsMain, Close and UrlTest touch it from
-// different JVM threads.
-var mainInstance atomic.Pointer[BoxInstance]
+// mainInstance is the core the service runs. mainAccess also guards protectCloser, so a core
+// that is closing cannot stop the protect server of the core that replaced it.
+var (
+	mainAccess    sync.Mutex
+	mainInstance  *BoxInstance
+	protectCloser io.Closer
+)
 
 func VersionBox() string {
 	version := []string{
@@ -177,9 +180,12 @@ func (b *BoxInstance) Close() (err error) {
 	b.coreWork.Wait()
 
 	// clear main instance
-	if mainInstance.CompareAndSwap(b, nil) {
-		goServeProtect(false)
+	mainAccess.Lock()
+	if mainInstance == b {
+		mainInstance = nil
+		serveProtectLocked(false)
 	}
+	mainAccess.Unlock()
 
 	// close box. A box whose Start failed has already closed itself, and closing it again
 	// reports os.ErrClosed; that must not replace the start error or fail the teardown.
@@ -206,8 +212,10 @@ func (b *BoxInstance) Wake() {
 }
 
 func (b *BoxInstance) SetAsMain() {
-	mainInstance.Store(b)
-	goServeProtect(true)
+	mainAccess.Lock()
+	defer mainAccess.Unlock()
+	mainInstance = b
+	serveProtectLocked(true)
 }
 
 func (b *BoxInstance) SetV2rayStats(outbounds string) {
@@ -254,7 +262,9 @@ func (b *BoxInstance) SelectedOutbound() string {
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer deferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
 	if i == nil {
-		i = mainInstance.Load()
+		mainAccess.Lock()
+		i = mainInstance
+		mainAccess.Unlock()
 	}
 	if i == nil {
 		// no core: test the direct route
@@ -267,20 +277,16 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 	return urlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout)
 }
 
-var (
-	protectAccess sync.Mutex
-	protectCloser io.Closer
-)
-
 // ServeProtect keeps socket protection available to the UI process while the kill switch holds
 // the tun with no core running; SetAsMain replaces the server once a core starts again.
 func ServeProtect(start bool) {
-	goServeProtect(start)
+	mainAccess.Lock()
+	defer mainAccess.Unlock()
+	serveProtectLocked(start)
 }
 
-func goServeProtect(start bool) {
-	protectAccess.Lock()
-	defer protectAccess.Unlock()
+// serveProtectLocked replaces the protect server; the caller holds mainAccess.
+func serveProtectLocked(start bool) {
 	if protectCloser != nil {
 		protectCloser.Close()
 		protectCloser = nil

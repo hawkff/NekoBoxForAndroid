@@ -24,6 +24,7 @@ func NekoLogPrintln(s string) {
 
 func NekoLogClear() {
 	if nekoLog != nil {
+		defer lockLog(nekoLog)()
 		nekoLog.Truncate(0)
 	}
 }
