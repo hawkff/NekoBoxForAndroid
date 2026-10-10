@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/dialer"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -38,7 +37,7 @@ func UrlTestOutbound(i *BoxInstance, tag string, link string, timeout int32) (la
 			},
 		},
 	}
-	return speedtest.UrlTest(client, link, timeout, speedtest.UrlTestStandard_RTT)
+	return urlTest(client, link, timeout)
 }
 
 // tailscaleReady reports backend and exit selection readiness, not packet reachability.

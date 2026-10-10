@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/matsuridayo/libneko/protect_server"
-	"github.com/matsuridayo/libneko/speedtest"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/boxapi"
@@ -32,7 +30,13 @@ func init() {
 	dialer.DoNotSelectInterface.Store(true)
 }
 
-var mainInstance *BoxInstance
+// mainInstance is the core the service runs. mainAccess also guards protectCloser, so a core
+// that is closing cannot stop the protect server of the core that replaced it.
+var (
+	mainAccess    sync.Mutex
+	mainInstance  *BoxInstance
+	protectCloser io.Closer
+)
 
 func VersionBox() string {
 	version := []string{
@@ -176,10 +180,12 @@ func (b *BoxInstance) Close() (err error) {
 	b.coreWork.Wait()
 
 	// clear main instance
+	mainAccess.Lock()
 	if mainInstance == b {
 		mainInstance = nil
-		goServeProtect(false)
+		serveProtectLocked(false)
 	}
+	mainAccess.Unlock()
 
 	// close box. A box whose Start failed has already closed itself, and closing it again
 	// reports os.ErrClosed; that must not replace the start error or fail the teardown.
@@ -206,8 +212,10 @@ func (b *BoxInstance) Wake() {
 }
 
 func (b *BoxInstance) SetAsMain() {
+	mainAccess.Lock()
+	defer mainAccess.Unlock()
 	mainInstance = b
-	goServeProtect(true)
+	serveProtectLocked(true)
 }
 
 func (b *BoxInstance) SetV2rayStats(outbounds string) {
@@ -253,40 +261,38 @@ func (b *BoxInstance) SelectedOutbound() string {
 
 func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err error) {
 	defer deferPanicToError("box.UrlTest", func(err_ error) { err = err_ })
+	if i == nil {
+		mainAccess.Lock()
+		i = mainInstance
+		mainAccess.Unlock()
+	}
+	if i == nil {
+		// no core: test the direct route
+		return urlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout)
+	}
 	var connectionTracker adapter.ConnectionTracker
-	// test i
-	if i != nil {
-		if i.v2api != nil {
-			connectionTracker = i.v2api.StatsService()
-		}
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	if i.v2api != nil {
+		connectionTracker = i.v2api.StatsService()
 	}
-	// test direct
-	if mainInstance == nil {
-		return speedtest.UrlTest(boxapi.CreateProxyHttpClient(nil, nil), link, timeout, speedtest.UrlTestStandard_RTT)
-	}
-	// test mainInstance
-	if mainInstance.v2api != nil {
-		connectionTracker = mainInstance.v2api.StatsService()
-	}
-	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+	return urlTest(boxapi.CreateProxyHttpClient(i.Box, connectionTracker), link, timeout)
 }
-
-var protectCloser io.Closer
 
 // ServeProtect keeps socket protection available to the UI process while the kill switch holds
 // the tun with no core running; SetAsMain replaces the server once a core starts again.
 func ServeProtect(start bool) {
-	goServeProtect(start)
+	mainAccess.Lock()
+	defer mainAccess.Unlock()
+	serveProtectLocked(start)
 }
 
-func goServeProtect(start bool) {
+// serveProtectLocked replaces the protect server; the caller holds mainAccess.
+func serveProtectLocked(start bool) {
 	if protectCloser != nil {
 		protectCloser.Close()
 		protectCloser = nil
 	}
 	if start {
-		protectCloser = protect_server.ServeProtect("protect_path", false, 0, func(fd int) {
+		protectCloser = serveProtect("protect_path", func(fd int) {
 			intfBox.AutoDetectInterfaceControl(int32(fd))
 		})
 	}

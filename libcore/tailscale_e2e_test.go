@@ -3,12 +3,9 @@ package libcore
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/matsuridayo/libneko/neko_log"
 )
 
 // Runs against a live tailnet: NEKOBOX_TAILSCALE_E2E_CONFIG points to a sing-box config with
@@ -26,10 +23,6 @@ func TestTailscaleEndToEnd(t *testing.T) {
 	}
 	content, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatal(err)
-	}
-	// The platform log writer forwards to neko_log, which InitCore sets up on Android.
-	if err := neko_log.SetupLog(1<<20, filepath.Join(t.TempDir(), "neko.log")); err != nil {
 		t.Fatal(err)
 	}
 	instance, err := NewSingBoxInstance(string(content), nil)
@@ -87,9 +80,6 @@ func TestTailscaleInteractiveLogin(t *testing.T) {
 	}
 	content, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := neko_log.SetupLog(1<<20, filepath.Join(t.TempDir(), "neko.log")); err != nil {
 		t.Fatal(err)
 	}
 	instance, err := NewSingBoxInstance(string(content), nil)

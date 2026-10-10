@@ -89,7 +89,9 @@ func protectPacketConn(conn *icmp.PacketConn) {
 	} else if v6 := conn.IPv6PacketConn(); v6 != nil {
 		inner = v6.PacketConn
 	}
-	syscallConn, ok := inner.(interface{ SyscallConn() (syscall.RawConn, error) })
+	syscallConn, ok := inner.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	})
 	if !ok {
 		return
 	}
