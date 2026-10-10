@@ -46,7 +46,8 @@ func serveProtect(path string, protect func(fd int)) io.Closer {
 
 // receiveFd reads the single fd a protect client sends along with its one data byte.
 func receiveFd(conn *net.UnixConn) (int, error) {
-	oob := make([]byte, syscall.CmsgSpace(4))
+	// Room for a second fd, so a message carrying several is rejected, not silently truncated.
+	oob := make([]byte, syscall.CmsgSpace(2*4))
 	_, oobn, _, _, err := conn.ReadMsgUnix(make([]byte, 1), oob)
 	if err != nil {
 		return 0, err
