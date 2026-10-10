@@ -522,7 +522,6 @@ class MainActivity :
         if (binding.fab.isShown) {
             anchorView = binding.fab
         }
-        // TODO
     }
 
     override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {

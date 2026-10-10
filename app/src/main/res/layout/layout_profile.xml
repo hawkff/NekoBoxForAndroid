@@ -51,7 +51,7 @@
                     android:lineBreakStyle="loose"
                     android:lineBreakWordStyle="phrase"
                     android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:attr/textColorPrimary"
+                    android:textColor="?attr/profileNameColor"
                     android:textStyle="bold"
                     tools:text="@string/profile_name" />
                 </LinearLayout>
@@ -79,7 +79,7 @@
                     android:visibility="gone"
                     app:srcCompat="@drawable/ic_baseline_more_vert_24" />
 
-                <LinearLayout
+                <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/share"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -87,22 +87,9 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/share"
                     android:focusable="true"
-                    android:nextFocusLeft="@+id/container">
-
-                    <LinearLayout
-                        android:id="@+id/share_layer"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:padding="12dp">
-
-                        <androidx.appcompat.widget.AppCompatImageView
-                            android:id="@+id/shareIcon"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            app:srcCompat="@drawable/ic_social_share" />
-                    </LinearLayout>
-
-                </LinearLayout>
+                    android:nextFocusLeft="@+id/container"
+                    android:padding="12dp"
+                    app:srcCompat="@drawable/ic_social_share" />
 
                 <androidx.appcompat.widget.AppCompatImageView
                     android:id="@+id/remove"
@@ -130,16 +117,14 @@
 
                 <TextView
                     android:id="@+id/profile_address"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
                     android:text="@string/server_address"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:textColor="?android:attr/textColorSecondary" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1" />
 
                 <TextView
                     android:id="@+id/traffic_text"
@@ -164,7 +149,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textColor="?android:textColorSecondary" />
+                    android:textColor="?attr/protocolColor" />
 
                 <View
                     android:layout_width="0dp"

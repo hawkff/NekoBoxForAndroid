@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.ui
 
-import android.graphics.Color
 import android.os.Bundle
 import android.text.format.Formatter
 import android.view.LayoutInflater
@@ -8,7 +7,6 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
@@ -60,7 +58,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.zhanghai.android.fastscroll.FastScrollerBuilder
 import moe.matsuri.nb4a.Protocols
-import moe.matsuri.nb4a.Protocols.getProtocolColor
 import java.util.Objects
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.collections.set
@@ -1054,9 +1051,7 @@ class ConfigurationGroupFragment : Fragment() {
         private val card = view as MaterialCardView
         val editButton: ImageView = binding.edit
         val doubleColumnMenuButton: ImageView = binding.doubleColumnMenu
-        val shareLayout: LinearLayout = binding.share
-        val shareLayer: LinearLayout = binding.shareLayer
-        val shareButton: ImageView = binding.shareIcon
+        val shareLayout: ImageView = binding.share
         val removeButton: ImageView = binding.remove
 
         init {
@@ -1213,9 +1208,7 @@ class ConfigurationGroupFragment : Fragment() {
             entity = proxyEntity
 
             profileName.text = proxyEntity.displayName()
-            profileName.setTextColor(requireContext().getColorAttr(R.attr.profileNameColor))
             profileType.text = proxyEntity.displayType()
-            profileType.setTextColor(requireContext().getProtocolColor(proxyEntity.type))
 
             val rx = proxyEntity.rx
             val tx = proxyEntity.tx
@@ -1245,13 +1238,10 @@ class ConfigurationGroupFragment : Fragment() {
                 TooltipCompat.setTooltipText(trafficText, null)
             }
 
-            var address = proxyEntity.displayAddress()
-            if (showTraffic && address.length >= 30) {
-                address = address.substring(0, 27) + "..."
-            }
-
-            if (proxyEntity.requireBean().name!!.isBlank() || !pf.alwaysShowAddress) {
-                address = ""
+            val address = if (proxyEntity.requireBean().name!!.isBlank() || !pf.alwaysShowAddress) {
+                ""
+            } else {
+                proxyEntity.displayAddress()
             }
 
             profileAddress.text = address
@@ -1307,13 +1297,6 @@ class ConfigurationGroupFragment : Fragment() {
             editButton.isEnabled = !running
             removeButton.isEnabled = !running
             applySelected(selected)
-
-            if (!(select || proxyEntity.type == ProxyEntity.TYPE_CHAIN)) {
-                shareLayer.setBackgroundColor(Color.TRANSPARENT)
-                shareButton.setImageResource(R.drawable.ic_social_share)
-                shareButton.setColorFilter(Color.GRAY)
-                shareButton.isVisible = true
-            }
         }
 
         private fun showCode(link: String, name: String) {
