@@ -7,100 +7,71 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.actor
 import xyz.nekobyte.nekobox.NekoBox
 import xyz.nekobyte.nekobox.ktx.Logs
 
+/**
+ * Shares one default-network callback between every listener in the process. All state changes
+ * run under [lock], so a listener always sees events in the order the framework delivered them;
+ * listeners run under the lock too and must not block on other threads.
+ */
 object DefaultNetworkListener {
-    private sealed class NetworkMessage {
-        class Start(val key: Any, val listener: (Network?) -> Unit) : NetworkMessage()
-        class Stop(val key: Any) : NetworkMessage()
+    private val lock = Any()
+    private val listeners = LinkedHashMap<Any, (Network?) -> Unit>()
+    private var network: Network? = null
+    private var fallback = false
+    private val callbackRegistration = NetworkCallbackRegistration()
 
-        class Put(val network: Network) : NetworkMessage()
-        class Update(val network: Network) : NetworkMessage()
-        class Lost(val network: Network) : NetworkMessage()
+    fun start(key: Any, listener: (Network?) -> Unit) {
+        synchronized(lock) {
+            if (listeners.isEmpty()) register()
+            listeners[key] = listener
+            val current = network
+            if (current != null) {
+                listener(current)
+            } else if (fallback) {
+                listener(NekoBox.connectivity.activeNetwork)
+            }
+        }
     }
 
-    private val networkActor = GlobalScope.actor<NetworkMessage>(
-        Dispatchers.Unconfined,
-        capacity = Channel.UNLIMITED,
-    ) {
-        val listeners = mutableMapOf<Any, (Network?) -> Unit>()
-        var network: Network? = null
-        for (message in channel) {
-            when (message) {
-                is NetworkMessage.Start -> {
-                    if (listeners.isEmpty()) register()
-                    listeners[message.key] = message.listener
-                    if (network != null) {
-                        message.listener(network)
-                    } else if (fallback) {
-                        message.listener(NekoBox.connectivity.activeNetwork)
-                    }
-                }
+    fun stop(key: Any) {
+        synchronized(lock) {
+            if (listeners.remove(key) != null && listeners.isEmpty()) {
+                network = null
+                unregister()
+            }
+        }
+    }
 
-                is NetworkMessage.Stop -> if (listeners.isNotEmpty() && // was not empty
-                    listeners.remove(message.key) != null && listeners.isEmpty()
-                ) {
-                    network = null
-                    unregister()
-                }
+    // A listener may stop itself while being called, so iterate over a copy.
+    private fun dispatch(value: Network?) = listeners.values.toList().forEach { it(value) }
 
-                is NetworkMessage.Put -> {
-                    network = message.network
-                    listeners.values.forEach { it(network) }
-                }
+    private object Callback : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            synchronized(lock) {
+                DefaultNetworkListener.network = network
+                dispatch(network)
+            }
+        }
 
-                is NetworkMessage.Update -> if (network == message.network) {
-                    listeners.values.forEach {
-                        it(
-                            network,
-                        )
-                    }
-                }
+        // Capability changes on the current network are passed on so link properties get re-read.
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            synchronized(lock) {
+                if (DefaultNetworkListener.network == network) dispatch(network)
+            }
+        }
 
-                is NetworkMessage.Lost -> if (network == message.network) {
-                    network = null
-                    listeners.values.forEach { it(null) }
+        override fun onLost(network: Network) {
+            synchronized(lock) {
+                if (DefaultNetworkListener.network == network) {
+                    DefaultNetworkListener.network = null
+                    dispatch(null)
                 }
             }
         }
     }
 
-    suspend fun start(key: Any, listener: (Network?) -> Unit) = networkActor.send(NetworkMessage.Start(key, listener))
-
-    suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
-
-    // NB: this runs in ConnectivityThread; offer events non-blocking (trySend) so we never
-    // park the framework callback thread on the actor. The actor is UNLIMITED, so trySend only
-    // fails if the actor channel is closed (actor coroutine died) - log that rather than
-    // silently dropping, since it means network-change handling has stopped working.
-    private fun offer(message: NetworkMessage) {
-        val result = networkActor.trySend(message)
-        if (result.isFailure) {
-            Logs.w("DefaultNetworkListener: dropped ${message.javaClass.simpleName} (actor closed?)")
-        }
-    }
-
-    private object Callback : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            offer(NetworkMessage.Put(network))
-        }
-
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) { // it's a good idea to refresh capabilities
-            offer(NetworkMessage.Update(network))
-        }
-
-        override fun onLost(network: Network) {
-            offer(NetworkMessage.Lost(network))
-        }
-    }
-
-    private var fallback = false
-    private val callbackRegistration = NetworkCallbackRegistration()
     private val request = NetworkRequest.Builder().apply {
         addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
