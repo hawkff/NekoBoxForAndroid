@@ -6,7 +6,6 @@ import androidx.annotation.RequiresApi
 import xyz.nekobyte.nekobox.NekoBox
 import xyz.nekobyte.nekobox.R
 import xyz.nekobyte.nekobox.aidl.INekoBoxService
-import xyz.nekobyte.nekobox.database.ProfileDatabase
 import android.service.quicksettings.TileService as BaseTileService
 
 @RequiresApi(24)
@@ -31,10 +30,9 @@ class TileService :
         }
     }
 
-    override fun cbSelectorUpdate(id: Long) {
-        val profile = ProfileDatabase.proxyDao.getById(id) ?: return
-        updateTile(BaseService.State.Connected, profile.displayName())
-    }
+    // Delivered on the main thread: read the title the service set for the new pick instead of
+    // querying the profile database here.
+    override fun cbSelectorUpdate(id: Long) = updateTile(BaseService.State.Connected, connection.service?.profileName)
 
     override fun onStartListening() {
         super.onStartListening()
