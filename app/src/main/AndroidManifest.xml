@@ -421,9 +421,12 @@
             android:authorities="${applicationId}.SentryPerformanceProvider"
             tools:node="remove" />
 
+        <!-- Enabled by default: the receiver disables itself when neither start at boot nor network
+             automation wants it. The component enabled state is stored per component name, so a
+             default of false would be lost whenever the class is renamed. -->
         <receiver
             android:name="xyz.nekobyte.nekobox.BootReceiver"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
             android:process=":bg">
             <intent-filter>

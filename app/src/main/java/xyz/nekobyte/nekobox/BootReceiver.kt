@@ -17,10 +17,16 @@ import xyz.nekobyte.nekobox.ktx.runOnDefaultDispatcher
 class BootReceiver : BroadcastReceiver() {
     companion object {
         private val componentName by lazy { ComponentName(app, BootReceiver::class.java) }
+
+        // The manifest default is enabled, so an unset component state counts as enabled too.
         var enabled: Boolean
-            get() = app.packageManager.getComponentEnabledSetting(
-                componentName,
-            ) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            get() = when (app.packageManager.getComponentEnabledSetting(componentName)) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                -> true
+
+                else -> false
+            }
             set(value) = app.packageManager.setComponentEnabledSetting(
                 componentName,
                 if (value) {
