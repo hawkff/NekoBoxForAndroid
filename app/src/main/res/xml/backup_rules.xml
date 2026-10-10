@@ -4,23 +4,23 @@
     <cloud-backup>
         <exclude
             domain="database"
-            path="sager_net.db" />
+            path="profiles.db" />
         <exclude
             domain="database"
-            path="configuration.db" />
+            path="settings.db" />
         <exclude
             domain="device_database"
-            path="configuration.db" />
+            path="settings.db" />
     </cloud-backup>
     <device-transfer>
         <exclude
             domain="database"
-            path="sager_net.db" />
+            path="profiles.db" />
         <exclude
             domain="database"
-            path="configuration.db" />
+            path="settings.db" />
         <exclude
             domain="device_database"
-            path="configuration.db" />
+            path="settings.db" />
     </device-transfer>
 </data-extraction-rules>
